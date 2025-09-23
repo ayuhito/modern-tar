@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../src/index";
@@ -26,7 +27,9 @@ describe("extract", () => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(unpackTar(destDir, { strip: 1 }));
+		const unpackStream = unpackTar(destDir, { strip: 1 });
+
+		await pipeline(packStream, unpackStream);
 
 		const files = await fs.readdir(destDir);
 		expect(files).toEqual(["test.txt"]);
@@ -37,14 +40,14 @@ describe("extract", () => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(
-			unpackTar(destDir, {
-				map: (header) => {
-					header.name = `prefixed/${header.name}`;
-					return header;
-				},
-			}),
-		);
+		const unpackStream = unpackTar(destDir, {
+			map: (header) => {
+				header.name = `prefixed/${header.name}`;
+				return header;
+			},
+		});
+
+		await pipeline(packStream, unpackStream);
 
 		const files = await fs.readdir(path.join(destDir, "prefixed"));
 		expect(files).toEqual(["hello.txt"]);
@@ -55,11 +58,11 @@ describe("extract", () => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(
-			unpackTar(destDir, {
-				filter: (header) => header.name !== ".gitignore",
-			}),
-		);
+		const unpackStream = unpackTar(destDir, {
+			filter: (header) => header.name !== ".gitignore",
+		});
+
+		await pipeline(packStream, unpackStream);
 
 		const files = await fs.readdir(destDir);
 		expect(files.includes(".gitignore")).toBe(false);
@@ -70,7 +73,9 @@ describe("extract", () => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(unpackTar(destDir));
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
 
 		const originalStat = await fs.stat(path.join(sourceDir, "hello.txt"));
 		const extractedStat = await fs.stat(path.join(destDir, "hello.txt"));

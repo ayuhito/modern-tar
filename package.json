@@ -25,5 +25,8 @@
 		"tsdown": "^0.15.4",
 		"typescript": "^5.9.2",
 		"vitest": "^3.2.4"
+	},
+	"engines": {
+		"node": ">=18.0.0"
 	}
 }

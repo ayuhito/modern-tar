@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../src/index";
@@ -28,7 +29,9 @@ describe("pack", () => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(unpackTar(destDir));
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
 
 		const files = await fs.readdir(destDir);
 		expect(files).toHaveLength(1);
@@ -52,7 +55,9 @@ describe("pack", () => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(unpackTar(destDir));
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
 
 		const rootFiles = await fs.readdir(destDir);
 		expect(rootFiles).toEqual(["a"]);
@@ -84,7 +89,9 @@ describe("pack", () => {
 
 		const destDir = path.join(tmpDir, "extracted");
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(unpackTar(destDir));
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
 
 		const extractedFile = path.join(
 			destDir,
@@ -103,7 +110,9 @@ describe("pack", () => {
 		const packStream = packTar(sourceDir, {
 			filter: (filePath) => path.basename(filePath) !== ".gitignore",
 		});
-		await packStream.pipeTo(unpackTar(destDir));
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
 
 		const files = await fs.readdir(destDir);
 		expect(files.includes(".gitignore")).toBe(false);

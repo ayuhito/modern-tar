@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pipeline } from "node:stream/promises";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../src/index";
@@ -29,7 +30,9 @@ describe("links", () => {
 
 		const destDir = path.join(tmpDir, "extracted");
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(unpackTar(destDir));
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
 
 		const files = (await fs.readdir(destDir)).sort();
 		expect(files).toEqual([".gitignore", "link"]);
@@ -57,7 +60,9 @@ describe("links", () => {
 
 			const destDir = path.join(tmpDir, "extracted");
 			const packStream = packTar(sourceDir, { dereference: true });
-			await packStream.pipeTo(unpackTar(destDir));
+			const unpackStream = unpackTar(destDir);
+
+			await pipeline(packStream, unpackStream);
 
 			const files = (await fs.readdir(destDir)).sort();
 			expect(files).toEqual([".gitignore", "link"]);
@@ -86,7 +91,9 @@ describe("links", () => {
 
 		const destDir = path.join(tmpDir, "extracted");
 		const packStream = packTar(sourceDir);
-		await packStream.pipeTo(unpackTar(destDir));
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
 
 		const originalExtractedPath = path.join(destDir, "hardlink-a.txt");
 		const hardlinkExtractedPath = path.join(destDir, "hardlink-b.txt");
@@ -123,7 +130,9 @@ describe("links", () => {
 
 			const destDir = path.join(tmpDir, "extracted");
 			const packStream = packTar(sourceDir);
-			await packStream.pipeTo(unpackTar(destDir));
+			const unpackStream = unpackTar(destDir);
+
+			await pipeline(packStream, unpackStream);
 
 			const extractedLink = path.join(destDir, "link");
 			const linkStat = await fs.lstat(extractedLink);
