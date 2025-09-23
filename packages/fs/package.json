@@ -1,0 +1,45 @@
+{
+	"name": "@modern-tar/fs",
+	"version": "0.0.0",
+	"description": "Filesystem utilities for @modern-tar/core.",
+	"license": "MIT",
+	"type": "module",
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": "./dist/index.js",
+		"./package.json": "./package.json"
+	},
+	"dependencies": {
+		"@modern-tar/core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^24.5.2"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"dev": "tsdown --watch",
+		"typecheck": "tsc --noEmit"
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"homepage": "https://github.com/ayuhito/modern-tar",
+	"bugs": {
+		"url": "https://github.com/ayuhito/modern-tar/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ayuhito/modern-tar.git",
+		"directory": "packages/fs"
+	},
+	"author": "Ayuhito <hello@ayuhito.com>",
+	"publishConfig": {
+		"access": "public"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	}
+}

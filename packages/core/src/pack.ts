@@ -1,0 +1,263 @@
+import {
+	BLOCK_SIZE,
+	CHECKSUM_SPACE,
+	DEFAULT_DIR_MODE,
+	DEFAULT_FILE_MODE,
+	TYPEFLAG,
+	USTAR,
+	USTAR_MAGIC,
+	USTAR_VERSION,
+} from "./constants";
+
+import type { TarHeader } from "./types";
+import { writeOctal, writeString } from "./utils";
+
+/**
+ * Controls a streaming tar packing process.
+ *
+ * Provides methods to add entries to a tar archive and finalize the stream.
+ * This is the advanced API for streaming tar creation.
+ */
+export interface TarPackController {
+	/**
+	 * Add an entry to the tar archive.
+	 *
+	 * After adding the entry, you must write exactly `header.size` bytes of data
+	 * to the returned WritableStream and then close it. For entries that do not
+	 * have a body (e.g., directories), the size property should be set to 0 and the
+	 * the returned stream should be closed immediately.
+	 *
+	 * @param header - The tar header for the entry. The `size` property must be accurate.
+	 * @returns WritableStream for writing the entry's body data
+	 *
+	 * @example
+	 * ```typescript
+	 * const entryStream = controller.add({
+	 *   name: "file.txt",
+	 *   size: 11,
+	 *   type: "file"
+	 * });
+	 *
+	 * const writer = entryStream.getWriter();
+	 * await writer.write(new TextEncoder().encode("hello world"));
+	 * await writer.close();
+	 * ```
+	 */
+	add(header: TarHeader): WritableStream<Uint8Array>;
+
+	/**
+	 * Finalize the archive.
+	 *
+	 * Must be called after all entries have been added.
+	 * This writes the end-of-archive marker and closes the readable stream.
+	 */
+	finalize(): void;
+
+	/**
+	 * Abort the packing process with an error.
+	 *
+	 * @param err - The error that caused the abort
+	 */
+	error(err: unknown): void;
+}
+
+/**
+ * Creates a 512-byte USTAR format tar header block from a TarHeader object.
+ */
+export function createTarHeader(header: TarHeader): Uint8Array {
+	const view = new Uint8Array(BLOCK_SIZE);
+
+	// Entries without a data body (like directories) have a size of 0.
+	const isBodyless =
+		header.type === "directory" ||
+		header.type === "symlink" ||
+		header.type === "link";
+	const size = isBodyless ? 0 : (header.size ?? 0);
+
+	// If a filename is >100 chars, USTAR allows splitting it into a 155-char prefix and a 100-char name.
+	let name = header.name;
+	let prefix = "";
+
+	if (name.length > USTAR.name.size) {
+		// We search backwards for the rightmost '/' that allows a valid split.
+		let i = name.length;
+		while (i > 0) {
+			const slashIndex = name.lastIndexOf("/", i);
+			// No suitable slash found.
+			if (slashIndex === -1) break;
+
+			const p = name.slice(0, slashIndex);
+			const n = name.slice(slashIndex + 1);
+
+			if (p.length <= USTAR.prefix.size && n.length <= USTAR.name.size) {
+				prefix = p;
+				name = n;
+				break;
+			}
+
+			// Continue searching from before the current slash.
+			i = slashIndex - 1;
+		}
+	}
+
+	writeString(view, USTAR.name.offset, USTAR.name.size, name);
+	writeOctal(
+		view,
+		USTAR.mode.offset,
+		USTAR.mode.size,
+		header.mode ??
+			(header.type === "directory" ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE),
+	);
+	writeOctal(view, USTAR.uid.offset, USTAR.uid.size, header.uid ?? 0);
+	writeOctal(view, USTAR.gid.offset, USTAR.gid.size, header.gid ?? 0);
+	writeOctal(view, USTAR.size.offset, USTAR.size.size, size);
+	writeOctal(
+		view,
+		USTAR.mtime.offset,
+		USTAR.mtime.size,
+		Math.floor((header.mtime?.getTime() ?? Date.now()) / 1000),
+	);
+	writeString(
+		view,
+		USTAR.typeflag.offset,
+		USTAR.typeflag.size,
+		TYPEFLAG[header.type ?? "file"],
+	);
+	writeString(
+		view,
+		USTAR.linkname.offset,
+		USTAR.linkname.size,
+		header.linkname,
+	);
+	view.set(USTAR_MAGIC, USTAR.magic.offset);
+	writeString(view, USTAR.version.offset, USTAR.version.size, USTAR_VERSION);
+	writeString(view, USTAR.uname.offset, USTAR.uname.size, header.uname);
+	writeString(view, USTAR.gname.offset, USTAR.gname.size, header.gname);
+	writeString(view, USTAR.prefix.offset, USTAR.prefix.size, prefix);
+
+	// Fill the checksum field with spaces before calculating.
+	view.fill(
+		CHECKSUM_SPACE,
+		USTAR.checksum.offset,
+		USTAR.checksum.offset + USTAR.checksum.size,
+	);
+
+	// Sum all bytes in the header.
+	let checksum = 0;
+	for (const byte of view) {
+		checksum += byte;
+	}
+
+	// Write the final checksum value, formatted as a 6-digit octal string followed by a NUL and a space.
+	const checksumString = `${checksum.toString(8).padStart(6, "0")}\0 `;
+	writeString(view, USTAR.checksum.offset, USTAR.checksum.size, checksumString);
+
+	return view;
+}
+
+/**
+ * Create a streaming tar packer.
+ *
+ * This function provides a controller-based API for creating tar archives, suitable
+ * for scenarios where entries are generated dynamically or when you need control over
+ * the packing process.
+ *
+ * @returns Object containing the readable stream and controller
+ * @returns readable - ReadableStream that outputs the tar archive bytes
+ * @returns controller - TarPackController for adding entries and finalizing
+ *
+ * @example
+ * ```typescript
+ * import { createTarPacker } from '@modern-tar/core';
+ *
+ * const { readable, controller } = createTarPacker();
+ *
+ * // Add entries dynamically
+ * const fileStream = controller.add({
+ *   name: "dynamic.txt",
+ *   size: 5,
+ *   type: "file"
+ * });
+ *
+ * const writer = fileStream.getWriter();
+ * await writer.write(new TextEncoder().encode("hello"));
+ * await writer.close();
+ *
+ * // Don't forget to finalize
+ * controller.finalize();
+ *
+ * // readable stream now contains the complete tar archive
+ * ```
+ */
+export function createTarPacker(): {
+	readable: ReadableStream<Uint8Array>;
+	controller: TarPackController;
+} {
+	let streamController: ReadableStreamController<Uint8Array>;
+
+	const readable = new ReadableStream<Uint8Array>({
+		start(controller) {
+			streamController = controller;
+		},
+	});
+
+	const packController: TarPackController = {
+		add(header: TarHeader): WritableStream<Uint8Array> {
+			const isBodyless =
+				header.type === "directory" ||
+				header.type === "symlink" ||
+				header.type === "link";
+			const size = isBodyless ? 0 : (header.size ?? 0);
+
+			// Create and enqueue the header for this entry.
+			const headerBlock = createTarHeader({ ...header, size });
+			streamController.enqueue(headerBlock as Uint8Array<ArrayBuffer>);
+
+			let totalWritten = 0;
+
+			return new WritableStream<Uint8Array>({
+				write(chunk) {
+					totalWritten += chunk.length;
+					if (totalWritten > size) {
+						const err = new Error(
+							`Entry '${header.name}' is larger than its specified size of ${size} bytes.`,
+						);
+						streamController.error(err);
+						throw err; // Abort the write with an error.
+					}
+					streamController.enqueue(chunk as Uint8Array<ArrayBuffer>);
+				},
+				close() {
+					if (totalWritten !== size) {
+						const err = new Error(
+							`Size mismatch for entry '${header.name}': expected ${size} bytes but received ${totalWritten}.`,
+						);
+						streamController.error(err);
+						throw err;
+					}
+
+					// Pad the entry data to fill a complete 512-byte block.
+					const paddingSize = (BLOCK_SIZE - (size % BLOCK_SIZE)) % BLOCK_SIZE;
+					if (paddingSize > 0) {
+						streamController.enqueue(new Uint8Array(paddingSize));
+					}
+				},
+				abort(reason) {
+					streamController.error(reason);
+				},
+			});
+		},
+
+		finalize() {
+			// A valid tar archive ends with two 512-byte empty blocks.
+			streamController.enqueue(new Uint8Array(BLOCK_SIZE * 2));
+			streamController.close();
+		},
+
+		error(err: unknown) {
+			streamController.error(err);
+		},
+	};
+
+	return { readable, controller: packController };
+}

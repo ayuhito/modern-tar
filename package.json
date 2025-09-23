@@ -1,0 +1,29 @@
+{
+	"private": true,
+	"license": "MIT",
+	"homepage": "https://github.com/ayuhito/modern-tar",
+	"bugs": {
+		"url": "https://github.com/ayuhito/modern-tar/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ayuhito/modern-tar.git"
+	},
+	"author": "Ayuhito <hello@ayuhito.com>",
+	"workspaces": [
+		"packages/*"
+	],
+	"scripts": {
+		"build": "cd packages/core && bun run build && cd ../fs && bun run build",
+		"test": "vitest",
+		"check": "biome check --write",
+		"typecheck": "cd packages/core && bun run typecheck && cd ../fs && bun run typecheck"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.2.4",
+		"@types/node": "^24.5.2",
+		"tsdown": "^0.15.4",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
+	}
+}
