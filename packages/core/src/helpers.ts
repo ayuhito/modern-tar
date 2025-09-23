@@ -4,25 +4,38 @@ import type { ParsedTarEntryWithData, TarEntry } from "./types";
 import { encoder } from "./utils";
 
 /**
- * Packs an array of tar entries into a single Uint8Array buffer.
+ * Packs an array of tar entries into a single `Uint8Array` buffer.
  *
- * @param entries - Array of tar entries with headers and optional bodies.
- * @returns A promise that resolves to the complete tar archive as a Uint8Array.
+ * For streaming scenarios or large archives, use {@link createTarPacker} instead.
+ *
+ * @param entries - Array of tar entries with headers and optional bodies
+ * @returns A `Promise` that resolves to the complete tar archive as a Uint8Array
  * @example
  * ```typescript
  * import { packTar } from '@modern-tar/core';
  *
  * const entries = [
- *  {
- * 		header: { name: "hello.txt", size: 5, type: "file" },
- * 		body: "hello"
- * 	},
- * 	{
- * 		header: { name: "folder/", type: "directory" }
- * 	}
+ *   {
+ *     header: { name: "hello.txt", size: 5, type: "file" },
+ *     body: "hello"
+ *   },
+ *   {
+ *     header: { name: "data.json", size: 13, type: "file" },
+ *     body: new Uint8Array([123, 34, 116, 101, 115, 116, 34, 58, 116, 114, 117, 101, 125]) // {"test":true}
+ *   },
+ *   {
+ *     header: { name: "folder/", type: "directory", size: 0 }
+ *   }
  * ];
  *
  * const tarBuffer = await packTar(entries);
+ *
+ * // Save to file or upload
+ * await fetch('/api/upload', {
+ *   method: 'POST',
+ *   body: tarBuffer,
+ *   headers: { 'Content-Type': 'application/x-tar' }
+ * });
  * ```
  */
 export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
@@ -75,19 +88,40 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
 }
 
 /**
- * Extracts all entries and their data from a tar archive buffer.
+ * Extracts all entries and their data from a complete tar archive buffer.
  *
- * @param archive - The complete tar archive (ArrayBuffer or Uint8Array).
- * @returns A promise that resolves to an array of entries with buffered data.
+ * For streaming scenarios or large archives, use {@link createTarDecoder} instead.
+ *
+ * @param archive - The complete tar archive as `ArrayBuffer` or `Uint8Array`
+ * @returns A `Promise` that resolves to an array of entries with buffered data
  * @example
  * ```typescript
  * import { unpackTar } from '@modern-tar/core';
  *
- * const tarBuffer = ...; // Some Uint8Array or ArrayBuffer containing a tar archive
+ * // From a file upload or fetch
+ * const response = await fetch('/api/archive.tar');
+ * const tarBuffer = await response.arrayBuffer();
  *
  * const entries = await unpackTar(tarBuffer);
  * for (const entry of entries) {
- * 		console.log(entry.header.name, entry.data);
+ *   console.log(`File: ${entry.header.name}, Size: ${entry.data.length} bytes`);
+ *
+ *   if (entry.header.type === 'file') {
+ *     const content = new TextDecoder().decode(entry.data);
+ *     console.log(`Content: ${content}`);
+ *   }
+ * }
+ * ```
+ * @example
+ * ```typescript
+ * // From a Uint8Array
+ * const tarData = new Uint8Array([...]); // your tar data
+ * const entries = await unpackTar(tarData);
+ *
+ * // Process specific files
+ * const textFiles = entries.filter(e => e.header.name.endsWith('.txt'));
+ * for (const file of textFiles) {
+ *   console.log(new TextDecoder().decode(file.data));
  * }
  * ```
  */

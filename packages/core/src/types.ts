@@ -1,9 +1,16 @@
-/** Header information for a tar entry. */
+/**
+ * Header information for a tar entry in USTAR format.
+ */
 export interface TarHeader {
+	/** Entry name/path. Can be up to 255 characters with USTAR prefix extension. */
 	name: string;
+	/** Size of the entry data in bytes. Should be 0 for directories, symlinks, and hardlinks. */
 	size: number;
+	/** Modification time as a `Date` object. Defaults to current time if not specified. */
 	mtime?: Date;
-	mode?: number; // e.g., 0o644
+	/** Unix file permissions as an octal number (e.g., 0o644 for rw-r--r--). Defaults to 0o644 for files and 0o755 for directories. */
+	mode?: number;
+	/** Entry type. Defaults to "file" if not specified. */
 	type?:
 		| "file"
 		| "directory"
@@ -11,15 +18,31 @@ export interface TarHeader {
 		| "link"
 		| "pax-header"
 		| "pax-global-header";
+	/** User ID of the entry owner. */
 	uid?: number;
+	/** Group ID of the entry owner. */
 	gid?: number;
+	/** User name of the entry owner. */
 	uname?: string;
+	/** Group name of the entry owner. */
 	gname?: string;
-	linkname?: string; // For symlinks and hard links
-	pax?: Record<string, string>; // Parsed PAX attributes
+	/** Target path for symlinks and hard links. */
+	linkname?: string;
+	/** PAX extended attributes as key-value pairs. */
+	pax?: Record<string, string>;
 }
 
-/** Represents a file or directory to be packed. The body can be many types for convenience. */
+/**
+ * Union type for entry body data that can be packed into a tar archive.
+ *
+ * Supports multiple input types for convenience:
+ * - `string` - Text content (encoded as UTF-8)
+ * - `Uint8Array` - Binary data
+ * - `ArrayBuffer` - Binary data
+ * - `ReadableStream<Uint8Array>` - Streaming data
+ * - `Blob` - File-like data
+ * - `null` - No content (for directories, etc.)
+ */
 export type TarEntryData =
 	| string
 	| Uint8Array
@@ -28,19 +51,29 @@ export type TarEntryData =
 	| Blob
 	| null;
 
-/** An entry object used for packing a tar archive. */
+/**
+ * Represents a complete entry to be packed into a tar archive.
+ *
+ * Combines header metadata with optional body data. Used as input to {@link packTar}
+ * and the controller returned by {@link createTarPacker}.
+ */
 export interface TarEntry {
 	header: TarHeader;
 	body?: TarEntryData;
 }
 
-/** Represents an entry read from an archive. The body is always a stream. */
+/**
+ * Represents an entry parsed from a tar archive stream.
+ */
 export interface ParsedTarEntry {
 	header: TarHeader;
 	body: ReadableStream<Uint8Array>;
 }
 
-/** Represents an extracted entry where the body has been buffered into a Uint8Array. */
+/**
+ * Represents an extracted entry with fully buffered content.
+
+ */
 export interface ParsedTarEntryWithData {
 	header: TarHeader;
 	data: Uint8Array;

@@ -16,31 +16,41 @@ import { writeOctal, writeString } from "./utils";
  * Controls a streaming tar packing process.
  *
  * Provides methods to add entries to a tar archive and finalize the stream.
- * This is the advanced API for streaming tar creation.
+ * This is the advanced API for streaming tar creation, allowing you to dynamically
+ * add entries and write their content as a [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream).
  */
 export interface TarPackController {
 	/**
 	 * Add an entry to the tar archive.
 	 *
 	 * After adding the entry, you must write exactly `header.size` bytes of data
-	 * to the returned WritableStream and then close it. For entries that do not
-	 * have a body (e.g., directories), the size property should be set to 0 and the
-	 * the returned stream should be closed immediately.
+	 * to the returned [`WritableStream`](https://developer.mozilla.org/en-US/docs/Web/API/WritableStream)
+	 * and then close it. For entries that do not have a body (e.g., directories),
+	 * the size property should be set to 0 and the stream should be closed immediately.
 	 *
-	 * @param header - The tar header for the entry. The `size` property must be accurate.
-	 * @returns WritableStream for writing the entry's body data
+	 * @param header - The tar header for the entry. The `size` property must be accurate
+	 * @returns A [`WritableStream`](https://developer.mozilla.org/en-US/docs/Web/API/WritableStream) for writing the entry's body data
 	 *
 	 * @example
 	 * ```typescript
-	 * const entryStream = controller.add({
+	 * // Add a text file
+	 * const fileStream = controller.add({
 	 *   name: "file.txt",
 	 *   size: 11,
 	 *   type: "file"
 	 * });
 	 *
-	 * const writer = entryStream.getWriter();
+	 * const writer = fileStream.getWriter();
 	 * await writer.write(new TextEncoder().encode("hello world"));
 	 * await writer.close();
+	 *
+	 * // Add a directory
+	 * const dirStream = controller.add({
+	 *   name: "folder/",
+	 *   type: "directory",
+	 *   size: 0
+	 * });
+	 * await dirStream.close(); // Directories have no content
 	 * ```
 	 */
 	add(header: TarHeader): WritableStream<Uint8Array>;
@@ -160,11 +170,12 @@ export function createTarHeader(header: TarHeader): Uint8Array {
  *
  * This function provides a controller-based API for creating tar archives, suitable
  * for scenarios where entries are generated dynamically or when you need control over
- * the packing process.
+ * the packing process. The returned [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)
+ * outputs tar archive bytes as entries are added.
  *
  * @returns Object containing the readable stream and controller
- * @returns readable - ReadableStream that outputs the tar archive bytes
- * @returns controller - TarPackController for adding entries and finalizing
+ * @returns readable - [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) that outputs the tar archive bytes
+ * @returns controller - {@link TarPackController} for adding entries and finalizing
  *
  * @example
  * ```typescript
@@ -183,10 +194,22 @@ export function createTarHeader(header: TarHeader): Uint8Array {
  * await writer.write(new TextEncoder().encode("hello"));
  * await writer.close();
  *
- * // Don't forget to finalize
+ * // Add multiple entries
+ * const jsonStream = controller.add({
+ *   name: "data.json",
+ *   size: 13,
+ *   type: "file"
+ * });
+ * const jsonWriter = jsonStream.getWriter();
+ * await jsonWriter.write(new TextEncoder().encode('{"test":true}'));
+ * await jsonWriter.close();
+ *
+ * // Finalize the archive
  * controller.finalize();
  *
- * // readable stream now contains the complete tar archive
+ * // Use the readable stream
+ * const response = new Response(readable);
+ * const buffer = await response.arrayBuffer();
  * ```
  */
 export function createTarPacker(): {
