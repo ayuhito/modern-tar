@@ -1,6 +1,45 @@
 {
-	"private": true,
+	"name": "modern-tar",
+	"version": "0.1.0",
+	"description": "Zero dependency streaming tar parser and writer for JavaScript.",
 	"license": "MIT",
+	"type": "module",
+	"sideEffects": false,
+	"main": "./dist/web/index.js",
+	"module": "./dist/web/index.js",
+	"types": "./dist/web/index.d.ts",
+	"exports": {
+		"./package.json": "./package.json",
+		".": {
+			"import": "./dist/web/index.js",
+			"types": "./dist/web/index.d.ts"
+		},
+		"./fs": {
+			"node": {
+				"import": "./dist/fs/index.js",
+				"types": "./dist/fs/index.d.ts"
+			},
+			"default": null
+		}
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.2.4",
+		"@types/node": "^24.5.2",
+		"tsdown": "^0.15.4",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"dev": "tsdown --watch",
+		"test": "vitest",
+		"check": "biome check --write",
+		"typecheck": "tsc --noEmit"
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
 	"homepage": "https://github.com/ayuhito/modern-tar",
 	"bugs": {
 		"url": "https://github.com/ayuhito/modern-tar/issues"
@@ -10,21 +49,8 @@
 		"url": "git+https://github.com/ayuhito/modern-tar.git"
 	},
 	"author": "Ayuhito <hello@ayuhito.com>",
-	"workspaces": [
-		"packages/*"
-	],
-	"scripts": {
-		"build": "cd packages/core && bun run build && cd ../fs && bun run build",
-		"test": "vitest",
-		"check": "biome check --write",
-		"typecheck": "cd packages/core && bun run typecheck && cd ../fs && bun run typecheck"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "2.2.4",
-		"@types/node": "^24.5.2",
-		"tsdown": "^0.15.4",
-		"typescript": "^5.9.2",
-		"vitest": "^3.2.4"
+	"publishConfig": {
+		"access": "public"
 	},
 	"engines": {
 		"node": ">=18.0.0"

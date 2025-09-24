@@ -1,13 +1,10 @@
 {
 	"compilerOptions": {
 		"target": "esnext",
-		"composite": true,
-		"lib": ["es2023"],
-		"moduleDetection": "force",
 		"module": "preserve",
 		"moduleResolution": "bundler",
+		"moduleDetection": "force",
 		"resolveJsonModule": true,
-		"types": ["node"],
 		"strict": true,
 		"noUnusedLocals": true,
 		"declaration": true,
@@ -15,7 +12,12 @@
 		"esModuleInterop": true,
 		"isolatedModules": true,
 		"verbatimModuleSyntax": true,
-		"skipLibCheck": true
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+
+		"composite": true,
+		"lib": ["ES2023", "DOM", "DOM.AsyncIterable"],
+		"types": []
 	},
-	"include": ["src", "tests"]
+	"include": ["src/web/**/*.ts", "tests/web/**/*.ts"]
 }

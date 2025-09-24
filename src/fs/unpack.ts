@@ -3,11 +3,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { UnpackOptions } from "@modern-tar/core";
-import {
-	createTarDecoder,
-	createTarOptionsTransformer,
-} from "@modern-tar/core";
+import type { UnpackOptions } from "../web/index";
+import { createTarDecoder, createTarOptionsTransformer } from "../web/index";
 
 /**
  * Filesystem-specific configuration options for extracting tar archives to the filesystem.

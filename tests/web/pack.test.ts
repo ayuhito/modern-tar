@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { packTar, type TarEntry, unpackTar } from "../src/index";
-import { decoder } from "../src/utils";
+import { packTar, type TarEntry, unpackTar } from "../../src/web/index";
+import { decoder } from "../../src/web/utils";
 
 describe("pack", () => {
 	it("packs a single file", async () => {

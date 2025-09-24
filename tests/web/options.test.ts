@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { packTar, unpackTar } from "../src/index";
-import { decoder } from "../src/utils";
+import { packTar, unpackTar } from "../../src/web/index";
+import { decoder } from "../../src/web/utils";
 
 describe("unpack options", () => {
 	// Helper function to create test archive

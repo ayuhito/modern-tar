@@ -2,8 +2,9 @@ import { createReadStream, type Stats } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
-import type { TarHeader } from "@modern-tar/core";
-import { BLOCK_SIZE, createTarHeader } from "@modern-tar/core";
+import { BLOCK_SIZE } from "../web/constants";
+import { createTarHeader } from "../web/pack";
+import type { TarHeader } from "../web/types";
 
 /**
  * Filesystem-specific configuration options for packing directories into tar archives.

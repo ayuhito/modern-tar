@@ -3,4 +3,4 @@ dist
 *.log
 .DS_Store
 .mise.toml
-tsconfig.tsbuildinfo
+*.tsbuildinfo
