@@ -5,7 +5,6 @@ import {
 	DEFAULT_FILE_MODE,
 	TYPEFLAG,
 	USTAR,
-	USTAR_MAGIC,
 	USTAR_VERSION,
 } from "./constants";
 
@@ -139,7 +138,8 @@ export function createTarHeader(header: TarHeader): Uint8Array {
 		USTAR.linkname.size,
 		header.linkname,
 	);
-	view.set(USTAR_MAGIC, USTAR.magic.offset);
+
+	writeString(view, USTAR.magic.offset, USTAR.magic.size, "ustar\0");
 	writeString(view, USTAR.version.offset, USTAR.version.size, USTAR_VERSION);
 	writeString(view, USTAR.uname.offset, USTAR.uname.size, header.uname);
 	writeString(view, USTAR.gname.offset, USTAR.gname.size, header.gname);

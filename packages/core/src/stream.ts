@@ -1,15 +1,14 @@
-import { BLOCK_SIZE, FLAGTYPE, USTAR, USTAR_MAGIC } from "./constants";
+import { BLOCK_SIZE, FLAGTYPE, USTAR } from "./constants";
 import type { ParsedTarEntry, TarHeader } from "./types";
 import { decoder, readOctal, readString } from "./utils";
 
 function parseHeader(block: Uint8Array): TarHeader {
-	const magic = block.subarray(
-		USTAR.magic.offset,
-		USTAR.magic.offset + USTAR_MAGIC.length,
-	);
-	const isUstar = USTAR_MAGIC.every((byte, i) => byte === magic[i]);
-
 	let name = readString(block, USTAR.name.offset, USTAR.name.size);
+
+	// The "ustar" magic string is 5 bytes, followed by a NUL.
+	const isUstar =
+		readString(block, USTAR.magic.offset, USTAR.magic.size) === "ustar";
+
 	if (isUstar) {
 		const prefix = readString(block, USTAR.prefix.offset, USTAR.prefix.size);
 		if (prefix) {

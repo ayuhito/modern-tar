@@ -1,5 +1,3 @@
-import { encoder } from "./utils";
-
 /** Size of a TAR block in bytes. */
 export const BLOCK_SIZE = 512;
 
@@ -29,9 +27,6 @@ export const USTAR = {
 	gname: { offset: 297, size: 32 },
 	prefix: { offset: 345, size: 155 },
 } as const;
-
-/** USTAR magic string ("ustar\0"). */
-export const USTAR_MAGIC = encoder.encode("ustar\0");
 
 /** USTAR version ("00"). */
 export const USTAR_VERSION = "00";
