@@ -68,6 +68,9 @@ export function unpackTar(
 		const { validateSymlinks = true } = options;
 		const resolvedDestDir = path.resolve(directoryPath);
 
+		// Ensure destination directory exists upfront
+		await fs.mkdir(directoryPath, { recursive: true });
+
 		const entryStream = webReadable
 			.pipeThrough(createTarDecoder())
 			.pipeThrough(createTarOptionsTransformer(options));
