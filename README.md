@@ -2,6 +2,16 @@
 
 Zero-dependency, cross-platform, streaming tar archive library for every JavaScript runtime. Built with the browser-native Web Streams API for performance and memory efficiency.
 
+## Features
+
+- 🚀 **Streaming Architecture** - Supports large archives without loading everything into memory.
+- 📋 **Standards Compliant** - Full USTAR format support with PAX extensions. Compatible with GNU tar, BSD tar, and other standard implementations.
+- 🗜️ **Compression** - Includes helpers for gzip compression/decompression.
+- 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation.
+- ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size.
+- 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes.
+- 📁 **Node.js Integration** - Additional high-level APIs for directory packing and extraction.
+
 ## Table of Contents
 
 - [Installation](#installation)
@@ -15,16 +25,6 @@ Zero-dependency, cross-platform, streaming tar archive library for every JavaScr
   - [Core Types](#core-types)
   - [Filesystem Types](#filesystem-types)
 - [Compatibility](#compatibility)
-
-## Features
-
-- 🚀 **Streaming Architecture** - Supports large archives without loading everything into memory.
-- 📋 **Standards Compliant** - Full USTAR format support with PAX extensions. Compatible with GNU tar, BSD tar, and other standard implementations.
-- 🗜️ **Compression** - Includes helpers for gzip compression/decompression.
-- 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation.
-- ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size.
-- 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes.
-- 📁 **Node.js Integration** - Additional high-level APIs for directory packing and extraction.
 
 ## Installation
 
