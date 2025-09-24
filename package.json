@@ -5,9 +5,9 @@
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,
-	"main": "./dist/index.js",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
+	"main": "./dist/web/index.js",
+	"module": "./dist/web/index.js",
+	"types": "./dist/web/index.d.ts",
 	"exports": {
 		"./package.json": "./package.json",
 		".": {
