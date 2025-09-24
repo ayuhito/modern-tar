@@ -93,7 +93,8 @@ const tarStream = response.body.pipeThrough(createGzipDecoder());
 // Use `unpackTar` for buffered extraction or `createTarDecoder` for streaming
 for await (const entry of unpackTar(tarStream)) {
 	console.log(`Extracted: ${entry.header.name}`);
-	// Process entry.body stream as needed
+	const content = new TextDecoder().decode(entry.data);
+	console.log(`Content: ${content}`);
 }
 ```
 
@@ -143,23 +144,32 @@ const entries = [
 const tarBuffer = await packTar(entries);
 ```
 
-#### `unpackTar(archive: ArrayBuffer | Uint8Array): Promise<ParsedTarEntryWithData[]>`
+#### `unpackTar(archive: ArrayBuffer | Uint8Array, options?: UnpackOptions): Promise<ParsedTarEntryWithData[]>`
 
-Extract all entries from a tar archive buffer.
+Extract all entries from a tar archive buffer with optional filtering and transformation.
 
 **Parameters:**
 - `archive` - Complete tar archive as ArrayBuffer or Uint8Array
+- `options` - Optional extraction configuration (see `UnpackOptions`)
 
 **Returns:** Promise resolving to array of entries with buffered data
 
 **Example:**
 ```typescript
+// Basic extraction
 const entries = await unpackTar(tarBuffer);
 for (const entry of entries) {
   console.log(`File: ${entry.header.name}`);
   const content = new TextDecoder().decode(entry.data);
   console.log(`Content: ${content}`);
 }
+
+// With filtering and path manipulation
+const filteredEntries = await unpackTar(tarBuffer, {
+  strip: 1, // Remove first path component
+  filter: (header) => header.name.endsWith('.js'),
+  map: (header) => ({ ...header, name: header.name.toLowerCase() })
+});
 ```
 
 ### Streaming API
@@ -204,6 +214,33 @@ const entriesStream = tarStream.pipeThrough(decoder);
 for await (const entry of entriesStream) {
   console.log(`Entry: ${entry.header.name}`);
   // Process entry.body stream as needed
+}
+```
+
+#### `createTarOptionsTransformer(options?: UnpackOptions): TransformStream<ParsedTarEntry, ParsedTarEntry>`
+
+Create a transform stream that applies unpacking options to tar entries.
+
+**Parameters:**
+- `options` - Optional unpacking configuration (see `UnpackOptions`)
+
+**Returns:** TransformStream that processes `ParsedTarEntry` objects with options applied
+
+**Example:**
+```typescript
+import { createTarDecoder, createTarOptionsTransformer } from '@modern-tar/core';
+
+const transformedStream = sourceStream
+  .pipeThrough(createTarDecoder())
+  .pipeThrough(createTarOptionsTransformer({
+    strip: 1,  // Remove first path component
+    filter: (header) => header.name.endsWith('.txt'),
+    map: (header) => ({ ...header, mode: 0o644 })
+  }));
+
+for await (const entry of transformedStream) {
+  // Process transformed entries
+  console.log(`Processed: ${entry.header.name}`);
 }
 ```
 
@@ -256,6 +293,50 @@ interface TarEntry {
   header: TarHeader;
   body?: string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> | Blob | null;
 }
+```
+
+### ParsedTarEntry
+
+```typescript
+interface ParsedTarEntry {
+	header: TarHeader;
+	body: ReadableStream<Uint8Array>;
+}
+```
+
+### ParsedTarEntryWithData
+
+```typescript
+interface ParsedTarEntryWithData {
+	header: TarHeader;
+	data: Uint8Array;
+}
+```
+
+### UnpackOptions
+
+Platform-neutral configuration options for extracting tar archives.
+
+```typescript
+interface UnpackOptions {
+  /** Number of leading path components to strip from entry names (e.g., strip: 1 removes first directory) */
+  strip?: number;
+  /** Filter function to include/exclude entries (return false to skip) */
+  filter?: (header: TarHeader) => boolean;
+  /** Transform function to modify tar headers before extraction */
+  map?: (header: TarHeader) => TarHeader;
+}
+```
+
+**Example:**
+```typescript
+const options: UnpackOptions = {
+  strip: 2, // Remove first 2 path components
+  filter: (header) => header.type === 'file' && !header.name.includes('test'),
+  map: (header) => ({ ...header, mode: 0o644 }) // Normalize permissions
+};
+
+const entries = await unpackTar(tarBuffer, options);
 ```
 
 ## Browser Support

@@ -78,3 +78,18 @@ export interface ParsedTarEntryWithData {
 	header: TarHeader;
 	data: Uint8Array;
 }
+
+/**
+ * Platform-neutral configuration options for extracting tar archives.
+ *
+ * These options work with any tar extraction implementation and are not tied
+ * to specific platforms like Node.js filesystem APIs.
+ */
+export interface UnpackOptions {
+	/** Number of leading path components to strip from entry names (e.g., strip: 1 removes first directory) */
+	strip?: number;
+	/** Filter function to include/exclude entries (return false to skip) */
+	filter?: (header: TarHeader) => boolean;
+	/** Transform function to modify tar headers before extraction */
+	map?: (header: TarHeader) => TarHeader;
+}

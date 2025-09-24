@@ -1,6 +1,7 @@
+import { createTarOptionsTransformer } from "./options";
 import { createTarPacker } from "./pack";
 import { createTarDecoder } from "./stream";
-import type { ParsedTarEntryWithData, TarEntry } from "./types";
+import type { ParsedTarEntryWithData, TarEntry, UnpackOptions } from "./types";
 import { encoder } from "./utils";
 
 /**
@@ -93,6 +94,7 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
  * For streaming scenarios or large archives, use {@link createTarDecoder} instead.
  *
  * @param archive - The complete tar archive as `ArrayBuffer` or `Uint8Array`
+ * @param options - Optional extraction configuration
  * @returns A `Promise` that resolves to an array of entries with buffered data
  * @example
  * ```typescript
@@ -114,19 +116,23 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
  * ```
  * @example
  * ```typescript
- * // From a Uint8Array
+ * // From a Uint8Array with options
  * const tarData = new Uint8Array([...]); // your tar data
- * const entries = await unpackTar(tarData);
+ * const entries = await unpackTar(tarData, {
+ *   strip: 1,
+ *   filter: (header) => header.name.endsWith('.txt'),
+ *   map: (header) => ({ ...header, name: header.name.toLowerCase() })
+ * });
  *
- * // Process specific files
- * const textFiles = entries.filter(e => e.header.name.endsWith('.txt'));
- * for (const file of textFiles) {
+ * // Process filtered files
+ * for (const file of entries) {
  *   console.log(new TextDecoder().decode(file.data));
  * }
  * ```
  */
 export async function unpackTar(
 	archive: ArrayBuffer | Uint8Array,
+	options: UnpackOptions = {},
 ): Promise<ParsedTarEntryWithData[]> {
 	// @ts-expect-error ReadableStream.from is supported.
 	const sourceStream = ReadableStream.from([
@@ -134,11 +140,14 @@ export async function unpackTar(
 	]);
 
 	const results: ParsedTarEntryWithData[] = [];
-	const decoderStream = sourceStream.pipeThrough(createTarDecoder());
 
-	for await (const entry of decoderStream) {
+	const entryStream = sourceStream
+		.pipeThrough(createTarDecoder())
+		.pipeThrough(createTarOptionsTransformer(options));
+
+	for await (const entry of entryStream) {
 		const data = new Uint8Array(await new Response(entry.body).arrayBuffer());
-		results.push({ ...entry, data });
+		results.push({ header: entry.header, data });
 	}
 
 	return results;

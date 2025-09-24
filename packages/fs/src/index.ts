@@ -18,5 +18,5 @@ import * as core from "@modern-tar/core";
  */
 export const web = core;
 
-export { type PackOptions, packTar } from "./pack";
-export { type UnpackOptions, unpackTar } from "./unpack";
+export { type PackOptionsFS, packTar } from "./pack";
+export { type UnpackOptionsFS, unpackTar } from "./unpack";

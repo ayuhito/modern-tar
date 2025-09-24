@@ -1,4 +1,4 @@
-# Modern Tar
+# 🗄 @modern/tar
 
 Zero-dependency, cross-platform, streaming tar archive library for every JavaScript runtime. Built with the browser-native Web Streams API for performance and memory efficiency.
 

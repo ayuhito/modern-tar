@@ -1,19 +1,28 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Writable } from "node:stream";
-import type { TarHeader } from "@modern-tar/core";
-import { createTarDecoder } from "@modern-tar/core";
+import type { UnpackOptions } from "@modern-tar/core";
+import {
+	createTarDecoder,
+	createTarOptionsTransformer,
+} from "@modern-tar/core";
 
 /**
- * Configuration options for extracting tar archives to the filesystem.
+ * Filesystem-specific configuration options for extracting tar archives to the filesystem.
+ *
+ * Extends the core {@link UnpackOptions} with Node.js filesystem-specific settings
+ * for controlling file permissions and other filesystem behaviors.
  */
-export interface UnpackOptions {
-	/** Number of leading path components to strip from entry names (e.g., strip: 1 removes first directory) */
-	strip?: number;
-	/** Filter function to include/exclude entries (return false to skip) */
-	filter?: (header: TarHeader) => boolean;
-	/** Transform function to modify tar headers before extraction */
-	map?: (header: TarHeader) => TarHeader;
+export interface UnpackOptionsFS extends UnpackOptions {
+	/** Default mode for created directories (e.g., 0o755). If not specified, uses mode from tar header or system default */
+	dmode?: number;
+	/** Default mode for created files (e.g., 0o644). If not specified, uses mode from tar header or system default */
+	fmode?: number;
+	/**
+	 * Prevent symlinks from pointing outside the extraction directory.
+	 * @default true
+	 */
+	validateSymlinks?: boolean;
 }
 
 /**
@@ -49,7 +58,7 @@ export interface UnpackOptions {
  */
 export function unpackTar(
 	directoryPath: string,
-	options: UnpackOptions = {},
+	options: UnpackOptionsFS = {},
 ): Writable {
 	const chunks: Uint8Array[] = [];
 
@@ -60,41 +69,34 @@ export function unpackTar(
 		},
 		async final(callback) {
 			try {
+				const { validateSymlinks = true } = options;
+				const resolvedDestDir = path.resolve(directoryPath);
 				const blob = new Blob(chunks);
 				const buffer = new Uint8Array(await blob.arrayBuffer());
 				const tarStream = ReadableStream.from([buffer]);
 
-				for await (const entry of tarStream.pipeThrough(createTarDecoder())) {
-					const header = options.map ? options.map(entry.header) : entry.header;
+				const entryStream = tarStream
+					.pipeThrough(createTarDecoder())
+					.pipeThrough(createTarOptionsTransformer(options));
 
-					if (options.filter?.(header) === false) {
-						for await (const _ of entry.body) {
-						} // Drain and discard
-						continue;
-					}
-
-					if (options.strip) {
-						const strippedName = header.name
-							.split("/")
-							.slice(options.strip)
-							.join("/");
-						if (!strippedName) {
-							for await (const _ of entry.body) {
-							} // Drain and discard
-							continue;
-						}
-						header.name = strippedName;
-					}
-
+				for await (const entry of entryStream) {
+					const header = entry.header;
 					const outPath = path.join(directoryPath, header.name);
 					await fs.mkdir(path.dirname(outPath), { recursive: true });
 
 					switch (header.type) {
 						case "directory":
-							await fs.mkdir(outPath, { recursive: true, mode: header.mode });
+							await fs.mkdir(outPath, {
+								recursive: true,
+								mode: options.dmode ?? header.mode,
+							});
 							break;
 						case "file": {
-							const fileHandle = await fs.open(outPath, "w", header.mode);
+							const fileHandle = await fs.open(
+								outPath,
+								"w",
+								options.fmode ?? header.mode,
+							);
 							try {
 								for await (const chunk of entry.body) {
 									await fileHandle.write(chunk);
@@ -106,6 +108,23 @@ export function unpackTar(
 						}
 						case "symlink":
 							if (header.linkname) {
+								if (validateSymlinks) {
+									const symlinkDir = path.dirname(outPath);
+									const resolvedTarget = path.resolve(
+										symlinkDir,
+										header.linkname,
+									);
+
+									if (
+										!resolvedTarget.startsWith(resolvedDestDir + path.sep) &&
+										resolvedTarget !== resolvedDestDir
+									) {
+										// To prevent path traversal attacks, throw an error if the target is outside.
+										throw new Error(
+											`Symlink target "${header.linkname}" points outside of the extraction directory.`,
+										);
+									}
+								}
 								await fs.symlink(header.linkname, outPath);
 							}
 							break;

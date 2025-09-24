@@ -6,9 +6,12 @@ import type { TarHeader } from "@modern-tar/core";
 import { createTarPacker } from "@modern-tar/core";
 
 /**
- * Configuration options for packing directories into tar archives.
+ * Filesystem-specific configuration options for packing directories into tar archives.
+ *
+ * These options are specific to Node.js filesystem operations and use Node.js-specific
+ * types like `Stats` for file system metadata.
  */
-export interface PackOptions {
+export interface PackOptionsFS {
 	/** Follow symlinks instead of storing them as symlinks (default: false) */
 	dereference?: boolean;
 	/** Filter function to include/exclude files (return false to exclude) */
@@ -17,7 +20,7 @@ export interface PackOptions {
 	map?: (header: TarHeader) => TarHeader;
 }
 
-async function* walk(directoryPath: string, options: PackOptions) {
+async function* walk(directoryPath: string, options: PackOptionsFS) {
 	const queue: Array<[string, string]> = [[directoryPath, "."]];
 	const seenInodes = new Map<number, string>(); // For hardlink detection
 
@@ -81,7 +84,7 @@ async function* walk(directoryPath: string, options: PackOptions) {
  */
 export function packTar(
 	directoryPath: string,
-	options: PackOptions = {},
+	options: PackOptionsFS = {},
 ): Readable {
 	const { readable, controller } = createTarPacker();
 
