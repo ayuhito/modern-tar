@@ -1,6 +1,8 @@
+import { createWriteStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { UnpackOptions } from "@modern-tar/core";
 import {
 	createTarDecoder,
@@ -67,9 +69,11 @@ export function unpackTar(
 	const processingPromise = (async () => {
 		const { validateSymlinks = true } = options;
 		const resolvedDestDir = path.resolve(directoryPath);
+		const createdDirs = new Set<string>();
 
 		// Ensure destination directory exists upfront
-		await fs.mkdir(directoryPath, { recursive: true });
+		await fs.mkdir(resolvedDestDir, { recursive: true });
+		createdDirs.add(resolvedDestDir);
 
 		const entryStream = webReadable
 			.pipeThrough(createTarDecoder())
@@ -78,32 +82,35 @@ export function unpackTar(
 		for await (const entry of entryStream) {
 			const header = entry.header;
 			const outPath = path.join(directoryPath, header.name);
+			const parentDir = path.dirname(outPath);
 
-			await fs.mkdir(path.dirname(outPath), { recursive: true });
+			// Only create a directory if it hasn't been seen before
+			if (!createdDirs.has(parentDir)) {
+				await fs.mkdir(parentDir, { recursive: true });
+				createdDirs.add(parentDir);
+			}
 
 			switch (header.type) {
-				case "directory":
-					await fs.mkdir(outPath, {
-						recursive: true,
-						mode: options.dmode ?? header.mode,
-					});
+				case "directory": {
+					const mode = options.dmode ?? header.mode;
+					// Check if the directory was already created as a parent of another entry
+					if (createdDirs.has(outPath) && mode) {
+						// If so, just ensure the permissions are correct
+						await fs.chmod(outPath, mode);
+					} else {
+						// Otherwise, create it with the correct permissions
+						await fs.mkdir(outPath, { recursive: true, mode });
+						createdDirs.add(outPath);
+					}
 					break;
+				}
 
 				case "file": {
-					const fileHandle = await fs.open(
-						outPath,
-						"w",
-						options.fmode ?? header.mode,
+					await pipeline(
+						Readable.fromWeb(entry.body),
+						createWriteStream(outPath, { mode: options.fmode ?? header.mode }),
 					);
 
-					try {
-						// Stream the body directly to the file.
-						for await (const chunk of entry.body) {
-							await fileHandle.write(chunk);
-						}
-					} finally {
-						await fileHandle.close();
-					}
 					break;
 				}
 
@@ -113,6 +120,7 @@ export function unpackTar(
 						if (validateSymlinks) {
 							const symlinkDir = path.dirname(outPath);
 							const resolvedTarget = path.resolve(symlinkDir, header.linkname);
+
 							if (
 								!resolvedTarget.startsWith(resolvedDestDir + path.sep) &&
 								resolvedTarget !== resolvedDestDir
@@ -122,6 +130,7 @@ export function unpackTar(
 								);
 							}
 						}
+
 						await fs.symlink(header.linkname, outPath);
 					}
 					break;
@@ -130,6 +139,7 @@ export function unpackTar(
 					if (header.linkname) {
 						await fs.link(path.join(directoryPath, header.linkname), outPath);
 					}
+
 					break;
 			}
 
