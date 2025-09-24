@@ -52,6 +52,10 @@ const extractStream = unpackTar('/output/directory');
 await pipeline(createReadStream('archive.tar'), extractStream);
 ```
 
+## Acknowledgements
+
+- [`tar-stream`](https://github.com/mafintosh/tar-stream) and [`tar-fs`](https://github.com/mafintosh/tar-fs) - For the inspiration and test fixtures.
+
 ## License
 
 MIT
