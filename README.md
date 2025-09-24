@@ -2,38 +2,29 @@
 
 Zero-dependency, cross-platform, streaming tar archive library for every JavaScript runtime. Built with the browser-native Web Streams API for performance and memory efficiency.
 
-## Features
-
-- 🚀 **Streaming Architecture** - Supports large archives without loading everything into memory
-- 📋 **Standards Compliant** - Full USTAR format support with PAX extensions. Compatible with GNU tar, BSD tar, and other standard implementations
-- 🗜️ **Compression** - Includes helpers for gzip compression/decompression
-- 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation
-- ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size
-- 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes
-- 📁 **Node.js Integration** - Additional high-level APIs for directory packing and extraction
-
 ## Table of Contents
 
-- [Features](#features)
 - [Installation](#installation)
-- [Quick Start](#quick-start)
-  - [Web Streams (Universal)](#web-streams-universal)
-  - [Node.js Filesystem](#nodejs-filesystem)
-- [Usage Examples](#usage-examples)
-  - [Simple Archive Creation](#simple-archive-creation)
-  - [Streaming Archives](#streaming-archives)
-  - [Directory Packing (Node.js)](#directory-packing-nodejs)
-  - [Compression/Decompression](#compressiondecompression)
-  - [Filtering and Transformation](#filtering-and-transformation)
+- [Usage](#usage)
+  - [Core Usage (Browser, Node.js, etc.)](#core-usage)
+  - [Node.js Filesystem Usage](#nodejs-filesystem-usage)
 - [API Reference](#api-reference)
-  - [Web Streams API (Universal)](#web-streams-api-universal)
-  - [Node.js Filesystem API](#nodejs-filesystem-api)
+  - [Core API (`modern-tar`)](#core-api-modern-tar)
+  - [Node.js Filesystem API (`modern-tar/fs`)](#nodejs-filesystem-api-modern-tarfs)
 - [Types](#types)
-- [Browser Support](#browser-support)
-- [Acknowledgements](#acknowledgements)
-- [License](#license)
+  - [Core Types](#core-types)
+  - [Filesystem Types](#filesystem-types)
+- [Compatibility](#compatibility)
 
+## Features
 
+- 🚀 **Streaming Architecture** - Supports large archives without loading everything into memory.
+- 📋 **Standards Compliant** - Full USTAR format support with PAX extensions. Compatible with GNU tar, BSD tar, and other standard implementations.
+- 🗜️ **Compression** - Includes helpers for gzip compression/decompression.
+- 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation.
+- ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size.
+- 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes.
+- 📁 **Node.js Integration** - Additional high-level APIs for directory packing and extraction.
 
 ## Installation
 
@@ -41,83 +32,53 @@ Zero-dependency, cross-platform, streaming tar archive library for every JavaScr
 npm install modern-tar
 ```
 
-## Quick Start
+## Usage
 
-### Web Streams (Universal)
+This package provides two entry points:
 
-Works in all JavaScript environments including browsers, Node.js, Cloudflare Workers, and more.
+- `modern-tar`: The core, cross-platform streaming API (works everywhere).
+- `modern-tar/fs`: High-level filesystem utilities for Node.js.
 
-```typescript
-import { packTar, unpackTar } from 'modern-tar';
+### Core Usage
 
-// Pack entries into tar buffer
-const entries = [
-  { header: { name: "hello.txt", size: 5 }, body: "hello" },
-  { header: { name: "world.txt", size: 5 }, body: "world" }
-];
-const tarBuffer = await packTar(entries);
+These APIs use the Web Streams API and can be used in any modern JavaScript environment.
 
-// Unpack tar buffer
-const extracted = await unpackTar(tarBuffer);
-console.log(extracted[0].header.name); // "hello.txt"
-```
-
-### Node.js Filesystem
-
-High-level APIs for working with directories and files on disk using Node Streams.
-
-```typescript
-import { packDirectory, unpackToDirectory } from 'modern-tar/fs';
-import { createWriteStream, createReadStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
-
-// Pack directory to tar file
-const tarStream = packDirectory('/my/directory');
-await pipeline(tarStream, createWriteStream('archive.tar'));
-
-// Extract tar file to directory
-const extractStream = unpackToDirectory('/output/directory');
-await pipeline(createReadStream('archive.tar'), extractStream);
-```
-
-## Usage Examples
-
-### Simple Archive Creation
+#### Simple
 
 ```typescript
 import { packTar, unpackTar } from 'modern-tar';
 
-// Create entries with different content types
+// Pack entries into a tar buffer
 const entries = [
-  { header: { name: "file.txt", size: 5 }, body: "hello" },
-  { header: { name: "dir/", type: "directory", size: 0 } },
-  { header: { name: "dir/nested.txt", size: 3 }, body: new Uint8Array([97, 98, 99]) }, // "abc"
-  { header: { name: "binary.dat", size: 4 }, body: new ArrayBuffer(4) }
+	{ header: { name: "file.txt", size: 5 }, body: "hello" },
+	{ header: { name: "dir/", type: "directory", size: 0 } },
+	{ header: { name: "dir/nested.txt", size: 3 }, body: new Uint8Array([97, 98, 99]) } // "abc"
 ];
 
+// Accepts string, Uint8Array, Blob, ReadableStream<Uint8Array> and more...
 const tarBuffer = await packTar(entries);
 
-// Extract all entries
+// Unpack tar buffer into entries
 for await (const entry of unpackTar(tarBuffer)) {
-  console.log(`File: ${entry.header.name}`);
-  const content = new TextDecoder().decode(entry.data);
-  console.log(`Content: ${content}`);
+	console.log(`File: ${entry.header.name}`);
+	const content = new TextDecoder().decode(entry.data);
+	console.log(`Content: ${content}`);
 }
 ```
 
-### Streaming Archives
+#### Streaming
 
 ```typescript
 import { createTarPacker, createTarDecoder } from 'modern-tar';
 
-// Create a tar packer for dynamic content
+// Create a tar packer
 const { readable, controller } = createTarPacker();
 
 // Add entries dynamically
 const fileStream = controller.add({
-  name: "dynamic.txt",
-  size: 5,
-  type: "file"
+	name: "dynamic.txt",
+	size: 5,
+	type: "file"
 });
 
 // Write content to the stream
@@ -125,165 +86,265 @@ const writer = fileStream.getWriter();
 await writer.write(new TextEncoder().encode("hello"));
 await writer.close();
 
-// Finalize the archive
+// When done adding entries, finalize the archive
 controller.finalize();
 
-// Decode the stream
+// `readable` now contains the complete tar archive which can be piped or processed
+const tarStream = readable;
+
+// Create a tar decoder
 const decoder = createTarDecoder();
-const decodedStream = readable.pipeThrough(decoder);
+const decodedStream = tarStream.pipeThrough(decoder);
 for await (const entry of decodedStream) {
-  console.log(`Decoded: ${entry.header.name}`);
-  // Process entry.body stream as needed
+	console.log(`Decoded: ${entry.header.name}`);
+	// Process `entry.body` stream as needed
 }
 ```
 
-### Directory Packing (Node.js)
+#### Compression/Decompression (gzip)
 
 ```typescript
-import { packDirectory, unpackToDirectory } from 'modern-tar/fs';
-import { createWriteStream, createReadStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
+import { createGzipDecoder, unpackTar } from 'modern-tar';
 
-// Pack with filtering and options
-const tarStream = packDirectory('./my/project', {
-  filter: (filePath, stats) => !filePath.includes('node_modules'),
-  map: (header) => ({ ...header, mode: 0o644 }), // Set all files to 644
-  dereference: true // Follow symlinks instead of archiving them
-});
-
-await pipeline(tarStream, createWriteStream('./project.tar'));
-
-// Extract with options
-const extractStream = unpackToDirectory('./output', {
-  strip: 1, // Remove first directory level
-  filter: (header) => header.name.endsWith('.js'), // Only extract JS files
-  fmode: 0o644, // Override file permissions
-  dmode: 0o755  // Override directory permissions
-});
-
-await pipeline(createReadStream('./project.tar'), extractStream);
-```
-
-### Compression/Decompression
-
-```typescript
-import { createGzipEncoder, createGzipDecoder, unpackTar } from 'modern-tar';
-
-// Compress a tar stream to .tar.gz
-const { readable, controller } = createTarPacker();
-// ... add entries ...
-controller.finalize();
-const compressedStream = readable.pipeThrough(createGzipEncoder());
-
-// Decompress .tar.gz and extract
+// Fetch a .tar.gz file stream
 const response = await fetch('https://example.com/archive.tar.gz');
 if (!response.body) throw new Error('No response body');
 
+// Decompress .tar.gz to .tar stream
 const tarStream = response.body.pipeThrough(createGzipDecoder());
+
+// Use `unpackTar` for buffered extraction or `createTarDecoder` for streaming
 for await (const entry of unpackTar(tarStream)) {
-  console.log(`Extracted: ${entry.header.name}`);
+	console.log(`Extracted: ${entry.header.name}`);
+	const content = new TextDecoder().decode(entry.data);
+	console.log(`Content: ${content}`);
 }
 ```
 
-### Filtering and Transformation
+### Node.js Filesystem Usage
+
+These APIs use Node.js streams when interacting with the local filesystem.
+
+#### Simple
 
 ```typescript
-import { unpackTar } from 'modern-tar';
+import { packTar, unpackTar } from 'modern-tar/fs';
+import { createWriteStream, createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 
-// Extract with filtering and path transformation
-const entries = await unpackTar(tarBuffer, {
-  strip: 2, // Remove first 2 path components
-  filter: (header) => {
-    // Only extract specific file types
-    return header.type === 'file' &&
-           (header.name.endsWith('.js') || header.name.endsWith('.json'));
-  },
-  map: (header) => ({
-    ...header,
-    name: `extracted/${header.name}`, // Add prefix to all paths
-    mode: 0o644 // Normalize permissions
-  })
+// Pack a directory into a tar file
+const tarStream = packTar('./my/project');
+const fileStream = createWriteStream('./project.tar');
+await pipeline(tarStream, fileStream);
+
+// Extract a tar file to a directory
+const tarReadStream = createReadStream('./project.tar');
+const extractStream = unpackTar('./output/directory');
+await pipeline(tarReadStream, extractStream);
+```
+
+#### Filtering and Transformation
+
+```typescript
+import { packTar, unpackTar } from 'modern-tar/fs';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+
+// Pack with filtering
+const packStream = packTar('./my/project', {
+	filter: (filePath, stats) => !filePath.includes('node_modules'),
+	map: (header) => ({ ...header, mode: 0o644 }), // Set all files to 644
+	dereference: true // Follow symlinks instead of archiving them
 });
+
+// Unpack with advanced options
+const sourceStream = createReadStream('./archive.tar');
+const extractStream = unpackTar('./output', {
+	// Core options
+	strip: 1, // Remove first directory level
+	filter: (header) => header.name.endsWith('.js'), // Only extract JS files
+	map: (header) => ({ ...header, name: header.name.toLowerCase() }), // Transform names
+
+	// Filesystem-specific options
+	fmode: 0o644, // Override file permissions
+	dmode: 0o755  // Override directory permissions
+});
+
+await pipeline(sourceStream, extractStream);
 ```
 
 ## API Reference
 
-### Web Streams API (Universal)
-
-Works in all JavaScript environments.
+### Core API (`modern-tar`)
 
 #### `packTar(entries: TarEntry[]): Promise<Uint8Array>`
 
 Pack an array of entries into a tar archive buffer.
 
-**Parameters:**
-- `entries` - Array of `TarEntry` objects to pack
+- **`entries`**: Array of `TarEntry` objects to pack.
+- **Returns**: Promise resolving to a complete tar archive as a `Uint8Array`.
 
-**Returns:** Promise resolving to complete tar archive as Uint8Array
+**Example:**
+
+```typescript
+const entries = [
+  { header: { name: "file.txt", size: 5 }, body: "hello" },
+  { header: { name: "dir/", type: "directory", size: 0 } }
+];
+const tarBuffer = await packTar(entries);
+```
 
 #### `unpackTar(archive: ArrayBuffer | Uint8Array, options?: UnpackOptions): Promise<ParsedTarEntryWithData[]>`
 
-Extract all entries from a tar archive buffer.
+Extract all entries from a tar archive buffer with optional filtering and transformation.
 
-**Parameters:**
-- `archive` - Complete tar archive as ArrayBuffer or Uint8Array
-- `options` - Optional extraction configuration
+- **`archive`**: Complete tar archive as `ArrayBuffer` or `Uint8Array`.
+- **`options`**: Optional extraction configuration (see `UnpackOptions`).
+- **Returns**: Promise resolving to an array of entries with buffered data.
 
-**Returns:** Promise resolving to array of entries with buffered data
+**Example:**
+
+```typescript
+// With filtering and path manipulation
+const filteredEntries = await unpackTar(tarBuffer, {
+  strip: 1, // Remove first path component
+  filter: (header) => header.name.endsWith('.js'),
+  map: (header) => ({ ...header, name: header.name.toLowerCase() })
+});
+```
 
 #### `createTarPacker(): { readable, controller }`
 
 Create a streaming tar packer for dynamic entry creation.
 
-**Returns:**
-- `readable` - ReadableStream outputting tar archive bytes
-- `controller` - TarPackController for adding entries
+- **Returns**: An object containing:
+  - `readable` - `ReadableStream` outputting tar archive bytes.
+  - `controller` - `TarPackController` for adding entries.
+
+**Example:**
+
+```typescript
+const { readable, controller } = createTarPacker();
+
+// Add entries dynamically
+const stream1 = controller.add({ name: "file1.txt", size: 5 });
+const stream2 = controller.add({ name: "file2.txt", size: 4 });
+
+// Write content to streams and finalize
+// ...
+controller.finalize();
+```
 
 #### `createTarDecoder(): TransformStream<Uint8Array, ParsedTarEntry>`
 
 Create a transform stream that parses tar bytes into entries.
 
+- **Returns**: `TransformStream` that converts tar archive bytes to `ParsedTarEntry` objects.
+
+**Example:**
+
+```typescript
+const decoder = createTarDecoder();
+const entriesStream = tarStream.pipeThrough(decoder);
+
+for await (const entry of entriesStream) {
+  console.log(`Entry: ${entry.header.name}`);
+  // Process entry.body stream as needed
+}
+```
+
 #### `createTarOptionsTransformer(options?: UnpackOptions): TransformStream<ParsedTarEntry, ParsedTarEntry>`
 
-Create a transform stream that applies unpacking options to tar entries.
+Create a transform stream that applies unpacking options (`strip`, `filter`, `map`) to tar entries.
+
+- **`options`**: Optional unpacking configuration (see `UnpackOptions`).
+- **Returns**: `TransformStream` that processes `ParsedTarEntry` objects.
+
+**Example:**
+
+```typescript
+import { createTarDecoder, createTarOptionsTransformer } from 'modern-tar';
+
+const transformedStream = sourceStream
+  .pipeThrough(createTarDecoder())
+  .pipeThrough(createTarOptionsTransformer({
+    strip: 1,
+    filter: (header) => header.name.endsWith('.txt'),
+  }));
+```
 
 #### `createGzipEncoder(): CompressionStream`
 
-Create a gzip compression stream for tar.gz creation.
+Create a gzip compression stream for `.tar.gz` creation.
+
+**Example:**
+
+```typescript
+const tarStream = /* ... */;
+const compressedStream = tarStream.pipeThrough(createGzipEncoder());
+```
 
 #### `createGzipDecoder(): DecompressionStream`
 
-Create a gzip decompression stream for tar.gz extraction.
+Create a gzip decompression stream for `.tar.gz` extraction.
 
-### Node.js Filesystem API
+**Example:**
 
-Available via `modern-tar/fs` import. Requires Node.js 18.0+.
+```typescript
+const gzipStream = /* ... */;
+const tarStream = gzipStream.pipeThrough(createGzipDecoder());
+```
 
-#### `packDirectory(directoryPath: string, options?: PackOptionsFS): Readable`
+### Node.js Filesystem API (`modern-tar/fs`)
+
+#### `packTar(directoryPath: string, options?: PackOptionsFS): Readable`
 
 Pack a directory into a Node.js Readable stream containing tar archive bytes.
 
-**Parameters:**
-- `directoryPath` - Path to directory to pack
-- `options` - Optional packing configuration
+- **`directoryPath`**: Path to the directory to pack.
+- **`options`**: Optional packing configuration (see `PackOptionsFS`).
+- **Returns**: Node.js `Readable` stream of tar archive bytes.
 
-**Returns:** Node.js `Readable` stream of tar archive bytes
+**Example:**
 
-#### `unpackToDirectory(directoryPath: string, options?: UnpackOptionsFS): Writable`
+```typescript
+import { packTar } from 'modern-tar/fs';
+
+const tarStream = packTar('/home/user/project', {
+  dereference: true,  // Follow symlinks
+  filter: (path, stats) => !path.includes('tmp'),
+});
+```
+
+#### `unpackTar(directoryPath: string, options?: UnpackOptionsFS): Writable`
 
 Extract a tar archive to a directory.
 
-**Parameters:**
-- `directoryPath` - Path to directory where files will be extracted
-- `options` - Optional extraction configuration
+- **`directoryPath`**: Path to the directory where files will be extracted.
+- **`options`**: Optional extraction configuration (see `UnpackOptionsFS`).
+- **Returns**: Node.js `Writable` stream to pipe tar archive bytes into.
 
-**Returns:** Node.js `Writable` stream to pipe tar archive bytes into
+**Example:**
+
+```typescript
+import { unpackTar } from 'modern-tar/fs';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+
+const tarStream = createReadStream('backup.tar');
+const extractStream = unpackTar('/restore/location', {
+  strip: 1,
+  fmode: 0o644, // Set consistent file permissions
+});
+await pipeline(tarStream, extractStream);
+```
 
 ## Types
 
-### TarHeader
+### Core Types
 
 ```typescript
+// Header information for a tar entry
 interface TarHeader {
   name: string;                    // File/directory name
   size: number;                    // File size in bytes
@@ -297,42 +358,28 @@ interface TarHeader {
   gname?: string;                  // Group name
   pax?: Record<string, string>;    // PAX extended attributes
 }
-```
 
-### TarEntry
-
-```typescript
+// Input entry for packing functions
 interface TarEntry {
   header: TarHeader;
   body?: string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> | Blob | null;
 }
-```
 
-### ParsedTarEntry
-
-```typescript
+// Output entry from a streaming decoder
 interface ParsedTarEntry {
-  header: TarHeader;
-  body: ReadableStream<Uint8Array>;
+	header: TarHeader;
+	body: ReadableStream<Uint8Array>;
 }
-```
 
-### ParsedTarEntryWithData
-
-```typescript
+// Output entry from a buffered unpack function
 interface ParsedTarEntryWithData {
-  header: TarHeader;
-  data: Uint8Array;
+	header: TarHeader;
+	data: Uint8Array;
 }
-```
 
-### UnpackOptions
-
-Platform-neutral configuration options for extracting tar archives.
-
-```typescript
+// Platform-neutral configuration for unpacking
 interface UnpackOptions {
-  /** Number of leading path components to strip from entry names */
+  /** Number of leading path components to strip from entry names (e.g., strip: 1 removes first directory) */
   strip?: number;
   /** Filter function to include/exclude entries (return false to skip) */
   filter?: (header: TarHeader) => boolean;
@@ -341,39 +388,43 @@ interface UnpackOptions {
 }
 ```
 
-### PackOptionsFS
-
-Filesystem-specific configuration options for packing directories (Node.js only).
+### Filesystem Types
 
 ```typescript
 interface PackOptionsFS {
   /** Follow symlinks instead of archiving them as symlinks (default: false) */
   dereference?: boolean;
-  /** Filter function to determine which files to include */
+  /** Filter function to determine which files to include (uses Node.js fs.Stats) */
   filter?: (path: string, stat: Stats) => boolean;
   /** Transform function to modify headers before packing */
   map?: (header: TarHeader) => TarHeader;
 }
-```
 
-### UnpackOptionsFS
-
-Extends `UnpackOptions` with filesystem-specific options (Node.js only).
-
-```typescript
 interface UnpackOptionsFS extends UnpackOptions {
-  /** Default mode for created directories (e.g., 0o755) */
+  // Inherited from UnpackOptions (platform-neutral):
+  /** Number of leading path components to strip from entry names */
+  strip?: number;
+  /** Filter function to determine which entries to extract */
+  filter?: (header: TarHeader) => boolean;
+  /** Transform function to modify headers before extraction */
+  map?: (header: TarHeader) => TarHeader;
+
+  // Filesystem-specific options:
+  /** Default mode for created directories (e.g., 0o755). Overrides tar header mode */
   dmode?: number;
-  /** Default mode for created files (e.g., 0o644) */
+  /** Default mode for created files (e.g., 0o644). Overrides tar header mode */
   fmode?: number;
-  /** Prevent symlinks from pointing outside the extraction directory (default: true) */
+  /**
+   * Prevent symlinks from pointing outside the extraction directory.
+   * @default true
+   */
   validateSymlinks?: boolean;
 }
 ```
 
-## Browser Support
+## Compatibility
 
-This library uses the [Web Streams API](https://caniuse.com/streams) and requires:
+The core library uses the [Web Streams API](https://caniuse.com/streams) and requires:
 
 - **Node.js**: 18.0+
 - **Browsers**: Modern browsers with Web Streams support
