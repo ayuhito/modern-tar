@@ -1,6 +1,6 @@
 {
 	"name": "@modern-tar/fs",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Filesystem utilities for @modern-tar/core.",
 	"license": "MIT",
 	"type": "module",
