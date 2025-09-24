@@ -15,10 +15,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Update npm to latest
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -29,7 +37,6 @@ jobs:
       - name: Run tests
         run: bun run test --run
 
-      # Temporary workaround until bun publish supports OIDC publishing
       - name: Rewrite workspace dependencies
         run: |
           # Get version from package.json
@@ -39,22 +46,12 @@ jobs:
           cd packages/fs
           bunx json -I -f package.json -e "this.dependencies['@modern-tar/core']='$VERSION'"
 
-      - name: Pack packages
-        run: |
-          cd packages/core
-          bun pm pack
-
-          cd ../fs
-          bun pm pack
-
       - name: Publish packages
         run: |
           # Publish core package first
           cd packages/core
-          TARBALL=$(ls *.tgz | head -n 1)
-          bunx npm publish "$TARBALL"
+          npm publish
 
           # Publish fs package
           cd ../fs
-          TARBALL=$(ls *.tgz | head -n 1)
-          bunx npm publish "$TARBALL"
+          npm publish
