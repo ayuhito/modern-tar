@@ -31,7 +31,7 @@ export function createTarOptionsTransformer(
 				// Validate strip value
 				if (options.strip < 0) {
 					// Drain the body before throwing
-					await drainStream(entry.body);
+					drainStream(entry.body);
 					throw new Error(
 						`Invalid strip value: ${options.strip}. Must be non-negative.`,
 					);
@@ -48,7 +48,7 @@ export function createTarOptionsTransformer(
 
 					if (strippedComponents.length === 0) {
 						// Drain and skip entries that become empty after stripping
-						await drainStream(entry.body);
+						drainStream(entry.body);
 						return;
 					}
 
@@ -66,7 +66,7 @@ export function createTarOptionsTransformer(
 			// Apply filter option
 			if (options.filter && options.filter(header) === false) {
 				// Drain and skip filtered entries
-				await drainStream(entry.body);
+				drainStream(entry.body);
 				return;
 			}
 
@@ -84,18 +84,23 @@ export function createTarOptionsTransformer(
 }
 
 /**
- * Helper function to properly drain a ReadableStream to avoid hanging.
- * This is essential when skipping entries to ensure the stream doesn't stall.
+ * Drains the stream asynchronously without blocking the transform stream.
  */
-async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
-	const reader = stream.getReader();
-	try {
-		// eslint-disable-next-line no-constant-condition
-		while (true) {
-			const { done } = await reader.read();
-			if (done) break;
+function drainStream(stream: ReadableStream<Uint8Array>): void {
+	// Don't await, just run in the background
+	(async () => {
+		const reader = stream.getReader();
+		try {
+			// eslint-disable-next-line no-constant-condition
+			while (true) {
+				const { done } = await reader.read();
+				if (done) break;
+			}
+		} catch (error) {
+			// Silently ignore drain errors to prevent unhandled rejections
+			console.debug("Stream drain error (non-critical):", error);
+		} finally {
+			reader.releaseLock();
 		}
-	} finally {
-		reader.releaseLock();
-	}
+	})();
 }

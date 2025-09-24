@@ -134,8 +134,6 @@ export function createTarDecoder(): TransformStream<
 
 					// If entry is complete, close its body stream and skip padding.
 					if (currentEntry.bytesLeft === 0) {
-						closeEntryBody();
-
 						const padding =
 							(BLOCK_SIZE - (currentEntry.header.size % BLOCK_SIZE)) %
 							BLOCK_SIZE;
@@ -144,9 +142,11 @@ export function createTarDecoder(): TransformStream<
 							break;
 						}
 
+						closeEntryBody();
 						offset += padding;
 						currentEntry = null;
 					} else {
+						// Body is not fully read, and we've run out of data in this chunk.
 						break;
 					}
 				}

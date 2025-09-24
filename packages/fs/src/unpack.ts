@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { Writable } from "node:stream";
+import { PassThrough, Readable, Writable } from "node:stream";
 import type { UnpackOptions } from "@modern-tar/core";
 import {
 	createTarDecoder,
@@ -60,97 +60,111 @@ export function unpackTar(
 	directoryPath: string,
 	options: UnpackOptionsFS = {},
 ): Writable {
-	const chunks: Uint8Array[] = [];
+	// Convert the reading end of the bridge to a Web ReadableStream.
+	const bridge = new PassThrough();
+	const webReadable = Readable.toWeb(bridge);
 
-	return new Writable({
-		write(chunk, _encoding, callback) {
-			chunks.push(chunk);
-			callback();
-		},
-		async final(callback) {
-			try {
-				const { validateSymlinks = true } = options;
-				const resolvedDestDir = path.resolve(directoryPath);
-				const blob = new Blob(chunks);
-				const buffer = new Uint8Array(await blob.arrayBuffer());
-				const tarStream = ReadableStream.from([buffer]);
+	const processingPromise = (async () => {
+		const { validateSymlinks = true } = options;
+		const resolvedDestDir = path.resolve(directoryPath);
 
-				const entryStream = tarStream
-					.pipeThrough(createTarDecoder())
-					.pipeThrough(createTarOptionsTransformer(options));
+		const entryStream = webReadable
+			.pipeThrough(createTarDecoder())
+			.pipeThrough(createTarOptionsTransformer(options));
 
-				for await (const entry of entryStream) {
-					const header = entry.header;
-					const outPath = path.join(directoryPath, header.name);
-					await fs.mkdir(path.dirname(outPath), { recursive: true });
+		for await (const entry of entryStream) {
+			const header = entry.header;
+			const outPath = path.join(directoryPath, header.name);
 
-					switch (header.type) {
-						case "directory":
-							await fs.mkdir(outPath, {
-								recursive: true,
-								mode: options.dmode ?? header.mode,
-							});
-							break;
-						case "file": {
-							const fileHandle = await fs.open(
-								outPath,
-								"w",
-								options.fmode ?? header.mode,
-							);
-							try {
-								for await (const chunk of entry.body) {
-									await fileHandle.write(chunk);
-								}
-							} finally {
-								await fileHandle.close();
-							}
-							break;
+			await fs.mkdir(path.dirname(outPath), { recursive: true });
+
+			switch (header.type) {
+				case "directory":
+					await fs.mkdir(outPath, {
+						recursive: true,
+						mode: options.dmode ?? header.mode,
+					});
+					break;
+
+				case "file": {
+					const fileHandle = await fs.open(
+						outPath,
+						"w",
+						options.fmode ?? header.mode,
+					);
+
+					try {
+						// Stream the body directly to the file.
+						for await (const chunk of entry.body) {
+							await fileHandle.write(chunk);
 						}
-						case "symlink":
-							if (header.linkname) {
-								if (validateSymlinks) {
-									const symlinkDir = path.dirname(outPath);
-									const resolvedTarget = path.resolve(
-										symlinkDir,
-										header.linkname,
-									);
+					} finally {
+						await fileHandle.close();
+					}
+					break;
+				}
 
-									if (
-										!resolvedTarget.startsWith(resolvedDestDir + path.sep) &&
-										resolvedTarget !== resolvedDestDir
-									) {
-										// To prevent path traversal attacks, throw an error if the target is outside.
-										throw new Error(
-											`Symlink target "${header.linkname}" points outside of the extraction directory.`,
-										);
-									}
-								}
-								await fs.symlink(header.linkname, outPath);
-							}
-							break;
-						case "link":
-							if (header.linkname) {
-								await fs.link(
-									path.join(directoryPath, header.linkname),
-									outPath,
+				case "symlink":
+					if (header.linkname) {
+						// Prevent path traversal attacks via symlinks.
+						if (validateSymlinks) {
+							const symlinkDir = path.dirname(outPath);
+							const resolvedTarget = path.resolve(symlinkDir, header.linkname);
+							if (
+								!resolvedTarget.startsWith(resolvedDestDir + path.sep) &&
+								resolvedTarget !== resolvedDestDir
+							) {
+								throw new Error(
+									`Symlink target "${header.linkname}" points outside of the extraction directory.`,
 								);
 							}
-							break;
+						}
+						await fs.symlink(header.linkname, outPath);
 					}
+					break;
 
-					// Apply timestamps.
-					if (header.mtime) {
-						try {
-							const utimesFn =
-								header.type === "symlink" ? fs.lutimes : fs.utimes;
-							await utimesFn(outPath, header.mtime, header.mtime);
-						} catch {}
+				case "link":
+					if (header.linkname) {
+						await fs.link(path.join(directoryPath, header.linkname), outPath);
 					}
-				}
-				callback();
-			} catch (err) {
-				callback(err instanceof Error ? err : new Error(String(err)));
+					break;
 			}
+
+			// Apply timestamps if available
+			if (header.mtime) {
+				try {
+					const utimesFn = header.type === "symlink" ? fs.lutimes : fs.utimes;
+					await utimesFn(outPath, header.mtime, header.mtime);
+				} catch {
+					// Ignore timestamp errors
+				}
+			}
+		}
+	})();
+
+	const writable = new Writable({
+		write(chunk, encoding, callback) {
+			// This respects backpressure from the file system and parser.
+			if (!bridge.write(chunk, encoding)) {
+				bridge.once("drain", callback);
+				return;
+			}
+
+			callback();
+		},
+
+		final(callback) {
+			bridge.end();
+			// Attach the final callback to the processing promise to ensure
+			// all files are written before the stream finishes.
+			processingPromise.then(() => callback()).catch(callback);
+		},
+
+		destroy(err, callback) {
+			bridge.destroy(err as Error | undefined);
+			callback(err);
 		},
 	});
+
+	return writable;
 }
