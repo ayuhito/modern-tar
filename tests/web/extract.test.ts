@@ -1,7 +1,8 @@
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { unpackTar } from "../src/index";
-import { decoder } from "../src/utils";
+import { packTar } from "../../src/web";
+import { unpackTar } from "../../src/web/index";
+import { decoder } from "../../src/web/utils";
 import {
 	GNU_TAR,
 	LONG_NAME_TAR,
@@ -116,7 +117,6 @@ describe("extract", () => {
 		expect(longName.length).toBe(100);
 
 		// Create a test archive with the 100-character filename using our pack function
-		const { packTar } = await import("../src/index");
 		const testArchive = await packTar([
 			{
 				header: {

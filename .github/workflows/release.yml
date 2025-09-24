@@ -37,21 +37,5 @@ jobs:
       - name: Run tests
         run: bun run test --run
 
-      - name: Rewrite workspace dependencies
-        run: |
-          # Get version from package.json
-          VERSION=$(cat packages/core/package.json | bunx json version)
-
-          # Fix workspace dependency in fs package
-          cd packages/fs
-          bunx json -I -f package.json -e "this.dependencies['@modern-tar/core']='$VERSION'"
-
       - name: Publish packages
-        run: |
-          # Publish core package first
-          cd packages/core
-          npm publish
-
-          # Publish fs package
-          cd ../fs
-          npm publish
+        run: npm publish

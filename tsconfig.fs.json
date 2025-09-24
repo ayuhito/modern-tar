@@ -1,13 +1,10 @@
 {
 	"compilerOptions": {
 		"target": "esnext",
-		"composite": true,
-		"lib": ["ES2023", "DOM", "DOM.AsyncIterable"],
-		"moduleDetection": "force",
 		"module": "preserve",
 		"moduleResolution": "bundler",
+		"moduleDetection": "force",
 		"resolveJsonModule": true,
-		"types": ["node"], // Only for tests. We should never import node types in the actual code.
 		"strict": true,
 		"noUnusedLocals": true,
 		"declaration": true,
@@ -15,7 +12,13 @@
 		"esModuleInterop": true,
 		"isolatedModules": true,
 		"verbatimModuleSyntax": true,
-		"skipLibCheck": true
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+
+		"composite": true,
+		"lib": ["ES2023"],
+		"types": ["node"]
 	},
-	"include": ["src", "tests"]
+	"include": ["src/fs/**/*.ts", "tests/fs/**/*.ts"],
+	"references": [{ "path": "./tsconfig.web.json" }]
 }

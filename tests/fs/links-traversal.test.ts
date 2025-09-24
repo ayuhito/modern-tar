@@ -3,10 +3,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { TarEntry } from "@modern-tar/core";
-import { packTar } from "@modern-tar/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { unpackTar } from "../src/index";
+import { unpackTar } from "../../src/fs/index";
+import type { TarEntry } from "../../src/web/index";
+import { packTar } from "../../src/web/index";
 
 describe("symlink traversal", () => {
 	let tmpDir: string;
