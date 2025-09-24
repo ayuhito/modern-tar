@@ -5,52 +5,46 @@ import type { TarHeader } from "@modern-tar/core";
 import { createTarDecoder } from "@modern-tar/core";
 
 /**
- * Options for extracting tar archives to the filesystem.
+ * Configuration options for extracting tar archives to the filesystem.
  */
 export interface UnpackOptions {
-	/** Number of leading path components to strip from entry names */
+	/** Number of leading path components to strip from entry names (e.g., strip: 1 removes first directory) */
 	strip?: number;
-	/** Filter function to determine which entries to extract */
+	/** Filter function to include/exclude entries (return false to skip) */
 	filter?: (header: TarHeader) => boolean;
-	/** Transform function to modify headers before extraction */
+	/** Transform function to modify tar headers before extraction */
 	map?: (header: TarHeader) => TarHeader;
 }
 
 /**
  * Extract a tar archive to a directory.
  *
- * Returns a Node.js Writable stream to pipe tar archive bytes into. Files, directories,
- * symlinks, and hard links are written to the filesystem with correct permissions
- * and timestamps.
+ * Returns a Node.js [`Writable`](https://nodejs.org/api/stream.html#class-streamwritable)
+ * stream to pipe tar archive bytes into. Files, directories, symlinks, and hardlinks
+ * are written to the filesystem with correct permissions and timestamps.
  *
  * @param directoryPath - Path to directory where files will be extracted
- * @param options - Extraction options for filtering, mapping, and path manipulation
- * @returns Node.js Writable stream to pipe tar archive bytes into
+ * @param options - Optional extraction configuration
+ * @returns Node.js [`Writable`](https://nodejs.org/api/stream.html#class-streamwritable) stream to pipe tar archive bytes into
  *
  * @example
  * ```typescript
- * import { packTar, unpackTar } from '@modern-tar/fs';
+ * import { unpackTar } from '@modern-tar/fs';
  * import { createReadStream } from 'node:fs';
  * import { pipeline } from 'node:stream/promises';
  *
- * // Basic streaming extraction
- * const tarStream = createReadStream('archive.tar');
+ * // Basic extraction
+ * const tarStream = createReadStream('project.tar');
  * const extractStream = unpackTar('/output/directory');
  * await pipeline(tarStream, extractStream);
  *
- * // Extract with path stripping
- * const tarStream2 = createReadStream('archive.tar');
- * const extractStream2 = unpackTar('/output/directory', {
- *   strip: 1  // Remove first path component
+ * // Extract with path manipulation and filtering
+ * const advancedStream = unpackTar('/output', {
+ *   strip: 1,  // Remove first path component
+ *   filter: (header) => header.type === 'file' && header.name.endsWith('.js'),
+ *   map: (header) => ({ ...header, mode: 0o644 })
  * });
- * await pipeline(tarStream2, extractStream2);
- *
- * // Extract with filtering
- * const tarStream3 = createReadStream('archive.tar');
- * const extractStream3 = unpackTar('/output/directory', {
- *   filter: (header) => !header.name.includes('.tmp')
- * });
- * await pipeline(tarStream3, extractStream3);
+ * await pipeline(createReadStream('archive.tar'), advancedStream);
  * ```
  */
 export function unpackTar(

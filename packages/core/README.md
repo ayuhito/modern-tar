@@ -4,13 +4,13 @@ Zero-dependency, cross-platform, streaming tar archive library for every JavaScr
 
 ## Features
 
-- 🚀 **Streaming Architecture** - Supports large archives without loading everything into memory
-- 📦 **USTAR Format** - Full support for USTAR tar format with long filename handling
-- 🔧 **PAX Extensions** - Support for PAX headers for extended metadata
-- 🗜️ **Compression** - Includes helpers for gzip compression/decompression
-- 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation
-- ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size
-- 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes
+- 🚀 **Streaming Architecture** - Supports large archives without loading everything into memory.
+- 📋 **Standards Compliant** -
+Full USTAR format support with PAX extensions. Compatible with GNU tar, BSD tar, and other standard implementations.
+- 🗜️ **Compression** - Includes helpers for gzip compression/decompression.
+- 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation.
+- ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size.
+- 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes.
 
 ## Installation
 
@@ -78,7 +78,7 @@ for await (const entry of decodedStream) {
 }
 ```
 
-### Compression/Decompression
+### Compression/Decompression (gzip)
 
 ```typescript
 import { createGzipDecoder, unpackTar } from '@modern-tar/core';

@@ -6,14 +6,14 @@ import type { TarHeader } from "@modern-tar/core";
 import { createTarPacker } from "@modern-tar/core";
 
 /**
- * Options for packing directories into tar archives.
+ * Configuration options for packing directories into tar archives.
  */
 export interface PackOptions {
-	/** Follow symlinks instead of archiving them as symlinks */
+	/** Follow symlinks instead of storing them as symlinks (default: false) */
 	dereference?: boolean;
-	/** Filter function to determine which files to include */
+	/** Filter function to include/exclude files (return false to exclude) */
 	filter?: (path: string, stat: Stats) => boolean;
-	/** Transform function to modify headers before packing */
+	/** Transform function to modify tar headers before packing */
 	map?: (header: TarHeader) => TarHeader;
 }
 
@@ -52,11 +52,14 @@ async function* walk(directoryPath: string, options: PackOptions) {
 }
 
 /**
- * Pack a directory into a Node.js Readable stream containing tar archive bytes.
+ * Pack a directory into a Node.js [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable) stream containing tar archive bytes.
+ *
+ * Recursively walks the directory structure and creates tar entries for files, directories,
+ * symlinks, and hardlinks.
  *
  * @param directoryPath - Path to directory to pack
- * @param options - Packing options
- * @returns Node.js Readable stream of tar archive bytes
+ * @param options - Optional packing configuration
+ * @returns Node.js [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable) stream of tar archive bytes
  *
  * @example
  * ```typescript
@@ -64,13 +67,15 @@ async function* walk(directoryPath: string, options: PackOptions) {
  * import { createWriteStream } from 'node:fs';
  * import { pipeline } from 'node:stream/promises';
  *
- * const tarStream = packTar('/my/directory');
- * const fileStream = createWriteStream('archive.tar');
- * await pipeline(tarStream, fileStream);
+ * // Basic directory packing
+ * const tarStream = packTar('/home/user/project');
+ * await pipeline(tarStream, createWriteStream('project.tar'));
  *
- * // With filtering
- * const filteredStream = packTar('/my/directory', {
- *   filter: (filePath, stat) => !filePath.includes('node_modules')
+ * // With filtering and transformation
+ * const filteredStream = packTar('/my/project', {
+ *   filter: (path, stats) => !path.includes('node_modules'),
+ *   map: (header) => ({ ...header, uname: 'builder' }),
+ *   dereference: true  // Follow symlinks
  * });
  * ```
  */
