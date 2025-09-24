@@ -133,12 +133,14 @@ describe("options fs", () => {
 			const files = await fs.readdir(extractDir, { recursive: true });
 			const sortedFiles = files.sort();
 
-			expect(sortedFiles).toEqual([
+			const expectedFiles = [
 				"file1.txt",
 				"link.txt",
 				"subdir",
-				"subdir/nested.txt",
-			]);
+				path.join("subdir", "nested.txt"),
+			];
+
+			expect(sortedFiles).toEqual(expectedFiles.sort());
 
 			// Verify symlink was dereferenced
 			const linkStat = await fs.lstat(path.join(extractDir, "link.txt"));
@@ -165,7 +167,12 @@ describe("options fs", () => {
 			await pipeline(packStream, unpackStream);
 
 			const fileStat = await fs.stat(path.join(extractDir, "test.txt"));
-			expect(fileStat.mode & 0o777).toBe(0o600);
+			if (os.platform() !== "win32") {
+				expect(fileStat.mode & 0o777).toBe(0o600);
+			} else {
+				// Windows handles permissions differently
+				expect(fileStat.mode & 0o777).toBeGreaterThan(0);
+			}
 		});
 
 		it("uses dmode to override directory permissions", async () => {
@@ -184,7 +191,12 @@ describe("options fs", () => {
 			await pipeline(packStream, unpackStream);
 
 			const dirStat = await fs.stat(path.join(extractDir, "subdir"));
-			expect(dirStat.mode & 0o777).toBe(0o700);
+			if (os.platform() !== "win32") {
+				expect(dirStat.mode & 0o777).toBe(0o700);
+			} else {
+				// Windows handles permissions differently
+				expect(dirStat.mode & 0o777).toBeGreaterThan(0);
+			}
 		});
 
 		it("inherits core strip option", async () => {
@@ -267,7 +279,12 @@ describe("options fs", () => {
 
 			// Check permissions
 			const fileStat = await fs.stat(path.join(extractDir, "HELLO.TXT"));
-			expect(fileStat.mode & 0o777).toBe(0o600);
+			if (os.platform() !== "win32") {
+				expect(fileStat.mode & 0o777).toBe(0o600);
+			} else {
+				// Windows handles permissions differently
+				expect(fileStat.mode & 0o777).toBeGreaterThan(0);
+			}
 		});
 
 		it("preserves original permissions when fmode/dmode not specified", async () => {
@@ -289,8 +306,14 @@ describe("options fs", () => {
 			const fileStat = await fs.stat(path.join(extractDir, "exec.sh"));
 			const dirStat = await fs.stat(path.join(extractDir, "restricted"));
 
-			expect(fileStat.mode & 0o777).toBe(0o755);
-			expect(dirStat.mode & 0o777).toBe(0o700);
+			if (os.platform() !== "win32") {
+				expect(fileStat.mode & 0o777).toBe(0o755);
+				expect(dirStat.mode & 0o777).toBe(0o700);
+			} else {
+				// Windows handles permissions differently
+				expect(fileStat.mode & 0o777).toBeGreaterThan(0);
+				expect(dirStat.mode & 0o777).toBeGreaterThan(0);
+			}
 		});
 	});
 
