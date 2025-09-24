@@ -52,86 +52,88 @@ export function packTar(
 	directoryPath: string,
 	options: PackOptionsFS = {},
 ): Readable {
+	const seenInodes = new Map<number, string>();
+
+	async function* walk(
+		currentPath: string, // The relative path inside the tar archive
+	): AsyncGenerator<Uint8Array | Buffer> {
+		const fullPath = path.join(directoryPath, currentPath);
+		const stat = await (options.dereference
+			? fs.stat(fullPath)
+			: fs.lstat(fullPath));
+
+		if (options.filter?.(fullPath, stat) === false) {
+			return;
+		}
+
+		// Header creation logic remains largely the same
+		const header: TarHeader = {
+			name: currentPath.replace(/\\/g, "/"),
+			mode: stat.mode,
+			mtime: stat.mtime,
+			uid: stat.uid,
+			gid: stat.gid,
+			size: 0,
+			type: "file",
+		};
+
+		// Handle hardlinks
+		if (stat.isFile() && stat.nlink > 1) {
+			const linkTarget = seenInodes.get(stat.ino);
+			if (linkTarget) {
+				header.type = "link";
+				header.linkname = linkTarget;
+			} else {
+				seenInodes.set(stat.ino, header.name);
+			}
+		}
+
+		// Handle other file types
+		if (header.type !== "link") {
+			if (stat.isDirectory()) {
+				header.type = "directory";
+				header.name = header.name.endsWith("/")
+					? header.name
+					: `${header.name}/`;
+			} else if (stat.isSymbolicLink()) {
+				header.type = "symlink";
+				header.linkname = await fs.readlink(fullPath);
+			} else if (stat.isFile()) {
+				header.size = stat.size;
+			}
+		}
+
+		const finalHeader = options.map ? options.map(header) : header;
+		yield createTarHeader(finalHeader);
+
+		// Yield file content and padding
+		if (finalHeader.type === "file" && finalHeader.size > 0) {
+			yield* createReadStream(fullPath);
+			const paddingSize =
+				(BLOCK_SIZE - (finalHeader.size % BLOCK_SIZE)) % BLOCK_SIZE;
+			if (paddingSize > 0) {
+				yield Buffer.alloc(paddingSize); // Using Buffer.alloc is idiomatic in Node.js
+			}
+		}
+
+		// If it's a directory, recurse into its children
+		if (stat.isDirectory()) {
+			const dirents = await fs.readdir(fullPath);
+			for (const dirent of dirents) {
+				yield* walk(path.join(currentPath, dirent));
+			}
+		}
+	}
+
 	return Readable.from(
 		(async function* () {
-			const seenInodes = new Map<number, string>();
-			// Start with the contents of the directory, not the directory itself.
-			const queue: Array<[string, string]> = (
-				await fs.readdir(directoryPath)
-			).map((name) => [path.join(directoryPath, name), name]);
-
-			while (queue.length > 0) {
-				// biome-ignore lint/style/noNonNullAssertion: Length checked above.
-				const [fullPath, relativePath] = queue.shift()!;
-				const stat = await (options.dereference
-					? fs.stat(fullPath)
-					: fs.lstat(fullPath));
-
-				if (options.filter?.(fullPath, stat) === false) {
-					continue;
-				}
-
-				const header: TarHeader = {
-					name: relativePath.replace(/\\/g, "/"),
-					mode: stat.mode,
-					mtime: stat.mtime,
-					uid: stat.uid,
-					gid: stat.gid,
-					size: 0,
-					type: "file",
-				};
-
-				// Handle hardlinks
-				if (stat.isFile() && stat.nlink > 1) {
-					const linkTarget = seenInodes.get(stat.ino);
-					if (linkTarget) {
-						header.type = "link";
-						header.linkname = linkTarget;
-					} else {
-						seenInodes.set(stat.ino, header.name);
-					}
-				}
-
-				// Handle directories and symlinks
-				if (header.type !== "link") {
-					if (stat.isDirectory()) {
-						header.type = "directory";
-						header.name = header.name.endsWith("/")
-							? header.name
-							: `${header.name}/`;
-
-						const dirents = await fs.readdir(fullPath);
-
-						for (const dirent of dirents) {
-							queue.push([
-								path.join(fullPath, dirent),
-								path.join(relativePath, dirent),
-							]);
-						}
-					} else if (stat.isSymbolicLink()) {
-						header.type = "symlink";
-						header.linkname = await fs.readlink(fullPath);
-					} else if (stat.isFile()) {
-						header.size = stat.size;
-					}
-				}
-
-				const finalHeader = options.map ? options.map(header) : header;
-				yield createTarHeader(finalHeader);
-
-				// For files, stream the content followed by padding to the next block.
-				if (finalHeader.type === "file" && finalHeader.size > 0) {
-					yield* createReadStream(fullPath);
-					const paddingSize =
-						(BLOCK_SIZE - (finalHeader.size % BLOCK_SIZE)) % BLOCK_SIZE;
-					if (paddingSize > 0) {
-						yield new Uint8Array(paddingSize);
-					}
-				}
+			const topLevelDirents = await fs.readdir(directoryPath);
+			for (const dirent of topLevelDirents) {
+				yield* walk(dirent);
 			}
 
-			// End with two zero-filled blocks once all entries are processed, as per tar spec.
-			yield new Uint8Array(BLOCK_SIZE * 2);
+			// End with two zero-filled blocks
+			yield Buffer.alloc(BLOCK_SIZE * 2);
 		})(),
 	);
 }
