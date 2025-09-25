@@ -38,20 +38,24 @@ jobs:
           VERSION=${TAG_NAME#v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Update package.json version
-        run: |
-          npm version ${{ steps.extract_version.outputs.version }} --no-git-tag-version
-
       - name: Configure Git
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
+      - name: Switch to main branch
+        run: |
+          git checkout main
+
+      - name: Update package.json version
+        run: |
+          npm version ${{ steps.extract_version.outputs.version }} --no-git-tag-version
+
       - name: Commit version bump
         run: |
           git add package.json
           git commit -m "chore: bump version to ${{ steps.extract_version.outputs.version }}"
-          git push
+          git push origin main
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
