@@ -1,4 +1,4 @@
-import { createWriteStream } from "node:fs";
+import { createWriteStream, type Stats } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
@@ -79,11 +79,10 @@ export function unpackTar(
 
 	const processingPromise = (async () => {
 		const resolvedDestDir = path.resolve(directoryPath);
-		const createdDirs = new Set<string>();
+		const validatedDirs = new Set<string>([resolvedDestDir]);
 
 		// Ensure destination directory exists upfront
 		await fs.mkdir(resolvedDestDir, { recursive: true });
-		createdDirs.add(resolvedDestDir);
 
 		const entryStream = readable
 			.pipeThrough(createTarDecoder())
@@ -106,31 +105,26 @@ export function unpackTar(
 
 				const outPath = path.join(resolvedDestDir, header.name);
 
-				if (!outPath.startsWith(resolvedDestDir)) {
-					throw new Error(
-						`Path traversal attempt detected for entry "${header.name}".`,
-					);
-				}
+				validateBounds(
+					outPath,
+					resolvedDestDir,
+					`Path traversal attempt detected for entry "${header.name}".`,
+				);
 
 				const parentDir = path.dirname(outPath);
-				// Only create a directory if it hasn't been seen before
-				if (!createdDirs.has(parentDir)) {
-					await fs.mkdir(parentDir, { recursive: true });
-					createdDirs.add(parentDir);
-				}
+
+				await validatePath(parentDir, resolvedDestDir, validatedDirs);
+				await fs.mkdir(parentDir, { recursive: true });
 
 				switch (header.type) {
 					case "directory": {
 						const mode = options.dmode ?? header.mode;
-						// Check if the directory was already created as a parent of another entry
-						if (createdDirs.has(outPath) && mode) {
-							// If so, just ensure the permissions are correct
-							await fs.chmod(outPath, mode);
-						} else {
-							// Otherwise, create it with the correct permissions
-							await fs.mkdir(outPath, { recursive: true, mode });
-							createdDirs.add(outPath);
-						}
+						await fs.mkdir(outPath, {
+							recursive: true,
+							mode,
+						});
+
+						validatedDirs.add(outPath);
 						break;
 					}
 
@@ -150,11 +144,11 @@ export function unpackTar(
 						if (options.validateSymlinks ?? true) {
 							const symlinkDir = path.dirname(outPath);
 							const resolvedTarget = path.resolve(symlinkDir, header.linkname);
-							if (!resolvedTarget.startsWith(resolvedDestDir)) {
-								throw new Error(
-									`Symlink target "${header.linkname}" points outside the extraction directory.`,
-								);
-							}
+							validateBounds(
+								resolvedTarget,
+								resolvedDestDir,
+								`Symlink target "${header.linkname}" points outside the extraction directory.`,
+							);
 						}
 						await fs.symlink(header.linkname, outPath);
 						break;
@@ -163,18 +157,30 @@ export function unpackTar(
 					case "link": {
 						if (!header.linkname) break;
 
-						const resolvedLinkTarget = path.resolve(
-							resolvedDestDir,
-							header.linkname,
-						);
-						if (!resolvedLinkTarget.startsWith(resolvedDestDir)) {
+						// Check for absolute paths in hardlink target
+						if (path.isAbsolute(header.linkname)) {
 							throw new Error(
 								`Hardlink target "${header.linkname}" points outside the extraction directory.`,
 							);
 						}
 
-						await fs.link(resolvedLinkTarget, outPath);
+						const resolvedLinkTarget = path.resolve(
+							resolvedDestDir,
+							header.linkname,
+						);
+						validateBounds(
+							resolvedLinkTarget,
+							resolvedDestDir,
+							`Hardlink target "${header.linkname}" points outside the extraction directory.`,
+						);
 
+						await validatePath(
+							path.dirname(resolvedLinkTarget),
+							resolvedDestDir,
+							validatedDirs,
+						);
+
+						await fs.link(resolvedLinkTarget, outPath);
 						break;
 					}
 				}
@@ -199,4 +205,83 @@ export function unpackTar(
 	});
 
 	return writable;
+}
+
+/**
+ * Recursively validates that each item of the given path exists and is a directory or
+ * a safe symlink.
+ *
+ * We need to call this for each path component to ensure that no symlinks escape the
+ * target directory.
+ */
+async function validatePath(
+	currentPath: string,
+	root: string,
+	cache: Set<string>,
+) {
+	// If the path is the root or is already in our cache, we're done.
+	if (currentPath === root || cache.has(currentPath)) {
+		return;
+	}
+
+	let stat: Stats;
+	try {
+		stat = await fs.lstat(currentPath);
+	} catch (err) {
+		if (
+			err instanceof Error &&
+			"code" in err &&
+			(err.code === "ENOENT" || err.code === "EPERM")
+		) {
+			// Path component doesn't exist, so we must validate its parent.
+			await validatePath(path.dirname(currentPath), root, cache);
+			cache.add(currentPath);
+
+			return;
+		}
+
+		throw err;
+	}
+
+	// If a component is a directory, validate its parent and then cache it.
+	if (stat.isDirectory()) {
+		await validatePath(path.dirname(currentPath), root, cache);
+		cache.add(currentPath);
+
+		return;
+	}
+
+	// If we encounter a symlink, we need to check where it points.
+	if (stat.isSymbolicLink()) {
+		const realPath = await fs.realpath(currentPath);
+
+		// Check if the symlink target is within our root directory.
+		validateBounds(
+			realPath,
+			root,
+			`Path traversal attempt detected: symlink "${currentPath}" points outside the extraction directory.`,
+		);
+
+		// Validate the parent and cache this symlink as safe
+		await validatePath(path.dirname(currentPath), root, cache);
+		cache.add(currentPath);
+
+		return;
+	}
+
+	// Any other file type is an invalid component for a directory path.
+	throw new Error(
+		`Path traversal attempt detected: "${currentPath}" is not a valid directory component.`,
+	);
+}
+
+/* Validates that the given target path is within the destination directory and does not escape. */
+function validateBounds(
+	targetPath: string,
+	destDir: string,
+	errorMessage: string,
+): void {
+	if (!(targetPath === destDir || targetPath.startsWith(destDir + path.sep))) {
+		throw new Error(errorMessage);
+	}
 }
