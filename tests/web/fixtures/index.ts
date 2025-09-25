@@ -22,6 +22,7 @@ export const BASE_256_SIZE = join(__dirname, "base-256-size.tar");
 export const HUGE = join(__dirname, "huge.tar.gz");
 export const LATIN1_TAR = join(__dirname, "latin1.tar");
 export const INCOMPLETE_TAR = join(__dirname, "incomplete.tar");
+
 // Created using gnu tar: tar cf gnu-incremental.tar --format gnu --owner=myuser:12345 --group=mygroup:67890 test.txt
 export const GNU_TAR = join(__dirname, "gnu.tar");
 // Created using gnu tar: tar cf gnu-incremental.tar -G --format gnu --owner=myuser:12345 --group=mygroup:67890 test.txt
@@ -30,3 +31,10 @@ export const GNU_INCREMENTAL_TAR = join(__dirname, "gnu-incremental.tar");
 export const UNKNOWN_FORMAT = join(__dirname, "unknown-format.tar");
 // Created using gnu tar: tar cf v7.tar --format v7 test.txt
 export const V7_TAR = join(__dirname, "v7.tar");
+export const INVALID_TAR = join(__dirname, "invalid.tar");
+
+// Real-world large packages for complex testing
+export const LODASH_TGZ = join(__dirname, "lodash-4.17.21.tgz");
+export const NEXT_SWC_TGZ = join(__dirname, "next-swc-linux-14.2.15.tgz");
+export const SHARP_TGZ = join(__dirname, "sharp-0.33.5.tgz");
+export const ELECTRON_TGZ = join(__dirname, "electron-33.0.2.tgz");
