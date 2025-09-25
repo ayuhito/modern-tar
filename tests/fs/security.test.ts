@@ -1202,5 +1202,147 @@ describe("security", () => {
 				await expect(fs.access(evilPath)).rejects.toThrow();
 			},
 		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents Unicode normalization cache poisoning",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const evilDir = path.join(tmpDir, "evil-output");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(evilDir, { recursive: true });
+
+				// Two different string representations for the same visual directory name "café"
+				const dirNamePrecomposed = "caf\u00e9/"; // NFC: é as single character (U+00E9)
+				const dirNameDecomposed = "cafe\u0301/"; // NFD: e + combining acute accent (U+0065 U+0301)
+
+				// Verify these are different strings but visually identical
+				expect(dirNamePrecomposed).not.toBe(dirNameDecomposed);
+				expect(dirNamePrecomposed.normalize("NFKD")).toBe(
+					dirNameDecomposed.normalize("NFKD"),
+				);
+
+				const entries: TarEntry[] = [
+					// Create the directory with the precomposed form. This will be cached as safe.
+					{
+						header: {
+							name: dirNamePrecomposed,
+							type: "directory",
+							mode: 0o755,
+							size: 0,
+						},
+					},
+					// Overwrite the directory with a symlink using the decomposed form.
+					// The cache invalidation will fail because the string keys are different.
+					{
+						header: {
+							name: dirNameDecomposed,
+							type: "symlink",
+							linkname: `../../${path.basename(evilDir)}`, // Points outside
+							size: 0,
+						},
+					},
+					// Write a file into the original (precomposed) directory name.
+					// The code will trust the cached entry and write through the symlink.
+					{
+						header: {
+							name: `${dirNamePrecomposed}malicious.txt`,
+							type: "file",
+							size: 5,
+						},
+						body: "pwned",
+					},
+				];
+
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir, { validateSymlinks: false });
+
+				// The fixed code should properly normalize paths and prevent cache poisoning
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow();
+
+				// Verify no file was created outside the extraction directory
+				const maliciousPath = path.join(evilDir, "malicious.txt");
+				await expect(fs.access(maliciousPath)).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"properly normalizes Unicode paths in cache operations",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				// Test various Unicode normalization forms
+				const testCases = [
+					{
+						name: "Unicode NFC vs NFD",
+						path1: "test\u00e9/", // NFC: é as single character
+						path2: "teste\u0301/", // NFD: e + combining acute accent
+					},
+					{
+						name: "Unicode NFKC vs NFKD",
+						path1: "test\u2126/", // NFKC: Ohm sign (Ω)
+						path2: "test\u03a9/", // NFKD: Greek capital omega (Ω)
+					},
+				];
+
+				for (const testCase of testCases) {
+					// These should be treated as the same path after normalization
+					expect(testCase.path1.normalize("NFKD")).toBe(
+						testCase.path2.normalize("NFKD"),
+					);
+
+					const entries: TarEntry[] = [
+						{
+							header: {
+								name: testCase.path1,
+								type: "directory",
+								mode: 0o755,
+								size: 0,
+							},
+						},
+						{
+							header: {
+								name: `${testCase.path1}file.txt`,
+								type: "file",
+								size: 4,
+							},
+							body: "test",
+						},
+						{
+							header: {
+								name: `${testCase.path2}file2.txt`,
+								type: "file",
+								size: 4,
+							},
+							body: "test",
+						},
+					];
+
+					const tarBuffer = await packTar(entries);
+					const maliciousTar = Readable.from([tarBuffer]);
+					const unpackStream = unpackTar(extractDir);
+
+					// This should work correctly with proper Unicode normalization
+					await expect(
+						pipeline(maliciousTar, unpackStream),
+					).resolves.not.toThrow();
+
+					// Both files should be created in the same normalized directory
+					const normalizedPath = testCase.path1.normalize("NFKD");
+					const file1Path = path.join(extractDir, normalizedPath, "file.txt");
+					const file2Path = path.join(extractDir, normalizedPath, "file2.txt");
+
+					await expect(fs.access(file1Path)).resolves.not.toThrow();
+					await expect(fs.access(file2Path)).resolves.not.toThrow();
+
+					// Clean up for next iteration
+					await fs.rm(path.join(extractDir, normalizedPath), {
+						recursive: true,
+						force: true,
+					});
+				}
+			},
+		);
 	});
 });

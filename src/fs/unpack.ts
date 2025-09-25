@@ -78,7 +78,7 @@ export function unpackTar(
 	});
 
 	const processingPromise = (async () => {
-		const resolvedDestDir = path.resolve(directoryPath);
+		const resolvedDestDir = normalizePath(path.resolve(directoryPath));
 		const validatedDirs = new Set<string>([resolvedDestDir]);
 
 		// Ensure destination directory exists upfront
@@ -95,15 +95,16 @@ export function unpackTar(
 				if (done) break;
 
 				const { header } = entry;
+				const normalizedName = normalizePath(header.name);
 
 				// Check for absolute paths in the entry name
-				if (path.isAbsolute(header.name)) {
+				if (path.isAbsolute(normalizedName)) {
 					throw new Error(
 						`Path traversal attempt detected for entry "${header.name}".`,
 					);
 				}
 
-				const outPath = path.join(resolvedDestDir, header.name);
+				const outPath = path.join(resolvedDestDir, normalizedName);
 
 				validateBounds(
 					outPath,
@@ -152,9 +153,16 @@ export function unpackTar(
 						}
 						await fs.symlink(header.linkname, outPath);
 
-						// Invalidate any cached directory entry for this path, which prevents a
-						// cache poisoning attack where a directory is replaced by a symlink.
-						validatedDirs.delete(outPath);
+						// This prevents cache poisoning attacks where a directory is replaced by a symlink.
+						//
+						// Invalidate the whole cache on Windows, because Windows normalizes paths aggressively.
+						// Other platforms, we can just remove the specific directory from the cache.
+						if (process.platform === "win32") {
+							validatedDirs.clear();
+							validatedDirs.add(resolvedDestDir);
+						} else {
+							validatedDirs.delete(outPath);
+						}
 
 						break;
 					}
@@ -162,8 +170,10 @@ export function unpackTar(
 					case "link": {
 						if (!header.linkname) break;
 
+						const normalizedLinkname = normalizePath(header.linkname);
+
 						// Check for absolute paths in hardlink target
-						if (path.isAbsolute(header.linkname)) {
+						if (path.isAbsolute(normalizedLinkname)) {
 							throw new Error(
 								`Hardlink target "${header.linkname}" points outside the extraction directory.`,
 							);
@@ -171,7 +181,7 @@ export function unpackTar(
 
 						const resolvedLinkTarget = path.resolve(
 							resolvedDestDir,
-							header.linkname,
+							normalizedLinkname,
 						);
 						validateBounds(
 							resolvedLinkTarget,
@@ -224,14 +234,16 @@ async function validatePath(
 	root: string,
 	cache: Set<string>,
 ) {
+	const normalizedPath = normalizePath(currentPath);
+
 	// If the path is the root or is already in our cache, we're done.
-	if (currentPath === root || cache.has(currentPath)) {
+	if (normalizedPath === root || cache.has(normalizedPath)) {
 		return;
 	}
 
 	let stat: Stats;
 	try {
-		stat = await fs.lstat(currentPath);
+		stat = await fs.lstat(normalizedPath);
 	} catch (err) {
 		if (
 			err instanceof Error &&
@@ -239,8 +251,8 @@ async function validatePath(
 			(err.code === "ENOENT" || err.code === "EPERM")
 		) {
 			// Path component doesn't exist, so we must validate its parent.
-			await validatePath(path.dirname(currentPath), root, cache);
-			cache.add(currentPath);
+			await validatePath(path.dirname(normalizedPath), root, cache);
+			cache.add(normalizedPath);
 
 			return;
 		}
@@ -250,15 +262,15 @@ async function validatePath(
 
 	// If a component is a directory, validate its parent and then cache it.
 	if (stat.isDirectory()) {
-		await validatePath(path.dirname(currentPath), root, cache);
-		cache.add(currentPath);
+		await validatePath(path.dirname(normalizedPath), root, cache);
+		cache.add(normalizedPath);
 
 		return;
 	}
 
 	// If we encounter a symlink, we need to check where it points.
 	if (stat.isSymbolicLink()) {
-		const realPath = await fs.realpath(currentPath);
+		const realPath = await fs.realpath(normalizedPath);
 
 		// Check if the symlink target is within our root directory.
 		validateBounds(
@@ -268,8 +280,8 @@ async function validatePath(
 		);
 
 		// Validate the parent and cache this symlink as safe
-		await validatePath(path.dirname(currentPath), root, cache);
-		cache.add(currentPath);
+		await validatePath(path.dirname(normalizedPath), root, cache);
+		cache.add(normalizedPath);
 
 		return;
 	}
@@ -286,7 +298,23 @@ function validateBounds(
 	destDir: string,
 	errorMessage: string,
 ): void {
-	if (!(targetPath === destDir || targetPath.startsWith(destDir + path.sep))) {
+	const normalizedTarget = normalizePath(targetPath);
+	if (
+		!(
+			normalizedTarget === destDir ||
+			normalizedTarget.startsWith(destDir + path.sep)
+		)
+	) {
 		throw new Error(errorMessage);
 	}
+}
+
+/**
+ * Normalizes a file path to prevent Unicode-based security vulnerabilities.
+ *
+ * This prevents cache poisoning attacks where different Unicode representations
+ * of the same visual path (e.g., "café" vs "cafe´") could bypass validation.
+ */
+function normalizePath(pathStr: string): string {
+	return pathStr.normalize("NFKD");
 }
