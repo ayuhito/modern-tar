@@ -14,30 +14,33 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [18, 20, 22, 24]
+
     name: Node ${{ matrix.node-version }} (${{ matrix.os }})
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
       - name: Setup Node ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Update npm
-        run: npm install -g npm@10
-
       - name: Install
-        run: npm install
+        run: pnpm install
 
       - name: Build
-        run: npm run build
+        run: pnpm run build
 
       - name: Typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Test
-        run: npm run test
+        run: pnpm run test
 
   test-bun:
     runs-on: ${{ matrix.os }}
