@@ -167,7 +167,8 @@ const extractStream = unpackTar('./output', {
 
 	// Filesystem-specific options
 	fmode: 0o644, // Override file permissions
-	dmode: 0o755  // Override directory permissions
+	dmode: 0o755, // Override directory permissions
+	maxDepth: 50  // Limit extraction depth for security (default: 1024)
 });
 
 await pipeline(sourceStream, extractStream);
@@ -492,6 +493,14 @@ interface UnpackOptionsFS extends UnpackOptions {
    * @default true
    */
   validateSymlinks?: boolean;
+  /**
+	 * The maximum depth of paths to extract. Prevents Denial of Service (DoS) attacks
+	 * from malicious archives with deeply nested directories.
+	 *
+	 * Set to `Infinity` to disable depth checking (not recommended for untrusted archives).
+	 * @default 1024
+	 */
+  maxDepth?: number;
 }
 ```
 

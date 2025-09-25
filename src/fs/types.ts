@@ -33,6 +33,14 @@ export interface UnpackOptionsFS extends UnpackOptions {
 	 * @default true
 	 */
 	validateSymlinks?: boolean;
+	/**
+	 * The maximum depth of paths to extract. Prevents Denial of Service (DoS) attacks
+	 * from malicious archives with deeply nested directories.
+	 *
+	 * Set to `Infinity` to disable depth checking (not recommended for untrusted archives).
+	 * @default 1024
+	 */
+	maxDepth?: number;
 }
 
 /** Describes a file on the local filesystem to be added to the archive. */

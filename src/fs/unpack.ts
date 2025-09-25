@@ -90,12 +90,26 @@ export function unpackTar(
 
 		const reader = entryStream.getReader();
 		try {
+			// Prevent DoS attacks with deeply nested paths
+			const maxDepth = options.maxDepth ?? 1024;
+
 			while (true) {
 				const { done, value: entry } = await reader.read();
 				if (done) break;
 
 				const { header } = entry;
 				const normalizedName = normalizePath(header.name);
+
+				// Check path depth to prevent DoS attacks
+				if (maxDepth !== Infinity) {
+					const depth = normalizedName.split("/").length;
+
+					if (depth > maxDepth) {
+						throw new Error(
+							`Path depth of entry "${header.name}" (${depth}) exceeds the maximum allowed depth of ${maxDepth}.`,
+						);
+					}
+				}
 
 				// Check for absolute paths in the entry name
 				if (path.isAbsolute(normalizedName)) {
