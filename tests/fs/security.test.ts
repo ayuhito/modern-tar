@@ -787,7 +787,6 @@ describe("security", () => {
 				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
-				// With the fix, this should reject the promise
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
 					'Symlink target "../extract-evil/malicious-file.txt" points outside the extraction directory.',
 				);
@@ -814,7 +813,7 @@ describe("security", () => {
 				const symlinkPath = path.join(extractDir, "escape");
 				await fs.symlink("../sibling", symlinkPath);
 
-				// Now create tar with hardlink through the existing symlink
+				// Create tar with hardlink through the existing symlink
 				const entries: TarEntry[] = [
 					{
 						header: {
@@ -840,6 +839,7 @@ describe("security", () => {
 				expect(content).toBe("original content");
 			},
 		);
+
 		it.skipIf(process.platform === "win32")(
 			"prevents CVE-2025-48387 multi-stage symlink+hardlink attack",
 			async () => {
@@ -854,7 +854,7 @@ describe("security", () => {
 
 				// Replicate the exact CVE PoC sequence
 				const entries: TarEntry[] = [
-					// Stage 1: Create root symlink with deep noop path + traversal
+					// Create root symlink with deep noop path + traversal
 					{
 						header: {
 							name: "root",
@@ -867,7 +867,7 @@ describe("security", () => {
 							linkname: "noop/".repeat(15) + "../".repeat(15),
 						},
 					},
-					// Stage 2: Create noop symlink pointing to current directory
+					// Create noop symlink pointing to current directory
 					{
 						header: {
 							name: "noop",
@@ -880,7 +880,7 @@ describe("security", () => {
 							linkname: ".",
 						},
 					},
-					// Stage 3: Create hardlink through the symlink chain to external file
+					// Create hardlink through the symlink chain to external file
 					{
 						header: {
 							name: "hardflag",
@@ -893,7 +893,7 @@ describe("security", () => {
 							linkname: `root${flagDir}/flag`,
 						},
 					},
-					// Stage 4: Overwrite external file via hardlink
+					// Overwrite external file via hardlink
 					{
 						header: {
 							name: "hardflag",
@@ -1091,6 +1091,115 @@ describe("security", () => {
 
 				const content = await fs.readFile(targetFile, "utf8");
 				expect(content).toBe("important data");
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents directory symlink overwrite cache poisoning (CVE-2021-32804)",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const outsideDir = path.join(tmpDir, "outside");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(outsideDir, { recursive: true });
+
+				// This test simulates the exact CVE-2021-32804 attack pattern:
+				// - Create a directory (gets cached as safe)
+				// - Remove it and create a symlink with same name (cache not invalidated)
+				// - Write file through symlink (cache bypass allows traversal)
+
+				// Create the directory directly to simulate it being cached
+				const attackDir = path.join(extractDir, "attack-dir");
+				await fs.mkdir(attackDir, { recursive: true });
+
+				// Remove it and create a symlink pointing outside
+				await fs.rmdir(attackDir);
+				await fs.symlink("../outside", attackDir);
+
+				// Create an archive that tries to write through this symlink
+				const entries: TarEntry[] = [
+					{
+						header: {
+							name: "attack-dir/malicious-file.txt",
+							type: "file",
+							size: 13,
+						},
+						body: "pwned content",
+					},
+				];
+
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir, { validateSymlinks: false });
+
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+					/Path traversal attempt detected/,
+				);
+
+				// Verify that the malicious file was NOT created outside
+				const maliciousPath = path.join(outsideDir, "malicious-file.txt");
+				await expect(fs.access(maliciousPath)).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents symlink cache poisoning with manual directory removal",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const targetDir = path.join(tmpDir, "target");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(targetDir, { recursive: true });
+
+				// Create archive with directory, then symlink at different path,
+				// then try to write through a path that could be cached
+				const entries: TarEntry[] = [
+					{
+						header: {
+							name: "legit-dir/",
+							type: "directory",
+							mode: 0o755,
+							size: 0,
+						},
+					},
+					{
+						header: {
+							name: "legit-dir/subdir/",
+							type: "directory",
+							mode: 0o755,
+							size: 0,
+						},
+					},
+					// Create symlink that could potentially be cached as a directory
+					{
+						header: {
+							name: "legit-dir/escape",
+							type: "symlink",
+							linkname: "../../target",
+							size: 0,
+						},
+					},
+					// Try to write through the symlinked path
+					{
+						header: {
+							name: "legit-dir/escape/evil.txt",
+							type: "file",
+							size: 10,
+						},
+						body: "malicious!",
+					},
+				];
+
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir, { validateSymlinks: false });
+
+				// Should be blocked by path validation
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+					/Path traversal attempt detected/,
+				);
+
+				// Verify no file created in target directory
+				const evilPath = path.join(targetDir, "evil.txt");
+				await expect(fs.access(evilPath)).rejects.toThrow();
 			},
 		);
 	});

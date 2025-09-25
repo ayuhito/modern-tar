@@ -151,6 +151,11 @@ export function unpackTar(
 							);
 						}
 						await fs.symlink(header.linkname, outPath);
+
+						// Invalidate any cached directory entry for this path, which prevents a
+						// cache poisoning attack where a directory is replaced by a symlink.
+						validatedDirs.delete(outPath);
+
 						break;
 					}
 
