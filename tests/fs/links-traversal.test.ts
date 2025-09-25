@@ -67,7 +67,7 @@ describe("symlink traversal", () => {
 
 			// This should throw an error
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'Symlink target "../../etc/passwd" points outside of the extraction directory.',
+				'Symlink target "../../etc/passwd" points outside the extraction directory.',
 			);
 		},
 	);
@@ -84,7 +84,7 @@ describe("symlink traversal", () => {
 
 			// This should throw an error
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'Symlink target "/etc/passwd" points outside of the extraction directory.',
+				'Symlink target "/etc/passwd" points outside the extraction directory.',
 			);
 		},
 	);
@@ -191,7 +191,7 @@ describe("symlink traversal", () => {
 
 			// This should throw an error
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				"points outside of the extraction directory",
+				"points outside the extraction directory",
 			);
 		},
 	);
@@ -235,7 +235,7 @@ describe("symlink traversal", () => {
 
 			// This should throw an error even for nested symlinks
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				"points outside of the extraction directory",
+				"points outside the extraction directory",
 			);
 		},
 	);
@@ -276,7 +276,7 @@ describe("symlink traversal", () => {
 
 			// This should throw an error as the resolved path goes outside
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				"points outside of the extraction directory",
+				"points outside the extraction directory",
 			);
 		},
 	);
@@ -294,7 +294,7 @@ describe("symlink traversal", () => {
 
 			// This should throw an error since validation is enabled by default
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'Symlink target "../../etc/passwd" points outside of the extraction directory.',
+				'Symlink target "../../etc/passwd" points outside the extraction directory.',
 			);
 		},
 	);
