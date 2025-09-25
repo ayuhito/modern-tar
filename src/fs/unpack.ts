@@ -60,7 +60,18 @@ export function unpackTar(
 
 		for await (const entry of entryStream) {
 			const header = entry.header;
-			const outPath = path.join(directoryPath, header.name);
+			const outPath = path.resolve(directoryPath, header.name);
+
+			// Prevent path traversal attacks that escape the target directory.
+			if (
+				!outPath.startsWith(resolvedDestDir + path.sep) &&
+				outPath !== resolvedDestDir
+			) {
+				throw new Error(
+					`Path traversal attempt detected for entry "${header.name}".`,
+				);
+			}
+
 			const parentDir = path.dirname(outPath);
 
 			// Only create a directory if it hasn't been seen before
@@ -116,7 +127,22 @@ export function unpackTar(
 
 				case "link":
 					if (header.linkname) {
-						await fs.link(path.join(directoryPath, header.linkname), outPath);
+						const resolvedLinkTarget = path.resolve(
+							directoryPath,
+							header.linkname,
+						);
+
+						// Prevent path traversal attacks via hardlinks.
+						if (
+							!resolvedLinkTarget.startsWith(resolvedDestDir + path.sep) &&
+							resolvedLinkTarget !== resolvedDestDir
+						) {
+							throw new Error(
+								`Hardlink target "${header.linkname}" points outside of the extraction directory.`,
+							);
+						}
+
+						await fs.link(resolvedLinkTarget, outPath);
 					}
 
 					break;
