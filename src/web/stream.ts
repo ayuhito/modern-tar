@@ -227,8 +227,15 @@ export function createTarDecoder(): TransformStream<
 		},
 
 		flush(controller) {
-			if (currentEntry)
-				controller.error(new Error("Tar archive is truncated."));
+			if (currentEntry) {
+				const error = new Error("Tar archive is truncated.");
+
+				// Error both the current entry and the main stream.
+				currentEntry.controller.error(error);
+				controller.error(error);
+			}
+
+			// Check for non-zero bytes in the leftover buffer.
 			if (buffer.some((b) => b !== 0))
 				controller.error(new Error("Unexpected data at end of archive."));
 		},
