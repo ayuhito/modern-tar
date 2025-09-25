@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { packTar } from "../../src/web";
 import { unpackTar } from "../../src/web/index";
+import { createTarDecoder } from "../../src/web/stream";
 import { decoder } from "../../src/web/utils";
 import {
 	GNU_TAR,
@@ -167,5 +168,69 @@ describe("extract", () => {
 		await expect(unpackTar(buffer)).rejects.toThrow(
 			"Tar archive is truncated.",
 		);
+	});
+
+	it("extracts a tar with a huge file using PAX headers for size", async () => {
+		const hugeFileSize = "8804630528"; // ~8.2 GB, as a string
+		const smallBody = "this is a placeholder body";
+		const bodyBuffer = new TextEncoder().encode(smallBody);
+
+		const archive = await packTar([
+			{
+				header: {
+					name: "huge.txt",
+					mode: 0o644,
+					mtime: new Date(1521214967000),
+					size: bodyBuffer.length, // The USTAR size can be the actual body size for this test
+					pax: {
+						size: hugeFileSize,
+					},
+				},
+				body: bodyBuffer,
+			},
+		]);
+
+		// Use streaming API to test just the header parsing without reading full body
+		// @ts-expect-error ReadableStream.from is supported.
+		const sourceStream = ReadableStream.from([archive]);
+		const decoder = new TextDecoder();
+
+		let headerParsed = false;
+		let entry: {
+			header: { name: string; size: number };
+			body: ReadableStream<Uint8Array>;
+		} | null = null;
+
+		const entryStream = sourceStream.pipeThrough(createTarDecoder());
+		const reader = entryStream.getReader();
+
+		try {
+			const result = await reader.read();
+			if (!result.done) {
+				entry = result.value;
+				headerParsed = true;
+			}
+		} catch {
+			// Expected for huge file simulation
+		} finally {
+			reader.releaseLock();
+		}
+
+		expect(headerParsed).toBe(true);
+		expect(entry).not.toBeNull();
+
+		if (entry) {
+			expect(entry.header.name).toBe("huge.txt");
+			// Verify that the size was correctly parsed from the PAX header
+			expect(entry.header.size).toBe(Number.parseInt(hugeFileSize, 10));
+
+			// Read just a small portion of the body to verify it starts correctly
+			const bodyReader = entry.body.getReader();
+			const chunk = await bodyReader.read();
+			const partialContent = decoder.decode(chunk.value);
+			// Trim null bytes that are part of TAR padding
+			expect(partialContent.replace(/\0+$/, "")).toBe(smallBody);
+			bodyReader.releaseLock();
+		}
 	});
 });
