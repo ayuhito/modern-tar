@@ -7,8 +7,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTarSources, type TarSource, unpackTar } from "../../src/fs/index";
 
+const isWindows = process.platform === "win32";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
+
+let expectedHelloContent: string;
+let expectedTestContent: string;
 
 describe("packTarSources", () => {
 	let tmpDir: string;
@@ -16,6 +21,16 @@ describe("packTarSources", () => {
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(
 			path.join(os.tmpdir(), "modern-tar-archive-test-"),
+		);
+
+		// Read the actual fixture files to handle line endings correctly
+		expectedHelloContent = await fs.readFile(
+			path.join(FIXTURES_DIR, "a", "hello.txt"),
+			"utf-8",
+		);
+		expectedTestContent = await fs.readFile(
+			path.join(FIXTURES_DIR, "b", "a", "test.txt"),
+			"utf-8",
 		);
 	});
 
@@ -44,7 +59,7 @@ describe("packTarSources", () => {
 		// Verify extraction
 		const extractedFile = path.join(destDir, "output", "hello.txt");
 		const content = await fs.readFile(extractedFile, "utf-8");
-		expect(content).toBe("hello world\n");
+		expect(content).toBe(expectedHelloContent);
 
 		// Verify file stats are preserved
 		const originalStat = await fs.stat(
@@ -86,8 +101,8 @@ describe("packTarSources", () => {
 			"utf-8",
 		);
 
-		expect(helloContent).toBe("hello world\n");
-		expect(testContent).toBe("test\n");
+		expect(helloContent).toBe(expectedHelloContent);
+		expect(testContent).toBe(expectedTestContent);
 	});
 
 	it("packs content sources", async () => {
@@ -232,7 +247,13 @@ describe("packTarSources", () => {
 
 		// Verify file mode
 		const extractedStat = await fs.stat(path.join(destDir, "bin", "script.sh"));
-		expect(extractedStat.mode & 0o777).toBe(0o755);
+		// File modes work differently on Windows
+		if (isWindows) {
+			// On Windows, executable permissions are handled differently
+			expect(extractedStat.mode & 0o777).toBe(0o666);
+		} else {
+			expect(extractedStat.mode & 0o777).toBe(0o755);
+		}
 	});
 
 	it("packs directory sources", async () => {
@@ -262,7 +283,7 @@ describe("packTarSources", () => {
 		).toBe(true);
 
 		const content = await fs.readFile(extractedFile, "utf-8");
-		expect(content).toBe("test\n");
+		expect(content).toBe(expectedTestContent);
 	});
 
 	it("packs mixed source types", async () => {
@@ -303,7 +324,7 @@ describe("packTarSources", () => {
 		);
 		const sourceFile = path.join(destDir, "project", "source", "a", "test.txt");
 
-		expect(readmeContent).toBe("hello world\n");
+		expect(readmeContent).toBe(expectedHelloContent);
 		expect(packageContent).toBe('{"name": "test-project", "version": "1.0.0"}');
 		expect(
 			await fs.access(sourceFile).then(
