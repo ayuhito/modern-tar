@@ -1,25 +1,11 @@
-import { createReadStream, type Stats } from "node:fs";
+import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { BLOCK_SIZE } from "../web/constants";
 import { createTarHeader } from "../web/pack";
 import type { TarHeader } from "../web/types";
-
-/**
- * Filesystem-specific configuration options for packing directories into tar archives.
- *
- * These options are specific to Node.js filesystem operations and use Node.js-specific
- * types like `Stats` for file system metadata.
- */
-export interface PackOptionsFS {
-	/** Follow symlinks instead of storing them as symlinks (default: false) */
-	dereference?: boolean;
-	/** Filter function to include/exclude files (return false to exclude) */
-	filter?: (path: string, stat: Stats) => boolean;
-	/** Transform function to modify tar headers before packing */
-	map?: (header: TarHeader) => TarHeader;
-}
+import type { PackOptionsFS } from "./types";
 
 /**
  * Pack a directory into a Node.js [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable) stream containing tar archive bytes.
