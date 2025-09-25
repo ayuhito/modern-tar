@@ -9,7 +9,7 @@ import {
 } from "./constants";
 
 import type { TarHeader } from "./types";
-import { writeOctal, writeString } from "./utils";
+import { encoder, writeOctal, writeString } from "./utils";
 
 /**
  * Controls a streaming tar packing process.
@@ -232,7 +232,57 @@ export function createTarPacker(): {
 				header.type === "link";
 			const size = isBodyless ? 0 : (header.size ?? 0);
 
-			// Create and enqueue the header for this entry.
+			// Generate PAX header if the pax field is present.
+			if (header.pax) {
+				let paxRecords = "";
+				for (const [key, value] of Object.entries(header.pax)) {
+					// Format for each PAX record is: "<length> <key>=<value>\n"
+					const record = `${key}=${value}\n`;
+
+					// The length field must include the bytes for the length string itself,
+					// plus a space and the record.
+					let length = record.length + 1; // +1 for the space
+					const lengthStr = String(length);
+					length += lengthStr.length;
+
+					// If adding the length digits changes the total length's number of digits
+					// (e.g., from 99 to 100), we need to adjust the length one last time.
+					const finalLengthStr = String(length);
+					if (finalLengthStr.length !== lengthStr.length) {
+						length += finalLengthStr.length - lengthStr.length;
+					}
+
+					paxRecords += `${length} ${record}`;
+				}
+
+				// Only proceed if we actually generated PAX records.
+				if (paxRecords) {
+					const paxBytes = encoder.encode(paxRecords);
+
+					// Create and enqueue the PAX header entry.
+					const paxHeader = createTarHeader({
+						name: `PaxHeader/${header.name}`,
+						size: paxBytes.length,
+						type: "pax-header",
+						mode: 0o644,
+						mtime: header.mtime,
+					});
+					streamController.enqueue(paxHeader as Uint8Array<ArrayBuffer>);
+
+					// Enqueue the PAX data itself.
+					streamController.enqueue(paxBytes);
+
+					// Add padding to align the PAX data to a 512-byte block boundary.
+					const paxPadding =
+						(BLOCK_SIZE - (paxBytes.length % BLOCK_SIZE)) % BLOCK_SIZE;
+
+					if (paxPadding > 0) {
+						streamController.enqueue(new Uint8Array(paxPadding));
+					}
+				}
+			}
+
+			// Create and enqueue the main USTAR header for the file entry.
 			const headerBlock = createTarHeader({ ...header, size });
 			streamController.enqueue(headerBlock as Uint8Array<ArrayBuffer>);
 
@@ -246,10 +296,12 @@ export function createTarPacker(): {
 							`Entry '${header.name}' is larger than its specified size of ${size} bytes.`,
 						);
 						streamController.error(err);
-						throw err; // Abort the write with an error.
+						throw err; // Abort the write.
 					}
+
 					streamController.enqueue(chunk as Uint8Array<ArrayBuffer>);
 				},
+
 				close() {
 					if (totalWritten !== size) {
 						const err = new Error(
