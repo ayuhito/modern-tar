@@ -14,7 +14,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [18, 20, 22, 24]
-    name: Test Node ${{ matrix.node-version }} (${{ matrix.os }})
+    name: Node ${{ matrix.node-version }} (${{ matrix.os }})
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -23,6 +23,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Update npm
+        run: npm install -g npm@latest
 
       - name: Install
         run: npm install
@@ -42,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    name: Test Bun (${{ matrix.os }})
+    name: Bun (${{ matrix.os }})
     steps:
       - name: Checkout
         uses: actions/checkout@v5
