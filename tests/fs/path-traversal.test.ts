@@ -267,7 +267,7 @@ describe("path traversal (zip slip) prevention", () => {
 
 			// This should throw an error
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'Hardlink target "../../target.txt" points outside of the extraction directory.',
+				'Hardlink target "../../target.txt" points outside the extraction directory.',
 			);
 		});
 
@@ -284,7 +284,7 @@ describe("path traversal (zip slip) prevention", () => {
 
 			// This should throw an error
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'Hardlink target "/tmp/target.txt" points outside of the extraction directory.',
+				'Hardlink target "/tmp/target.txt" points outside the extraction directory.',
 			);
 		});
 
