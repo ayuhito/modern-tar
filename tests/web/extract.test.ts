@@ -5,6 +5,7 @@ import { unpackTar } from "../../src/web/index";
 import { decoder } from "../../src/web/utils";
 import {
 	GNU_TAR,
+	INCOMPLETE_TAR,
 	LONG_NAME_TAR,
 	MULTI_FILE_TAR,
 	ONE_FILE_TAR,
@@ -157,5 +158,14 @@ describe("extract", () => {
 		expect(entry.header.uname).toBe("myuser");
 		expect(entry.header.gname).toBe("mygroup");
 		expect(decoder.decode(entry.data)).toBe("Hello, world!\n");
+	});
+
+	it("throws an error for an incomplete archive", async () => {
+		const buffer = await fs.readFile(INCOMPLETE_TAR);
+
+		// We expect unpackTar to reject because the archive is truncated
+		await expect(unpackTar(buffer)).rejects.toThrow(
+			"Tar archive is truncated.",
+		);
 	});
 });
