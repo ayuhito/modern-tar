@@ -8,7 +8,7 @@ import { unpackTar } from "../../src/fs/index";
 import type { TarEntry } from "../../src/web/index";
 import { packTar } from "../../src/web/index";
 
-describe("path traversal (zip slip) prevention", () => {
+describe("path traversal prevention", () => {
 	let tmpDir: string;
 
 	beforeEach(async () => {
