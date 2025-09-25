@@ -100,6 +100,157 @@ describe("unpack options", () => {
 			const dirEntry = entries.find((e) => e.header.type === "directory");
 			expect(dirEntry?.header.name).toBe("level1/subdir/");
 		});
+
+		describe("symlink and hardlink handling", () => {
+			it("preserves relative symlinks unchanged", async () => {
+				const archive = await packTar([
+					{
+						header: {
+							name: "parent/subdir/mylink",
+							size: 0,
+							type: "symlink",
+							linkname: "target.txt", // relative symlink
+						},
+					},
+					{
+						header: {
+							name: "parent/subdir/target.txt",
+							size: 4,
+							type: "file",
+						},
+						body: "test",
+					},
+				]);
+
+				const entries = await unpackTar(archive, { strip: 1 });
+
+				expect(entries).toHaveLength(2);
+				const symlinkEntry = entries.find((e) => e.header.type === "symlink");
+				expect(symlinkEntry?.header.name).toBe("subdir/mylink");
+				expect(symlinkEntry?.header.linkname).toBe("target.txt"); // unchanged
+			});
+
+			it("strips absolute symlinks correctly", async () => {
+				const archive = await packTar([
+					{
+						header: {
+							name: "parent/subdir/mylink",
+							size: 0,
+							type: "symlink",
+							linkname: "/parent/subdir/target.txt", // absolute symlink
+						},
+					},
+					{
+						header: {
+							name: "parent/subdir/target.txt",
+							size: 4,
+							type: "file",
+						},
+						body: "test",
+					},
+				]);
+
+				const entries = await unpackTar(archive, { strip: 1 });
+
+				expect(entries).toHaveLength(2);
+				const symlinkEntry = entries.find((e) => e.header.type === "symlink");
+				expect(symlinkEntry?.header.name).toBe("subdir/mylink");
+				expect(symlinkEntry?.header.linkname).toBe("/subdir/target.txt"); // stripped
+			});
+
+			it("preserves relative hardlinks unchanged", async () => {
+				const archive = await packTar([
+					{
+						header: {
+							name: "parent/subdir/mylink",
+							size: 0,
+							type: "link",
+							linkname: "target.txt", // relative hardlink
+						},
+					},
+					{
+						header: {
+							name: "parent/subdir/target.txt",
+							size: 4,
+							type: "file",
+						},
+						body: "test",
+					},
+				]);
+
+				const entries = await unpackTar(archive, { strip: 1 });
+
+				expect(entries).toHaveLength(2);
+				const hardlinkEntry = entries.find((e) => e.header.type === "link");
+				expect(hardlinkEntry?.header.name).toBe("subdir/mylink");
+				expect(hardlinkEntry?.header.linkname).toBe("target.txt"); // unchanged
+			});
+
+			it("strips absolute hardlinks correctly", async () => {
+				const archive = await packTar([
+					{
+						header: {
+							name: "parent/subdir/mylink",
+							size: 0,
+							type: "link",
+							linkname: "/parent/subdir/target.txt", // absolute hardlink
+						},
+					},
+					{
+						header: {
+							name: "parent/subdir/target.txt",
+							size: 4,
+							type: "file",
+						},
+						body: "test",
+					},
+				]);
+
+				const entries = await unpackTar(archive, { strip: 1 });
+
+				expect(entries).toHaveLength(2);
+				const hardlinkEntry = entries.find((e) => e.header.type === "link");
+				expect(hardlinkEntry?.header.name).toBe("subdir/mylink");
+				expect(hardlinkEntry?.header.linkname).toBe("/subdir/target.txt"); // stripped
+			});
+
+			it("skips entries when absolute linkname becomes empty after excessive strip", async () => {
+				const archive = await packTar([
+					{
+						header: {
+							name: "parent/subdir/mylink",
+							size: 0,
+							type: "symlink",
+							linkname: "/parent/target.txt", // absolute symlink with 2 components
+						},
+					},
+				]);
+
+				const entries = await unpackTar(archive, { strip: 3 }); // strip more than linkname has
+
+				expect(entries).toHaveLength(0); // entry should be filtered out
+			});
+
+			it("handles complex relative symlinks with dots", async () => {
+				const archive = await packTar([
+					{
+						header: {
+							name: "parent/subdir/mylink",
+							size: 0,
+							type: "symlink",
+							linkname: "../other/target.txt", // relative symlink with ..
+						},
+					},
+				]);
+
+				const entries = await unpackTar(archive, { strip: 1 });
+
+				expect(entries).toHaveLength(1);
+				const symlinkEntry = entries[0];
+				expect(symlinkEntry.header.name).toBe("subdir/mylink");
+				expect(symlinkEntry.header.linkname).toBe("../other/target.txt"); // unchanged
+			});
+		});
 	});
 
 	describe("strip option edge cases", () => {
@@ -320,7 +471,6 @@ describe("unpack options", () => {
 
 				const entries = await unpackTar(archive, { strip: 1 });
 
-				// FIXED: Multiple slashes are normalized by filtering empty components
 				// "path//to//file.txt" → ["path", "to", "file.txt"] → strip 1 → ["to", "file.txt"] → "to/file.txt"
 				expect(entries).toHaveLength(1);
 				expect(entries[0].header.name).toBe("to/file.txt");
@@ -340,7 +490,6 @@ describe("unpack options", () => {
 
 				const entries = await unpackTar(archive, { strip: 1 });
 
-				// FIXED: Empty components are filtered out for consistent behavior
 				// "a//b/file1.txt" → ["a", "b", "file1.txt"] → strip 1 → ["b", "file1.txt"] → "b/file1.txt"
 				// "x/y//file2.txt" → ["x", "y", "file2.txt"] → strip 1 → ["y", "file2.txt"] → "y/file2.txt"
 				expect(entries).toHaveLength(2);
@@ -465,7 +614,7 @@ describe("unpack options", () => {
 				expect(entries).toHaveLength(0);
 			});
 
-			it("handles negative strip value", async () => {
+			it("handles negative strip value gracefully", async () => {
 				const archive = await packTar([
 					{
 						header: { name: "path/to/file.txt", size: 4, type: "file" },
@@ -473,10 +622,11 @@ describe("unpack options", () => {
 					},
 				]);
 
-				// FIXED: Negative values now throw an error
-				await expect(unpackTar(archive, { strip: -1 })).rejects.toThrow(
-					"Invalid strip value: -1. Must be non-negative.",
-				);
+				const entries = await unpackTar(archive, { strip: -1 });
+
+				// Negative strip should be treated as 0 (no stripping)
+				expect(entries).toHaveLength(1);
+				expect(entries[0].header.name).toBe("path/to/file.txt");
 			});
 		});
 
