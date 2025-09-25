@@ -131,13 +131,16 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
  * ```
  */
 export async function unpackTar(
-	archive: ArrayBuffer | Uint8Array,
+	archive: ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>,
 	options: UnpackOptions = {},
 ): Promise<ParsedTarEntryWithData[]> {
-	// @ts-expect-error ReadableStream.from is supported.
-	const sourceStream = ReadableStream.from([
-		archive instanceof Uint8Array ? archive : new Uint8Array(archive),
-	]);
+	const sourceStream: ReadableStream<Uint8Array> =
+		archive instanceof ReadableStream
+			? archive
+			: // @ts-expect-error ReadableStream.from is supported.
+			  ReadableStream.from([
+					archive instanceof Uint8Array ? archive : new Uint8Array(archive),
+			  ]);
 
 	const results: ParsedTarEntryWithData[] = [];
 
