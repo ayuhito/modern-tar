@@ -2,6 +2,7 @@
 	"name": "modern-tar",
 	"version": "0.2.0",
 	"description": "Zero dependency streaming tar parser and writer for JavaScript.",
+	"author": "Ayuhito <hello@ayuhito.com>",
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,
@@ -48,7 +49,6 @@
 		"type": "git",
 		"url": "git+https://github.com/ayuhito/modern-tar.git"
 	},
-	"author": "Ayuhito <hello@ayuhito.com>",
 	"publishConfig": {
 		"access": "public"
 	},
