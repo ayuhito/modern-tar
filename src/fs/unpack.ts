@@ -3,26 +3,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { UnpackOptions } from "../web/index";
 import { createTarDecoder, createTarOptionsTransformer } from "../web/index";
-
-/**
- * Filesystem-specific configuration options for extracting tar archives to the filesystem.
- *
- * Extends the core {@link UnpackOptions} with Node.js filesystem-specific settings
- * for controlling file permissions and other filesystem behaviors.
- */
-export interface UnpackOptionsFS extends UnpackOptions {
-	/** Default mode for created directories (e.g., 0o755). If not specified, uses mode from tar header or system default */
-	dmode?: number;
-	/** Default mode for created files (e.g., 0o644). If not specified, uses mode from tar header or system default */
-	fmode?: number;
-	/**
-	 * Prevent symlinks from pointing outside the extraction directory.
-	 * @default true
-	 */
-	validateSymlinks?: boolean;
-}
+import type { UnpackOptionsFS } from "./types";
 
 /**
  * Extract a tar archive to a directory.

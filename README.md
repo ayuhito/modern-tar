@@ -173,6 +173,25 @@ const extractStream = unpackTar('./output', {
 await pipeline(sourceStream, extractStream);
 ```
 
+#### Archive Creation
+
+```typescript
+import { packTarSources, type TarSource } from 'modern-tar/fs';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+
+// Pack multiple sources
+const sources: TarSource[] = [
+  { type: 'file', source: './package.json', target: 'project/package.json' },
+  { type: 'directory', source: './src', target: 'project/src' },
+  { type: 'content', content: 'Hello World!', target: 'project/hello.txt' },
+  { type: 'content', content: '#!/bin/bash\necho "Executable"', target: 'bin/script.sh', mode: 0o755 }
+];
+
+const archiveStream = packTarSources(sources);
+await pipeline(archiveStream, createWriteStream('project.tar'));
+```
+
 ## API Reference
 
 ### Core API (`modern-tar`)
@@ -339,6 +358,31 @@ const extractStream = unpackTar('/restore/location', {
 await pipeline(tarStream, extractStream);
 ```
 
+#### `packTarSources(sources: TarSource[]): Readable`
+
+Pack multiple sources (files, directories, or raw content) into a tar archive stream.
+
+- **`sources`**: Array of `TarSource` objects describing what to include in the archive.
+- **Returns**: Node.js `Readable` stream of tar archive bytes.
+
+**Example:**
+
+```typescript
+import { packTarSources, type TarSource } from 'modern-tar/fs';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+
+const sources: TarSource[] = [
+  { type: 'file', source: './README.md', target: 'docs/readme.txt' },
+  { type: 'directory', source: './src', target: 'app/src' },
+  { type: 'content', content: '{"version": "1.0.0"}', target: 'app/config.json' },
+  { type: 'content', content: Buffer.from('binary data'), target: 'data/binary.dat' }
+];
+
+const archiveStream = packTarSources(sources);
+await pipeline(archiveStream, createWriteStream('app.tar'));
+```
+
 ## Types
 
 ### Core Types
@@ -399,6 +443,35 @@ interface PackOptionsFS {
   /** Transform function to modify headers before packing */
   map?: (header: TarHeader) => TarHeader;
 }
+
+// Source types for packTarSources function
+interface FileSource {
+  type: "file";
+  /** Path to the source file on the local filesystem */
+  source: string;
+  /** Destination path inside the tar archive */
+  target: string;
+}
+
+interface DirectorySource {
+  type: "directory";
+  /** Path to the source directory on the local filesystem */
+  source: string;
+  /** Destination path inside the tar archive */
+  target: string;
+}
+
+interface ContentSource {
+  type: "content";
+  /** Raw content to add. Supports string, Uint8Array, ArrayBuffer, ReadableStream, Blob, or null. */
+	content: TarEntryData;
+  /** Destination path inside the tar archive */
+  target: string;
+  /** Optional Unix file permissions (e.g., 0o644, 0o755) */
+  mode?: number;
+}
+
+type TarSource = FileSource | DirectorySource | ContentSource;
 
 interface UnpackOptionsFS extends UnpackOptions {
   // Inherited from UnpackOptions (platform-neutral):
