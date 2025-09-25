@@ -492,24 +492,27 @@ describe("path traversal (zip slip) prevention", () => {
 			expect(await fs.readFile(filePath, "utf8")).toBe("malicious data");
 		});
 
-		it("prevents traversal with Windows-style paths on Unix", async () => {
-			const extractDir = path.join(tmpDir, "extract");
-			await fs.mkdir(extractDir, { recursive: true });
+		it.skipIf(process.platform === "win32")(
+			"prevents traversal with Windows-style paths on Unix",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
 
-			// Try Windows-style path traversal (should be treated as filename on Unix)
-			const maliciousTar = await createTarWithMaliciousFile(
-				"..\\..\\malicious.txt",
-			);
-			const unpackStream = unpackTar(extractDir);
+				// Try Windows-style path traversal (should be treated as filename on Unix)
+				const maliciousTar = await createTarWithMaliciousFile(
+					"..\\..\\malicious.txt",
+				);
+				const unpackStream = unpackTar(extractDir);
 
-			// On Unix, this should be treated as a filename with backslashes
-			await expect(
-				pipeline(maliciousTar, unpackStream),
-			).resolves.toBeUndefined();
+				// On Unix, this should be treated as a filename with backslashes
+				await expect(
+					pipeline(maliciousTar, unpackStream),
+				).resolves.toBeUndefined();
 
-			// The file should be created with the literal filename
-			const filePath = path.join(extractDir, "..\\..\\malicious.txt");
-			expect(await fs.readFile(filePath, "utf8")).toBe("malicious data");
-		});
+				// The file should be created with the literal filename
+				const filePath = path.join(extractDir, "..\\..\\malicious.txt");
+				expect(await fs.readFile(filePath, "utf8")).toBe("malicious data");
+			},
+		);
 	});
 });
