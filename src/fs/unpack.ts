@@ -60,7 +60,7 @@ export function unpackTar(
 
 		for await (const entry of entryStream) {
 			const header = entry.header;
-			const outPath = path.resolve(directoryPath, header.name);
+			const outPath = path.normalize(path.resolve(directoryPath, header.name));
 
 			// Prevent path traversal attacks that escape the target directory.
 			if (
@@ -109,7 +109,9 @@ export function unpackTar(
 						// Prevent path traversal attacks via symlinks.
 						if (validateSymlinks) {
 							const symlinkDir = path.dirname(outPath);
-							const resolvedTarget = path.resolve(symlinkDir, header.linkname);
+							const resolvedTarget = path.normalize(
+								path.resolve(symlinkDir, header.linkname),
+							);
 
 							if (
 								!resolvedTarget.startsWith(resolvedDestDir + path.sep) &&
@@ -127,9 +129,8 @@ export function unpackTar(
 
 				case "link":
 					if (header.linkname) {
-						const resolvedLinkTarget = path.resolve(
-							directoryPath,
-							header.linkname,
+						const resolvedLinkTarget = path.normalize(
+							path.resolve(directoryPath, header.linkname),
 						);
 
 						// Prevent path traversal attacks via hardlinks.
