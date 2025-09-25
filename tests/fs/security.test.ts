@@ -1345,4 +1345,171 @@ describe("security", () => {
 			},
 		);
 	});
+
+	it("prevents DoS attacks via deeply nested paths", async () => {
+		const extractDir = path.join(tmpDir, "extract");
+		await fs.mkdir(extractDir, { recursive: true });
+
+		// "a/b/c/d/..."
+		const alphabet = "abcdefghijklmnopqrstuvwxyz";
+		const dirs = [];
+		for (let i = 0; i < 40; i++) {
+			dirs.push(alphabet[i % 26]);
+		}
+		const deepPath = `${dirs.join("/")}/file.txt`;
+		const expectedDepth = dirs.length + 1; // +1 for file.txt
+
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: deepPath,
+					type: "file",
+					size: 4,
+				},
+				body: "test",
+			},
+		];
+
+		const tarBuffer = await packTar(entries);
+		const maliciousTar = Readable.from([tarBuffer]);
+		const unpackStream = unpackTar(extractDir, { maxDepth: 30 }); // Set limit lower than our path
+
+		// Should be blocked due to excessive path depth
+		await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+			new RegExp(
+				`Path depth of entry .* \\(${expectedDepth}\\) exceeds the maximum allowed depth of 30`,
+			),
+		);
+
+		// Verify that no deeply nested directories were created
+		const firstLevel = path.join(extractDir, "a");
+		await expect(fs.access(firstLevel)).rejects.toThrow();
+	});
+
+	it("allows extraction when path depth is within limit", async () => {
+		const extractDir = path.join(tmpDir, "extract");
+		await fs.mkdir(extractDir, { recursive: true });
+
+		const dirs = ["a", "b", "c", "d", "e"];
+		const deepPath = `${dirs.join("/")}/file.txt`;
+		const expectedDepth = dirs.length + 1; // +1 for file.txt
+
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: deepPath,
+					type: "file",
+					size: 4,
+				},
+				body: "test",
+			},
+		];
+
+		const tarBuffer = await packTar(entries);
+		const maliciousTar = Readable.from([tarBuffer]);
+		const unpackStream = unpackTar(extractDir, { maxDepth: expectedDepth });
+
+		// Should succeed as it's exactly at the limit
+		await expect(pipeline(maliciousTar, unpackStream)).resolves.not.toThrow();
+
+		// Verify the file was created at the deep path
+		const deepFilePath = path.join(extractDir, deepPath);
+		await expect(fs.access(deepFilePath)).resolves.not.toThrow();
+		const content = await fs.readFile(deepFilePath, "utf8");
+		expect(content).toBe("test");
+	});
+
+	it("respects custom maxDepth option", async () => {
+		const extractDir = path.join(tmpDir, "extract");
+		await fs.mkdir(extractDir, { recursive: true });
+
+		// Create an entry with a path depth of 5
+		const moderatePath = "a/b/c/d/e/file.txt";
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: moderatePath,
+					type: "file",
+					size: 4,
+				},
+				body: "test",
+			},
+		];
+
+		const tarBuffer = await packTar(entries);
+		const maliciousTar = Readable.from([tarBuffer]);
+		const unpackStream = unpackTar(extractDir, { maxDepth: 4 });
+
+		// Should be blocked due to custom maxDepth of 4
+		await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+			/Path depth of entry .* \(6\) exceeds the maximum allowed depth of 4/,
+		);
+
+		// Verify that no directories were created
+		const firstLevel = path.join(extractDir, "a");
+		await expect(fs.access(firstLevel)).rejects.toThrow();
+	});
+
+	it("allows infinite depth when maxDepth is set to Infinity", async () => {
+		const extractDir = path.join(tmpDir, "extract");
+		await fs.mkdir(extractDir, { recursive: true });
+
+		// Create an entry with a very deep path
+		const deepPath = `${"a/".repeat(50)}file.txt`;
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: deepPath,
+					type: "file",
+					size: 4,
+				},
+				body: "test",
+			},
+		];
+
+		const tarBuffer = await packTar(entries);
+		const maliciousTar = Readable.from([tarBuffer]);
+		const unpackStream = unpackTar(extractDir, { maxDepth: Infinity });
+
+		// Should succeed with infinite depth
+		await expect(pipeline(maliciousTar, unpackStream)).resolves.not.toThrow();
+
+		// Verify the file was created at the deep path
+		const deepFilePath = path.join(extractDir, deepPath);
+		await expect(fs.access(deepFilePath)).resolves.not.toThrow();
+		const content = await fs.readFile(deepFilePath, "utf8");
+		expect(content).toBe("test");
+	});
+
+	it("prevents resource exhaustion from many nested directories", async () => {
+		const extractDir = path.join(tmpDir, "extract");
+		await fs.mkdir(extractDir, { recursive: true });
+		const entries: TarEntry[] = [];
+
+		// Create 50 entries each with 20-level deep paths = 50 * 20 = 1000 directory operations
+		for (let i = 0; i < 50; i++) {
+			const deepPath = `dir${i}/${"sub/".repeat(19)}file.txt`;
+			entries.push({
+				header: {
+					name: deepPath,
+					type: "file",
+					size: 4,
+				},
+				body: "test",
+			});
+		}
+
+		const tarBuffer = await packTar(entries);
+		const maliciousTar = Readable.from([tarBuffer]);
+		const unpackStream = unpackTar(extractDir, { maxDepth: 15 }); // Limit to 15 levels
+
+		// Should be blocked due to excessive path depth
+		await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+			/Path depth of entry .* \(21\) exceeds the maximum allowed depth of 15/,
+		);
+
+		// Verify that no deeply nested directories were created
+		const firstEntry = path.join(extractDir, "dir0");
+		await expect(fs.access(firstEntry)).rejects.toThrow();
+	});
 });
