@@ -27,40 +27,38 @@ export function createTarOptionsTransformer(
 			let header = entry.header;
 
 			// Apply strip option
-			if (options.strip !== undefined) {
-				// Validate strip value
-				if (options.strip < 0) {
-					// Drain the body before throwing
+			const stripCount = options.strip;
+			if (stripCount && stripCount > 0) {
+				const newName = stripPathComponents(header.name, stripCount);
+
+				// If the entry's name is completely stripped, skip it.
+				if (newName === null) {
 					drainStream(entry.body);
-					throw new Error(
-						`Invalid strip value: ${options.strip}. Must be non-negative.`,
+					return;
+				}
+
+				let newLinkname = header.linkname;
+
+				// If it's an absolute symlink/hardlink, strip its target path too.
+				if (newLinkname?.startsWith("/")) {
+					const strippedLinkTarget = stripPathComponents(
+						newLinkname,
+						stripCount,
 					);
+
+					// If the target is stripped, it should point to the new root '/'.
+					newLinkname =
+						strippedLinkTarget === null ? "/" : `/${strippedLinkTarget}`;
 				}
 
-				if (options.strip > 0) {
-					// Normalize path by removing empty components and leading/trailing slashes
-					const normalizedPath = header.name
-						.split("/")
-						.filter((component: string) => component.length > 0);
-
-					// Apply stripping
-					const strippedComponents = normalizedPath.slice(options.strip);
-
-					if (strippedComponents.length === 0) {
-						// Drain and skip entries that become empty after stripping
-						drainStream(entry.body);
-						return;
-					}
-
-					const strippedName = strippedComponents.join("/");
-
-					// Preserve directory indicator for directory entries
-					if (header.type === "directory" && !strippedName.endsWith("/")) {
-						header = { ...header, name: `${strippedName}/` };
-					} else {
-						header = { ...header, name: strippedName };
-					}
-				}
+				header = {
+					...header,
+					name:
+						header.type === "directory" && !newName.endsWith("/")
+							? `${newName}/`
+							: newName,
+					linkname: newLinkname,
+				};
 			}
 
 			// Apply filter option
@@ -81,6 +79,18 @@ export function createTarOptionsTransformer(
 			});
 		},
 	});
+}
+
+/**
+ * Strips the specified number of leading path components from a given path.
+ */
+function stripPathComponents(path: string, stripCount: number): string | null {
+	const components = path.split("/").filter((c) => c.length > 0);
+	if (stripCount >= components.length) {
+		return null; // The path is fully stripped.
+	}
+
+	return components.slice(stripCount).join("/");
 }
 
 /**
