@@ -79,8 +79,7 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
 		.then(() => controller.finalize())
 		.catch((err) => controller.error(err));
 
-	const response = new Response(readable);
-	const buffer = await response.arrayBuffer();
+	const buffer = await new Response(readable).arrayBuffer();
 
 	// Await the packing promise to ensure any background errors are thrown.
 	await packingPromise;
