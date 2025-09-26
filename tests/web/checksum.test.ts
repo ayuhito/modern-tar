@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTarPacker, packTar, unpackTar } from "../../src/web";
 import { USTAR } from "../../src/web/constants";
+import { streamToBuffer } from "../../src/web/utils";
 
 describe("checksum validation", () => {
 	it("should reject tar entries with corrupted checksums", async () => {
@@ -96,8 +97,7 @@ describe("checksum validation", () => {
 		controller.finalize();
 
 		// Read the archive and corrupt the second entry
-		const buffer = await new Response(readable).arrayBuffer();
-		const corruptedBuffer = new Uint8Array(buffer);
+		const buffer = await streamToBuffer(readable);
 
 		// Find the second header (skip first header + content + padding)
 		const firstEntrySize = 5;
@@ -106,11 +106,10 @@ describe("checksum validation", () => {
 
 		// Corrupt the checksum of the second entry
 		const secondChecksumOffset = secondHeaderOffset + USTAR.checksum.offset;
-		corruptedBuffer[secondChecksumOffset] =
-			corruptedBuffer[secondChecksumOffset] + 1;
+		buffer[secondChecksumOffset] = buffer[secondChecksumOffset] + 1;
 
 		// The entire extraction should fail when encountering the corrupted second entry
-		await expect(unpackTar(corruptedBuffer)).rejects.toThrow(
+		await expect(unpackTar(buffer)).rejects.toThrow(
 			"Invalid tar header checksum",
 		);
 	});

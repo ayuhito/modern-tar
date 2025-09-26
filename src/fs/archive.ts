@@ -69,7 +69,7 @@ export function packTarSources(sources: TarSource[]): Readable {
 					if (content instanceof ReadableStream) {
 						const chunks: Buffer[] = [];
 						for await (const chunk of Readable.fromWeb(content)) {
-							chunks.push(chunk as Buffer);
+							chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 						}
 
 						const buffer = Buffer.concat(chunks);

@@ -64,3 +64,40 @@ export function readOctal(
 	// An empty or invalid octal string is treated as zero.
 	return octalString ? Number.parseInt(octalString, 8) : 0;
 }
+
+/**
+ * Reads an entire ReadableStream of Uint8Arrays into a single, combined Uint8Array.
+ *
+ * The easy way to do this is `new Response(stream).arrayBuffer()`, but we can be more
+ * performant by buffering the chunks directly.
+ */
+export async function streamToBuffer(
+	stream: ReadableStream<Uint8Array>,
+): Promise<Uint8Array> {
+	const chunks: Uint8Array[] = [];
+	const reader = stream.getReader();
+	let totalLength = 0;
+
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+
+			chunks.push(value);
+			totalLength += value.length;
+		}
+
+		// Pre-allocate the final buffer.
+		const result = new Uint8Array(totalLength);
+		let offset = 0;
+
+		for (const chunk of chunks) {
+			result.set(chunk, offset);
+			offset += chunk.length;
+		}
+
+		return result;
+	} finally {
+		reader.releaseLock();
+	}
+}
