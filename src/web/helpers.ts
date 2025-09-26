@@ -1,6 +1,6 @@
 import { createTarOptionsTransformer } from "./options";
 import { createTarPacker } from "./pack";
-import { createTarDecoder } from "./stream";
+import { createTarDecoder } from "./unpack";
 import type { ParsedTarEntryWithData, TarEntry, UnpackOptions } from "./types";
 import { encoder } from "./utils";
 
