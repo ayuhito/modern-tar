@@ -105,28 +105,6 @@ for await (const entry of decodedStream) {
 #### Compression/Decompression (gzip)
 
 ```typescript
-import { createGzipEncoder, createTarPacker } from '@modern-tar/core';
-
-// Create and compress a tar archive
-const { readable, controller } = createTarPacker();
-const compressedStream = readable.pipeThrough(createGzipEncoder());
-
-// Add entries...
-const fileStream = controller.add({ name: "file.txt", size: 5, type: "file" });
-const writer = fileStream.getWriter();
-await writer.write(new TextEncoder().encode("hello"));
-await writer.close();
-controller.finalize();
-
-// Upload compressed .tar.gz
-await fetch('/api/upload', {
-  method: 'POST',
-  body: compressedStream,
-  headers: { 'Content-Type': 'application/gzip' }
-});
-```
-
-```typescript
 import { createGzipDecoder, unpackTar } from 'modern-tar';
 
 // Fetch a .tar.gz file stream
