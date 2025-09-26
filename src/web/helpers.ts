@@ -1,7 +1,7 @@
 import { createTarOptionsTransformer } from "./options";
 import { createTarPacker } from "./pack";
-import { createTarDecoder } from "./unpack";
 import type { ParsedTarEntryWithData, TarEntry, UnpackOptions } from "./types";
+import { createTarDecoder } from "./unpack";
 import { encoder } from "./utils";
 
 /**
@@ -61,13 +61,19 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
 			} else {
 				// For all other types, normalize to a Uint8Array first.
 				let chunk: Uint8Array;
-				if (typeof body === "string") {
-					chunk = encoder.encode(body);
+
+				if (body === null || body === undefined) {
+					chunk = new Uint8Array(0);
 				} else if (body instanceof Uint8Array) {
 					chunk = body;
-				} else {
-					// Handles the ArrayBuffer case.
+				} else if (body instanceof ArrayBuffer) {
 					chunk = new Uint8Array(body);
+				} else if (typeof body === "string") {
+					chunk = encoder.encode(body);
+				} else {
+					throw new TypeError(
+						`Unsupported content type for entry "${entry.header.name}". Expected string, Uint8Array, ArrayBuffer, Blob, ReadableStream, or undefined.`,
+					);
 				}
 
 				const writer = entryStream.getWriter();

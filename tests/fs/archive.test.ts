@@ -455,4 +455,63 @@ describe("packTarSources", () => {
 			}
 		}).rejects.toThrow();
 	});
+
+	it("errors for invalid content types", async () => {
+		// Test invalid content types that could come from JavaScript usage or dynamic data
+		const invalidSources: TarSource[] = [
+			{
+				type: "content",
+				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+				content: 123 as any, // number
+				target: "number.txt",
+			},
+		];
+
+		const stream = packTarSources(invalidSources);
+		await expect(
+			new Promise((resolve, reject) => {
+				stream.on("error", reject);
+				stream.on("end", resolve);
+				stream.resume();
+			}),
+		).rejects.toThrow(/Unsupported content type/);
+
+		// Test with boolean
+		const booleanSources: TarSource[] = [
+			{
+				type: "content",
+				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+				content: true as any,
+				target: "bool.txt",
+			},
+		];
+
+		const boolStream = packTarSources(booleanSources);
+		await expect(
+			new Promise((resolve, reject) => {
+				boolStream.on("error", reject);
+				boolStream.on("end", resolve);
+				boolStream.resume();
+			}),
+		).rejects.toThrow(/Unsupported content type/);
+
+		// Test with object
+		const objectSources: TarSource[] = [
+			{
+				type: "content",
+				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+				content: { invalid: "object" } as any,
+				target: "obj.txt",
+			},
+		];
+
+		const objStream = packTarSources(objectSources);
+		await expect(
+			new Promise((resolve, reject) => {
+				objStream.on("error", reject);
+				objStream.on("end", resolve);
+				objStream.resume();
+			}),
+		).rejects.toThrow(/Unsupported content type/);
+	});
 });

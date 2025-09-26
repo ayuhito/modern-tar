@@ -49,7 +49,8 @@ export type TarEntryData =
 	| ArrayBuffer
 	| ReadableStream<Uint8Array>
 	| Blob
-	| null;
+	| null
+	| undefined;
 
 /**
  * Represents a complete entry to be packed into a tar archive.
