@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { packTar, type TarEntry, unpackTar } from "../../src/web/index";
+import { packTar, type TarEntry, unpackTar } from "../../src/web";
 import { decoder } from "../../src/web/utils";
 
 describe("pack", () => {

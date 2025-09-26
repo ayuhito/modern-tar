@@ -5,7 +5,7 @@
  * @returns A [`CompressionStream`](https://developer.mozilla.org/en-US/docs/Web/API/CompressionStream) configured for gzip compression
  * @example
  * ```typescript
- * import { createGzipEncoder, createTarPacker } from '@modern-tar/core';
+ * import { createGzipEncoder, createTarPacker } from 'modern-tar';
  *
  * // Create and compress a tar archive
  * const { readable, controller } = createTarPacker();
@@ -37,7 +37,7 @@ export function createGzipEncoder(): CompressionStream {
  * @returns A [`DecompressionStream`](https://developer.mozilla.org/en-US/docs/Web/API/DecompressionStream) configured for gzip decompression
  * @example
  * ```typescript
- * import { createGzipDecoder, createTarDecoder } from '@modern-tar/core';
+ * import { createGzipDecoder, createTarDecoder } from 'modern-tar';
  *
  * // Download and process a .tar.gz file
  * const response = await fetch('https://api.example.com/archive.tar.gz');

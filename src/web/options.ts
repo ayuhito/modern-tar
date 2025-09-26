@@ -8,7 +8,7 @@ import type { ParsedTarEntry, UnpackOptions } from "./types";
  *
  * @example
  * ```typescript
- * import { createTarDecoder, createTarOptionsTransformer } from '@modern-tar/core';
+ * import { createTarDecoder, createTarOptionsTransformer } from 'modern-tar';
  *
  * const transformedStream = sourceStream
  *   .pipeThrough(createTarDecoder())

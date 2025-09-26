@@ -19,7 +19,7 @@ import type { PackOptionsFS } from "./types";
  *
  * @example
  * ```typescript
- * import { packTar } from '@modern-tar/fs';
+ * import { packTar } from 'modern-tar/fs';
  * import { createWriteStream } from 'node:fs';
  * import { pipeline } from 'node:stream/promises';
  *

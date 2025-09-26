@@ -1,6 +1,6 @@
 import { createTarOptionsTransformer } from "./options";
 import { createTarPacker } from "./pack";
-import { createTarDecoder } from "./stream";
+import { createTarDecoder } from "./unpack";
 import type { ParsedTarEntryWithData, TarEntry, UnpackOptions } from "./types";
 import { encoder } from "./utils";
 
@@ -13,7 +13,7 @@ import { encoder } from "./utils";
  * @returns A `Promise` that resolves to the complete tar archive as a Uint8Array
  * @example
  * ```typescript
- * import { packTar } from '@modern-tar/core';
+ * import { packTar } from 'modern-tar';
  *
  * const entries = [
  *   {
@@ -97,7 +97,7 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
  * @returns A `Promise` that resolves to an array of entries with buffered data
  * @example
  * ```typescript
- * import { unpackTar } from '@modern-tar/core';
+ * import { unpackTar } from '@modern-tar';
  *
  * // From a file upload or fetch
  * const response = await fetch('/api/archive.tar');

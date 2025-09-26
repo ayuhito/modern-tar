@@ -71,106 +71,10 @@ export interface TarPackController {
 }
 
 /**
- * Creates a 512-byte USTAR format tar header block from a TarHeader object.
- */
-export function createTarHeader(header: TarHeader): Uint8Array {
-	const view = new Uint8Array(BLOCK_SIZE);
-
-	// Entries without a data body (like directories) have a size of 0.
-	const isBodyless =
-		header.type === "directory" ||
-		header.type === "symlink" ||
-		header.type === "link";
-	const size = isBodyless ? 0 : (header.size ?? 0);
-
-	// If a filename is >100 chars, USTAR allows splitting it into a 155-char prefix and a 100-char name.
-	let name = header.name;
-	let prefix = "";
-
-	if (name.length > USTAR.name.size) {
-		// We search backwards for the rightmost '/' that allows a valid split.
-		let i = name.length;
-		while (i > 0) {
-			const slashIndex = name.lastIndexOf("/", i);
-			// No suitable slash found.
-			if (slashIndex === -1) break;
-
-			const p = name.slice(0, slashIndex);
-			const n = name.slice(slashIndex + 1);
-
-			if (p.length <= USTAR.prefix.size && n.length <= USTAR.name.size) {
-				prefix = p;
-				name = n;
-				break;
-			}
-
-			// Continue searching from before the current slash.
-			i = slashIndex - 1;
-		}
-	}
-
-	writeString(view, USTAR.name.offset, USTAR.name.size, name);
-	writeOctal(
-		view,
-		USTAR.mode.offset,
-		USTAR.mode.size,
-		header.mode ??
-			(header.type === "directory" ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE),
-	);
-	writeOctal(view, USTAR.uid.offset, USTAR.uid.size, header.uid ?? 0);
-	writeOctal(view, USTAR.gid.offset, USTAR.gid.size, header.gid ?? 0);
-	writeOctal(view, USTAR.size.offset, USTAR.size.size, size);
-	writeOctal(
-		view,
-		USTAR.mtime.offset,
-		USTAR.mtime.size,
-		Math.floor((header.mtime?.getTime() ?? Date.now()) / 1000),
-	);
-	writeString(
-		view,
-		USTAR.typeflag.offset,
-		USTAR.typeflag.size,
-		TYPEFLAG[header.type ?? "file"],
-	);
-	writeString(
-		view,
-		USTAR.linkname.offset,
-		USTAR.linkname.size,
-		header.linkname,
-	);
-
-	writeString(view, USTAR.magic.offset, USTAR.magic.size, "ustar\0");
-	writeString(view, USTAR.version.offset, USTAR.version.size, USTAR_VERSION);
-	writeString(view, USTAR.uname.offset, USTAR.uname.size, header.uname);
-	writeString(view, USTAR.gname.offset, USTAR.gname.size, header.gname);
-	writeString(view, USTAR.prefix.offset, USTAR.prefix.size, prefix);
-
-	// Fill the checksum field with spaces before calculating.
-	view.fill(
-		CHECKSUM_SPACE,
-		USTAR.checksum.offset,
-		USTAR.checksum.offset + USTAR.checksum.size,
-	);
-
-	// Sum all bytes in the header.
-	let checksum = 0;
-	for (const byte of view) {
-		checksum += byte;
-	}
-
-	// Write the final checksum value, formatted as a 6-digit octal string followed by a NUL and a space.
-	const checksumString = `${checksum.toString(8).padStart(6, "0")}\0 `;
-	writeString(view, USTAR.checksum.offset, USTAR.checksum.size, checksumString);
-
-	return view;
-}
-
-/**
  * Create a streaming tar packer.
  *
- * This function provides a controller-based API for creating tar archives, suitable
- * for scenarios where entries are generated dynamically or when you need control over
- * the packing process. The returned [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)
+ * Provides a controller-based API for creating tar archives, suitable for scenarios where entries are
+ * generated dynamically. The returned [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)
  * outputs tar archive bytes as entries are added.
  *
  * @returns Object containing the readable stream and controller
@@ -179,7 +83,7 @@ export function createTarHeader(header: TarHeader): Uint8Array {
  *
  * @example
  * ```typescript
- * import { createTarPacker } from '@modern-tar/core';
+ * import { createTarPacker } from 'modern-tar';
  *
  * const { readable, controller } = createTarPacker();
  *
@@ -335,4 +239,99 @@ export function createTarPacker(): {
 	};
 
 	return { readable, controller: packController };
+}
+
+/**
+ * Creates a 512-byte USTAR format tar header block from a TarHeader object.
+ */
+export function createTarHeader(header: TarHeader): Uint8Array {
+	const view = new Uint8Array(BLOCK_SIZE);
+
+	// Entries without a data body (like directories) have a size of 0.
+	const isBodyless =
+		header.type === "directory" ||
+		header.type === "symlink" ||
+		header.type === "link";
+	const size = isBodyless ? 0 : (header.size ?? 0);
+
+	// If a filename is >100 chars, USTAR allows splitting it into a 155-char prefix and a 100-char name.
+	let name = header.name;
+	let prefix = "";
+
+	if (name.length > USTAR.name.size) {
+		// We search backwards for the rightmost '/' that allows a valid split.
+		let i = name.length;
+		while (i > 0) {
+			const slashIndex = name.lastIndexOf("/", i);
+			// No suitable slash found.
+			if (slashIndex === -1) break;
+
+			const p = name.slice(0, slashIndex);
+			const n = name.slice(slashIndex + 1);
+
+			if (p.length <= USTAR.prefix.size && n.length <= USTAR.name.size) {
+				prefix = p;
+				name = n;
+				break;
+			}
+
+			// Continue searching from before the current slash.
+			i = slashIndex - 1;
+		}
+	}
+
+	writeString(view, USTAR.name.offset, USTAR.name.size, name);
+	writeOctal(
+		view,
+		USTAR.mode.offset,
+		USTAR.mode.size,
+		header.mode ??
+			(header.type === "directory" ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE),
+	);
+	writeOctal(view, USTAR.uid.offset, USTAR.uid.size, header.uid ?? 0);
+	writeOctal(view, USTAR.gid.offset, USTAR.gid.size, header.gid ?? 0);
+	writeOctal(view, USTAR.size.offset, USTAR.size.size, size);
+	writeOctal(
+		view,
+		USTAR.mtime.offset,
+		USTAR.mtime.size,
+		Math.floor((header.mtime?.getTime() ?? Date.now()) / 1000),
+	);
+	writeString(
+		view,
+		USTAR.typeflag.offset,
+		USTAR.typeflag.size,
+		TYPEFLAG[header.type ?? "file"],
+	);
+	writeString(
+		view,
+		USTAR.linkname.offset,
+		USTAR.linkname.size,
+		header.linkname,
+	);
+
+	writeString(view, USTAR.magic.offset, USTAR.magic.size, "ustar\0");
+	writeString(view, USTAR.version.offset, USTAR.version.size, USTAR_VERSION);
+	writeString(view, USTAR.uname.offset, USTAR.uname.size, header.uname);
+	writeString(view, USTAR.gname.offset, USTAR.gname.size, header.gname);
+	writeString(view, USTAR.prefix.offset, USTAR.prefix.size, prefix);
+
+	// Fill the checksum field with spaces before calculating.
+	view.fill(
+		CHECKSUM_SPACE,
+		USTAR.checksum.offset,
+		USTAR.checksum.offset + USTAR.checksum.size,
+	);
+
+	// Sum all bytes in the header.
+	let checksum = 0;
+	for (const byte of view) {
+		checksum += byte;
+	}
+
+	// Write the final checksum value, formatted as a 6-digit octal string followed by a NUL and a space.
+	const checksumString = `${checksum.toString(8).padStart(6, "0")}\0 `;
+	writeString(view, USTAR.checksum.offset, USTAR.checksum.size, checksumString);
+
+	return view;
 }

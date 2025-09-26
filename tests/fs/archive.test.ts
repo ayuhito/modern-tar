@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { packTarSources, type TarSource, unpackTar } from "../../src/fs/index";
+import { packTarSources, type TarSource, unpackTar } from "../../src/fs";
 
 const isWindows = process.platform === "win32";
 

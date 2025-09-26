@@ -5,7 +5,7 @@ export {
 	createTarPacker,
 	type TarPackController,
 } from "./pack";
-export { createTarDecoder } from "./stream";
+export { createTarDecoder } from "./unpack";
 export type {
 	ParsedTarEntry,
 	ParsedTarEntryWithData,
