@@ -4,7 +4,7 @@ import {
 	createGzipDecoder,
 	type ParsedTarEntryWithData,
 	unpackTar,
-} from "../../src/web/index";
+} from "../../src/web";
 import { ELECTRON_TGZ, LODASH_TGZ, NEXT_SWC_TGZ, SHARP_TGZ } from "./fixtures";
 
 async function extractTgz(filePath: string): Promise<ParsedTarEntryWithData[]> {

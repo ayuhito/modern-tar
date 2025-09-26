@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { packTar, unpackTar } from "../../src/fs/index";
+import { packTar, unpackTar } from "../../src/fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");

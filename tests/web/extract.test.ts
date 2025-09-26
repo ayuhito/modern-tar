@@ -1,8 +1,6 @@
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { packTar } from "../../src/web";
-import { unpackTar } from "../../src/web/index";
-import { createTarDecoder } from "../../src/web/stream";
+import { createTarDecoder, packTar, unpackTar } from "../../src/web";
 import { decoder } from "../../src/web/utils";
 import {
 	GNU_TAR,
