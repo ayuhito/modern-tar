@@ -2,113 +2,21 @@ import { BLOCK_SIZE, CHECKSUM_SPACE, FLAGTYPE, USTAR } from "./constants";
 import type { ParsedTarEntry, TarHeader } from "./types";
 import { decoder, readOctal, readString } from "./utils";
 
-function validateChecksum(block: Uint8Array): boolean {
-	const storedChecksum = readOctal(block, USTAR.checksum.offset, USTAR.checksum.size);
-
-	// Create a temporary copy to modify for calculation
-	const blockCopy = new Uint8Array(block);
-
-	// Blank out the checksum field with spaces
-	blockCopy.fill(
-		CHECKSUM_SPACE,
-		USTAR.checksum.offset,
-		USTAR.checksum.offset + USTAR.checksum.size,
-	);
-
-	let calculatedChecksum = 0;
-	for (const byte of blockCopy) {
-		calculatedChecksum += byte;
-	}
-
-	return storedChecksum === calculatedChecksum;
-}
-
-function parseHeader(block: Uint8Array): TarHeader {
-	if (!validateChecksum(block)) {
-		throw new Error("Invalid tar header checksum");
-	}
-
-	let name = readString(block, USTAR.name.offset, USTAR.name.size);
-
-	// The "ustar" magic string is 5 bytes, followed by a NUL.
-	const isUstar =
-		readString(block, USTAR.magic.offset, USTAR.magic.size) === "ustar";
-
-	if (isUstar) {
-		const prefix = readString(block, USTAR.prefix.offset, USTAR.prefix.size);
-		if (prefix) {
-			name = `${prefix}/${name}`;
-		}
-	}
-
-	const typeFlag = readString(
-		block,
-		USTAR.typeflag.offset,
-		USTAR.typeflag.size,
-	) as keyof typeof FLAGTYPE;
-
-	return {
-		name,
-		mode: readOctal(block, USTAR.mode.offset, USTAR.mode.size),
-		uid: readOctal(block, USTAR.uid.offset, USTAR.uid.size),
-		gid: readOctal(block, USTAR.gid.offset, USTAR.gid.size),
-		size: readOctal(block, USTAR.size.offset, USTAR.size.size),
-		mtime: new Date(
-			readOctal(block, USTAR.mtime.offset, USTAR.mtime.size) * 1000,
-		),
-		type: FLAGTYPE[typeFlag] || "file",
-		linkname: readString(block, USTAR.linkname.offset, USTAR.linkname.size),
-		uname: readString(block, USTAR.uname.offset, USTAR.uname.size),
-		gname: readString(block, USTAR.gname.offset, USTAR.gname.size),
-	};
-}
-
-function parsePax(buffer: Uint8Array): Record<string, string> {
-	const pax: Record<string, string> = {};
-
-	let offset = 0;
-	while (offset < buffer.length) {
-		// Find the first space character to find the length of the record.
-		const spaceIndex = buffer.indexOf(32, offset);
-		if (spaceIndex === -1) break;
-
-		const lengthStr = decoder.decode(buffer.subarray(offset, spaceIndex));
-		const length = Number.parseInt(lengthStr, 10);
-		if (!length) break;
-
-		const recordEnd = offset + length;
-		const recordStr = decoder.decode(
-			buffer.subarray(spaceIndex + 1, recordEnd - 1),
-		);
-
-		const [key, value] = recordStr.split("=", 2);
-		if (key && value !== undefined) {
-			pax[key] = value;
-		}
-
-		offset = recordEnd;
-	}
-
-	return pax;
-}
-
-// Helper to apply PAX metadata to a USTAR header.
-function applyPax(header: TarHeader, pax: Record<string, string>) {
-	header.name = pax.path ?? header.name;
-	header.linkname = pax.linkpath ?? header.linkname;
-
-	if (pax.size) header.size = Number.parseInt(pax.size, 10);
-	if (pax.mtime) header.mtime = new Date(Number.parseFloat(pax.mtime) * 1000);
-	if (pax.uid) header.uid = Number.parseInt(pax.uid, 10);
-	if (pax.gid) header.gid = Number.parseInt(pax.gid, 10);
-
-	header.uname = pax.uname ?? header.uname;
-	header.gname = pax.gname ?? header.gname;
-	header.pax = pax;
-}
-
 /**
- * Creates a TransformStream that parses a tar archive into ParsedTarEntry objects.
+ * Create a transform stream that parses tar bytes into entries.
+ *
+ * @returns `TransformStream` that converts tar archive bytes to {@link ParsedTarEntry} objects.
+ * @example
+ * ```typescript
+ * import { createTarDecoder } from 'modern-tar';
+ *
+ * const decoder = createTarDecoder();
+ * const entriesStream = tarStream.pipeThrough(decoder);
+ *
+ * for await (const entry of entriesStream) {
+ *  console.log(`Entry: ${entry.header.name}`);
+ *  // Process entry.body stream as needed
+ * }
  */
 export function createTarDecoder(): TransformStream<
 	Uint8Array,
@@ -122,14 +30,6 @@ export function createTarDecoder(): TransformStream<
 	} | null = null;
 	let pax: Record<string, string> | null = null;
 	let paxGlobal: Record<string, string> = {};
-
-	const closeEntryBody = () => {
-		try {
-			currentEntry?.controller.close();
-		} catch {
-			// Suppress errors if stream is already closed.
-		}
-	};
 
 	return new TransformStream({
 		transform(chunk, controller) {
@@ -166,7 +66,12 @@ export function createTarDecoder(): TransformStream<
 							break;
 						}
 
-						closeEntryBody();
+						try {
+							currentEntry?.controller.close();
+						} catch {
+							// Suppress errors if stream is already closed.
+						}
+
 						offset += padding;
 						currentEntry = null;
 					} else {
@@ -265,4 +170,113 @@ export function createTarDecoder(): TransformStream<
 				controller.error(new Error("Unexpected data at end of archive."));
 		},
 	});
+}
+
+function parseHeader(block: Uint8Array): TarHeader {
+	if (!validateChecksum(block)) {
+		throw new Error("Invalid tar header checksum");
+	}
+
+	let name = readString(block, USTAR.name.offset, USTAR.name.size);
+
+	// The "ustar" magic string is 5 bytes, followed by a NUL.
+	const isUstar =
+		readString(block, USTAR.magic.offset, USTAR.magic.size) === "ustar";
+
+	if (isUstar) {
+		const prefix = readString(block, USTAR.prefix.offset, USTAR.prefix.size);
+		if (prefix) {
+			name = `${prefix}/${name}`;
+		}
+	}
+
+	const typeFlag = readString(
+		block,
+		USTAR.typeflag.offset,
+		USTAR.typeflag.size,
+	) as keyof typeof FLAGTYPE;
+
+	return {
+		name,
+		mode: readOctal(block, USTAR.mode.offset, USTAR.mode.size),
+		uid: readOctal(block, USTAR.uid.offset, USTAR.uid.size),
+		gid: readOctal(block, USTAR.gid.offset, USTAR.gid.size),
+		size: readOctal(block, USTAR.size.offset, USTAR.size.size),
+		mtime: new Date(
+			readOctal(block, USTAR.mtime.offset, USTAR.mtime.size) * 1000,
+		),
+		type: FLAGTYPE[typeFlag] || "file",
+		linkname: readString(block, USTAR.linkname.offset, USTAR.linkname.size),
+		uname: readString(block, USTAR.uname.offset, USTAR.uname.size),
+		gname: readString(block, USTAR.gname.offset, USTAR.gname.size),
+	};
+}
+
+function parsePax(buffer: Uint8Array): Record<string, string> {
+	const pax: Record<string, string> = {};
+
+	let offset = 0;
+	while (offset < buffer.length) {
+		// Find the first space character to find the length of the record.
+		const spaceIndex = buffer.indexOf(32, offset);
+		if (spaceIndex === -1) break;
+
+		const lengthStr = decoder.decode(buffer.subarray(offset, spaceIndex));
+		const length = Number.parseInt(lengthStr, 10);
+		if (!length) break;
+
+		const recordEnd = offset + length;
+		const recordStr = decoder.decode(
+			buffer.subarray(spaceIndex + 1, recordEnd - 1),
+		);
+
+		const [key, value] = recordStr.split("=", 2);
+		if (key && value !== undefined) {
+			pax[key] = value;
+		}
+
+		offset = recordEnd;
+	}
+
+	return pax;
+}
+
+// Helper to apply PAX metadata to a USTAR header.
+function applyPax(header: TarHeader, pax: Record<string, string>) {
+	header.name = pax.path ?? header.name;
+	header.linkname = pax.linkpath ?? header.linkname;
+
+	if (pax.size) header.size = Number.parseInt(pax.size, 10);
+	if (pax.mtime) header.mtime = new Date(Number.parseFloat(pax.mtime) * 1000);
+	if (pax.uid) header.uid = Number.parseInt(pax.uid, 10);
+	if (pax.gid) header.gid = Number.parseInt(pax.gid, 10);
+
+	header.uname = pax.uname ?? header.uname;
+	header.gname = pax.gname ?? header.gname;
+	header.pax = pax;
+}
+
+function validateChecksum(block: Uint8Array): boolean {
+	const storedChecksum = readOctal(
+		block,
+		USTAR.checksum.offset,
+		USTAR.checksum.size,
+	);
+
+	// Create a temporary copy to modify for calculation
+	const blockCopy = new Uint8Array(block);
+
+	// Blank out the checksum field with spaces
+	blockCopy.fill(
+		CHECKSUM_SPACE,
+		USTAR.checksum.offset,
+		USTAR.checksum.offset + USTAR.checksum.size,
+	);
+
+	let calculatedChecksum = 0;
+	for (const byte of blockCopy) {
+		calculatedChecksum += byte;
+	}
+
+	return storedChecksum === calculatedChecksum;
 }

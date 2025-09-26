@@ -6,57 +6,6 @@ import { pipeline } from "node:stream/promises";
 import { createTarPacker, type TarPackController } from "../web/index";
 import type { TarSource } from "./types";
 
-async function addFileToPacker(
-	controller: TarPackController,
-	sourcePath: string,
-	targetPath: string,
-): Promise<void> {
-	const stat = await fs.stat(sourcePath);
-	const entryStream = controller.add({
-		name: targetPath,
-		size: stat.size,
-		mode: stat.mode,
-		mtime: stat.mtime,
-		type: "file",
-	});
-	await pipeline(createReadStream(sourcePath), Writable.fromWeb(entryStream));
-}
-
-async function addDirectoryToPacker(
-	controller: TarPackController,
-	sourcePath: string,
-	targetPathInArchive: string,
-): Promise<void> {
-	// Add the directory entry itself first.
-	const sourceStat = await fs.stat(sourcePath);
-	controller
-		.add({
-			name: `${targetPathInArchive}/`, // Directories in tar must end with a slash.
-			type: "directory",
-			mode: sourceStat.mode,
-			mtime: sourceStat.mtime,
-			size: 0,
-		})
-		.close();
-
-	const dirents = await fs.readdir(sourcePath, { withFileTypes: true });
-
-	// Process all directory contents sequentially.
-	for (const dirent of dirents) {
-		const fullSourcePath = path.join(sourcePath, dirent.name);
-		const archiveEntryPath = path
-			.join(targetPathInArchive, dirent.name)
-			// Normalize to forward slashes for tar format.
-			.replace(/\\/g, "/");
-
-		if (dirent.isDirectory()) {
-			await addDirectoryToPacker(controller, fullSourcePath, archiveEntryPath);
-		} else if (dirent.isFile()) {
-			await addFileToPacker(controller, fullSourcePath, archiveEntryPath);
-		}
-	}
-}
-
 /**
  * Packs multiple sources into a tar archive as a Node.js Readable stream from an
  * array of sources (files, directories, or raw content).
@@ -168,4 +117,55 @@ export function packTarSources(sources: TarSource[]): Readable {
 		.catch((err) => controller.error(err as Error));
 
 	return Readable.fromWeb(readable);
+}
+
+async function addFileToPacker(
+	controller: TarPackController,
+	sourcePath: string,
+	targetPath: string,
+): Promise<void> {
+	const stat = await fs.stat(sourcePath);
+	const entryStream = controller.add({
+		name: targetPath,
+		size: stat.size,
+		mode: stat.mode,
+		mtime: stat.mtime,
+		type: "file",
+	});
+	await pipeline(createReadStream(sourcePath), Writable.fromWeb(entryStream));
+}
+
+async function addDirectoryToPacker(
+	controller: TarPackController,
+	sourcePath: string,
+	targetPathInArchive: string,
+): Promise<void> {
+	// Add the directory entry itself first.
+	const sourceStat = await fs.stat(sourcePath);
+	controller
+		.add({
+			name: `${targetPathInArchive}/`, // Directories in tar must end with a slash.
+			type: "directory",
+			mode: sourceStat.mode,
+			mtime: sourceStat.mtime,
+			size: 0,
+		})
+		.close();
+
+	const dirents = await fs.readdir(sourcePath, { withFileTypes: true });
+
+	// Process all directory contents sequentially.
+	for (const dirent of dirents) {
+		const fullSourcePath = path.join(sourcePath, dirent.name);
+		const archiveEntryPath = path
+			.join(targetPathInArchive, dirent.name)
+			// Normalize to forward slashes for tar format.
+			.replace(/\\/g, "/");
+
+		if (dirent.isDirectory()) {
+			await addDirectoryToPacker(controller, fullSourcePath, archiveEntryPath);
+		} else if (dirent.isFile()) {
+			await addFileToPacker(controller, fullSourcePath, archiveEntryPath);
+		}
+	}
 }

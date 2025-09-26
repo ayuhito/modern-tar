@@ -1,4 +1,4 @@
-import * as fs from "node:fs/promises";
+import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
 	createGzipDecoder,
@@ -8,22 +8,17 @@ import {
 import { ELECTRON_TGZ, LODASH_TGZ, NEXT_SWC_TGZ, SHARP_TGZ } from "./fixtures";
 
 async function extractTgz(filePath: string): Promise<ParsedTarEntryWithData[]> {
-	const buffer = await fs.readFile(filePath);
+	// @ts-expect-error ReadableStream.from is supported in Node tests
+	const fileStream = ReadableStream.from(fs.createReadStream(filePath));
 
-	// Create a stream from the buffer
-	// @ts-expect-error ReadableStream.from is supported
-	const gzippedStream = ReadableStream.from([buffer]);
-
-	// Decompress the stream and buffer the result
-	const tarStream = gzippedStream.pipeThrough(createGzipDecoder());
+	const tarStream = fileStream.pipeThrough(createGzipDecoder());
 	const tarBuffer = await new Response(tarStream).arrayBuffer();
 
-	// Unpack the tar archive and return its entries
 	return unpackTar(tarBuffer);
 }
 
 describe("real world examples", () => {
-	it("extracts a large, real-world npm package (lodash)", async () => {
+	it("extracts a real-world npm package (lodash)", async () => {
 		const entries = await extractTgz(LODASH_TGZ);
 
 		const filesAndDirs = entries.filter(

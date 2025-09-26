@@ -47,10 +47,10 @@ export const TYPEFLAG = {
 
 /** Reverse mapping from flag characters to type names. */
 export const FLAGTYPE = {
-	[TYPEFLAG.file]: "file",
-	[TYPEFLAG.link]: "link",
-	[TYPEFLAG.symlink]: "symlink",
-	[TYPEFLAG.directory]: "directory",
-	[TYPEFLAG["pax-header"]]: "pax-header",
-	[TYPEFLAG["pax-global-header"]]: "pax-global-header",
+	"0": "file",
+	"1": "link",
+	"2": "symlink",
+	"5": "directory",
+	x: "pax-header",
+	g: "pax-global-header",
 } as const;

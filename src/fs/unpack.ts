@@ -19,7 +19,7 @@ import type { UnpackOptionsFS } from "./types";
  *
  * @example
  * ```typescript
- * import { unpackTar } from '@modern-tar/fs';
+ * import { unpackTar } from 'modern-tar/fs';
  * import { createReadStream } from 'node:fs';
  * import { pipeline } from 'node:stream/promises';
  *
