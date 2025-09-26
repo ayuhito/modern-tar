@@ -137,10 +137,14 @@ export async function unpackTar(
 	const sourceStream: ReadableStream<Uint8Array> =
 		archive instanceof ReadableStream
 			? archive
-			: // @ts-expect-error ReadableStream.from is supported.
-			  ReadableStream.from([
-					archive instanceof Uint8Array ? archive : new Uint8Array(archive),
-			  ]);
+			: new ReadableStream<Uint8Array>({
+					start(controller) {
+						const data =
+							archive instanceof Uint8Array ? archive : new Uint8Array(archive);
+						controller.enqueue(data);
+						controller.close();
+					},
+				});
 
 	const results: ParsedTarEntryWithData[] = [];
 
@@ -148,9 +152,17 @@ export async function unpackTar(
 		.pipeThrough(createTarDecoder())
 		.pipeThrough(createTarOptionsTransformer(options));
 
-	for await (const entry of entryStream) {
-		const data = new Uint8Array(await new Response(entry.body).arrayBuffer());
-		results.push({ header: entry.header, data });
+	const reader = entryStream.getReader();
+	try {
+		while (true) {
+			const { done, value: entry } = await reader.read();
+			if (done) break;
+
+			const data = new Uint8Array(await new Response(entry.body).arrayBuffer());
+			results.push({ header: entry.header, data });
+		}
+	} finally {
+		reader.releaseLock();
 	}
 
 	return results;
