@@ -59,7 +59,8 @@ const entries = [
 const tarBuffer = await packTar(entries);
 
 // Unpack tar buffer into entries
-for await (const entry of unpackTar(tarBuffer)) {
+const entries = await unpackTar(tarBuffer);
+for (const entry of entries) {
 	console.log(`File: ${entry.header.name}`);
 	const content = new TextDecoder().decode(entry.data);
 	console.log(`Content: ${content}`);
@@ -114,7 +115,8 @@ if (!response.body) throw new Error('No response body');
 const tarStream = response.body.pipeThrough(createGzipDecoder());
 
 // Use `unpackTar` for buffered extraction or `createTarDecoder` for streaming
-for await (const entry of unpackTar(tarStream)) {
+const entries = await unpackTar(tarStream);
+for (const entry of entries) {
 	console.log(`Extracted: ${entry.header.name}`);
 	const content = new TextDecoder().decode(entry.data);
 	console.log(`Content: ${content}`);
@@ -419,7 +421,7 @@ interface ParsedTarEntry {
 // Output entry from a buffered unpack function
 interface ParsedTarEntryWithData {
 	header: TarHeader;
-	data: Uint8Array;
+	data: Uint8Array<ArrayBuffer>;
 }
 
 // Platform-neutral configuration for unpacking
