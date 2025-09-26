@@ -1,6 +1,6 @@
 {
 	"name": "modern-tar",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Zero dependency streaming tar parser and writer for JavaScript.",
 	"author": "Ayuhito <hello@ayuhito.com>",
 	"license": "MIT",
