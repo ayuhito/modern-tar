@@ -127,7 +127,7 @@ await fetch('/api/upload', {
 ```
 
 ```typescript
-import { createGzipDecoder, createTarDecoder } from 'modern-tar';
+import { createGzipDecoder, createTarDecoder, unpackTar } from 'modern-tar';
 
 // Download and process a .tar.gz file
 const response = await fetch('https://api.example.com/archive.tar.gz');
