@@ -1,8 +1,33 @@
-import { BLOCK_SIZE, FLAGTYPE, USTAR } from "./constants";
+import { BLOCK_SIZE, CHECKSUM_SPACE, FLAGTYPE, USTAR } from "./constants";
 import type { ParsedTarEntry, TarHeader } from "./types";
 import { decoder, readOctal, readString } from "./utils";
 
+function validateChecksum(block: Uint8Array): boolean {
+	const storedChecksum = readOctal(block, USTAR.checksum.offset, USTAR.checksum.size);
+
+	// Create a temporary copy to modify for calculation
+	const blockCopy = new Uint8Array(block);
+
+	// Blank out the checksum field with spaces
+	blockCopy.fill(
+		CHECKSUM_SPACE,
+		USTAR.checksum.offset,
+		USTAR.checksum.offset + USTAR.checksum.size,
+	);
+
+	let calculatedChecksum = 0;
+	for (const byte of blockCopy) {
+		calculatedChecksum += byte;
+	}
+
+	return storedChecksum === calculatedChecksum;
+}
+
 function parseHeader(block: Uint8Array): TarHeader {
+	if (!validateChecksum(block)) {
+		throw new Error("Invalid tar header checksum");
+	}
+
 	let name = readString(block, USTAR.name.offset, USTAR.name.size);
 
 	// The "ustar" magic string is 5 bytes, followed by a NUL.
