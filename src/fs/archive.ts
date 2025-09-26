@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createTarPacker, type TarPackController } from "../web/index";
+import { encoder } from "../web/utils";
 import type { TarSource } from "./types";
 
 /**
@@ -57,7 +58,9 @@ export function packTarSources(sources: TarSource[]): Readable {
 							mode,
 							type: "file",
 						});
+
 						await content.stream().pipeTo(entryStream);
+
 						break;
 					}
 
@@ -89,12 +92,16 @@ export function packTarSources(sources: TarSource[]): Readable {
 					let data: Uint8Array;
 					if (content === null || content === undefined) {
 						data = new Uint8Array(0);
-					} else if (typeof content === "string") {
-						data = Buffer.from(content);
+					} else if (content instanceof Uint8Array) {
+						data = content;
 					} else if (content instanceof ArrayBuffer) {
 						data = new Uint8Array(content);
+					} else if (typeof content === "string") {
+						data = encoder.encode(content);
 					} else {
-						data = content;
+						throw new TypeError(
+							`Unsupported content type for entry "${targetPath}". Expected string, Uint8Array, ArrayBuffer, Blob, ReadableStream, or undefined.`,
+						);
 					}
 
 					const entryStream = controller.add({

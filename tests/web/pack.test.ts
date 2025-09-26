@@ -238,4 +238,45 @@ describe("pack", () => {
 		expect(extractedEntries[1].header.type).toBe("directory");
 		expect(extractedEntries[1].header.mode).toBe(0o755);
 	});
+
+	it("errors for invalid body types", async () => {
+		// Test invalid body types that could come from JavaScript usage or dynamic data
+		const invalidEntries: TarEntry[] = [
+			{
+				header: { name: "test.txt", size: 0, type: "file" },
+				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+				body: true as any, // boolean
+			},
+		];
+
+		await expect(packTar(invalidEntries)).rejects.toThrow(
+			/Unsupported content type/,
+		);
+
+		// Test with object
+		const objectEntries: TarEntry[] = [
+			{
+				header: { name: "obj.txt", size: 0, type: "file" },
+				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+				body: { invalid: "object" } as any,
+			},
+		];
+
+		await expect(packTar(objectEntries)).rejects.toThrow(
+			/Unsupported content type/,
+		);
+
+		// Test with number
+		const numberEntries: TarEntry[] = [
+			{
+				header: { name: "num.txt", size: 0, type: "file" },
+				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+				body: 123 as any,
+			},
+		];
+
+		await expect(packTar(numberEntries)).rejects.toThrow(
+			/Unsupported content type/,
+		);
+	});
 });
