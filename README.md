@@ -421,7 +421,7 @@ interface ParsedTarEntry {
 // Output entry from a buffered unpack function
 interface ParsedTarEntryWithData {
 	header: TarHeader;
-	data: Uint8Array<ArrayBuffer>;
+	data: Uint8Array;
 }
 
 // Platform-neutral configuration for unpacking

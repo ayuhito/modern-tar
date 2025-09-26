@@ -5,6 +5,7 @@ import {
 	type ParsedTarEntryWithData,
 	unpackTar,
 } from "../../src/web";
+import { streamToBuffer } from "../../src/web/utils";
 import { ELECTRON_TGZ, LODASH_TGZ, NEXT_SWC_TGZ, SHARP_TGZ } from "./fixtures";
 
 async function extractTgz(filePath: string): Promise<ParsedTarEntryWithData[]> {
@@ -12,7 +13,7 @@ async function extractTgz(filePath: string): Promise<ParsedTarEntryWithData[]> {
 	const fileStream = ReadableStream.from(fs.createReadStream(filePath));
 
 	const tarStream = fileStream.pipeThrough(createGzipDecoder());
-	const tarBuffer = await new Response(tarStream).arrayBuffer();
+	const tarBuffer = await streamToBuffer(tarStream);
 
 	return unpackTar(tarBuffer);
 }

@@ -2,7 +2,7 @@ import { createTarOptionsTransformer } from "./options";
 import { createTarPacker } from "./pack";
 import type { ParsedTarEntryWithData, TarEntry, UnpackOptions } from "./types";
 import { createTarDecoder } from "./unpack";
-import { encoder } from "./utils";
+import { encoder, streamToBuffer } from "./utils";
 
 /**
  * Packs an array of tar entries into a single `Uint8Array` buffer.
@@ -85,7 +85,7 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
 		.then(() => controller.finalize())
 		.catch((err) => controller.error(err));
 
-	const buffer = await new Response(readable).arrayBuffer();
+	const buffer = await streamToBuffer(readable);
 
 	// Await the packing promise to ensure any background errors are thrown.
 	await packingPromise;
@@ -163,7 +163,7 @@ export async function unpackTar(
 			const { done, value: entry } = await reader.read();
 			if (done) break;
 
-			const data = new Uint8Array(await new Response(entry.body).arrayBuffer());
+			const data = await streamToBuffer(entry.body);
 			results.push({ header: entry.header, data });
 		}
 	} finally {

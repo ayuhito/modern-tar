@@ -77,7 +77,7 @@ export interface ParsedTarEntry {
  */
 export interface ParsedTarEntryWithData {
 	header: TarHeader;
-	data: Uint8Array<ArrayBuffer>;
+	data: Uint8Array;
 }
 
 /**
