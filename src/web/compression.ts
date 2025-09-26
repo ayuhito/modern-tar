@@ -1,8 +1,7 @@
 /**
- * Creates a gzip compression stream using the native
- * [`CompressionStream`](https://developer.mozilla.org/en-US/docs/Web/API/CompressionStream) API.
+ * Creates a gzip compression stream that is compatible with Uint8Array streams.
  *
- * @returns A [`CompressionStream`](https://developer.mozilla.org/en-US/docs/Web/API/CompressionStream) configured for gzip compression
+ * @returns A {@link ReadableWritablePair} configured for gzip compression with proper Uint8Array typing
  * @example
  * ```typescript
  * import { createGzipEncoder, createTarPacker } from 'modern-tar';
@@ -26,15 +25,23 @@
  * });
  * ```
  */
-export function createGzipEncoder(): CompressionStream {
-	return new CompressionStream("gzip");
+export function createGzipEncoder(): ReadableWritablePair<
+	Uint8Array,
+	Uint8Array
+> {
+	// CompressionStream uses generic `BufferSource` types which is a union type that includes `Uint8Array`,
+	// while `pipeThrough` needs ONLY a `Uint8Array`. This causes type issues since TypeScript cannot guarantee
+	// the code will always be used with `Uint8Array`, so we assert this.
+	return new CompressionStream("gzip") as unknown as ReadableWritablePair<
+		Uint8Array,
+		Uint8Array
+	>;
 }
 
 /**
- * Creates a gzip decompression stream using the native
- * [`DecompressionStream`](https://developer.mozilla.org/en-US/docs/Web/API/DecompressionStream) API.
+ * Creates a gzip decompression stream that is compatible with Uint8Array streams.
  *
- * @returns A [`DecompressionStream`](https://developer.mozilla.org/en-US/docs/Web/API/DecompressionStream) configured for gzip decompression
+ * @returns A {@link ReadableWritablePair} configured for gzip decompression with proper Uint8Array typing
  * @example
  * ```typescript
  * import { createGzipDecoder, createTarDecoder } from 'modern-tar';
@@ -43,31 +50,43 @@ export function createGzipEncoder(): CompressionStream {
  * const response = await fetch('https://api.example.com/archive.tar.gz');
  * if (!response.body) throw new Error('No response body');
  *
- * // Chain decompression and tar parsing
+ * // Buffer entire archive
+ * const entries = await unpackTar(response.body.pipeThrough(createGzipDecoder()));
+ *
+ * for (const entry of entries) {
+ *   console.log(`Extracted: ${entry.header.name}`);
+ *   const content = new TextDecoder().decode(entry.data);
+ *   console.log(`Content: ${content}`);
+ * }
+ * ```
+ * @example
+ * ```typescript
+ * import { createGzipDecoder, createTarDecoder } from 'modern-tar';
+ *
+ * // Download and process a .tar.gz file
+ * const response = await fetch('https://api.example.com/archive.tar.gz');
+ * if (!response.body) throw new Error('No response body');
+ *
+ * // Chain decompression and tar parsing using streams
  * const entries = response.body
  *   .pipeThrough(createGzipDecoder())
  *   .pipeThrough(createTarDecoder());
  *
  * for await (const entry of entries) {
- *   console.log(`Extracted: ${entry.header.name}`);
+ * console.log(`Extracted: ${entry.header.name}`);
  *   // Process entry.body ReadableStream as needed
  * }
  * ```
- * @example
- * ```typescript
- * // Decompress local .tar.gz data
- * const gzippedData = new Uint8Array([...]); // your gzipped tar data
- * const stream = new ReadableStream({
- *   start(controller) {
- *     controller.enqueue(gzippedData);
- *     controller.close();
- *   }
- * });
- *
- * const tarStream = stream.pipeThrough(createGzipDecoder());
- * // Now process tarStream with createTarDecoder()...
- * ```
  */
-export function createGzipDecoder(): DecompressionStream {
-	return new DecompressionStream("gzip");
+export function createGzipDecoder(): ReadableWritablePair<
+	Uint8Array,
+	Uint8Array
+> {
+	// DecompressionStream uses generic `BufferSource` types which is a union type that includes `Uint8Array`,
+	// while `pipeThrough` needs ONLY a `Uint8Array`. This causes type issues since TypeScript cannot guarantee
+	// the code will always be used with `Uint8Array`, so we assert this.
+	return new DecompressionStream("gzip") as unknown as ReadableWritablePair<
+		Uint8Array,
+		Uint8Array
+	>;
 }

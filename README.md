@@ -105,21 +105,51 @@ for await (const entry of decodedStream) {
 #### Compression/Decompression (gzip)
 
 ```typescript
-import { createGzipDecoder, unpackTar } from 'modern-tar';
+import { createGzipEncoder, createTarPacker } from 'modern-tar';
 
-// Fetch a .tar.gz file stream
-const response = await fetch('https://example.com/archive.tar.gz');
+// Create and compress a tar archive
+const { readable, controller } = createTarPacker();
+const compressedStream = readable.pipeThrough(createGzipEncoder());
+
+// Add entries...
+const fileStream = controller.add({ name: "file.txt", size: 5, type: "file" });
+const writer = fileStream.getWriter();
+await writer.write(new TextEncoder().encode("hello"));
+await writer.close();
+controller.finalize();
+
+// Upload compressed .tar.gz
+await fetch('/api/upload', {
+  method: 'POST',
+  body: compressedStream,
+  headers: { 'Content-Type': 'application/gzip' }
+});
+```
+
+```typescript
+import { createGzipDecoder, createTarDecoder } from 'modern-tar';
+
+// Download and process a .tar.gz file
+const response = await fetch('https://api.example.com/archive.tar.gz');
 if (!response.body) throw new Error('No response body');
 
-// Decompress .tar.gz to .tar stream
-const tarStream = response.body.pipeThrough(createGzipDecoder());
+// Buffer entire archive
+const entries = await unpackTar(response.body.pipeThrough(createGzipDecoder()));
 
-// Use `unpackTar` for buffered extraction or `createTarDecoder` for streaming
-const entries = await unpackTar(tarStream);
 for (const entry of entries) {
 	console.log(`Extracted: ${entry.header.name}`);
 	const content = new TextDecoder().decode(entry.data);
 	console.log(`Content: ${content}`);
+}
+
+// Or chain decompression and tar parsing using streams
+const entries = response.body
+  .pipeThrough(createGzipDecoder())
+  .pipeThrough(createTarDecoder());
+
+for await (const entry of entries) {
+  console.log(`Extracted: ${entry.header.name}`);
+  // Process entry.body ReadableStream as needed
 }
 ```
 
