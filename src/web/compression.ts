@@ -1,7 +1,7 @@
 /**
  * Creates a gzip compression stream that is compatible with Uint8Array streams.
  *
- * @returns A {@link ReadableWritablePair} configured for gzip compression with proper Uint8Array typing
+ * @returns A {@link ReadableWritablePair} configured for gzip compression.
  * @example
  * ```typescript
  * import { createGzipEncoder, createTarPacker } from 'modern-tar';
@@ -41,7 +41,7 @@ export function createGzipEncoder(): ReadableWritablePair<
 /**
  * Creates a gzip decompression stream that is compatible with Uint8Array streams.
  *
- * @returns A {@link ReadableWritablePair} configured for gzip decompression with proper Uint8Array typing
+ * @returns A {@link ReadableWritablePair} configured for gzip decompression.
  * @example
  * ```typescript
  * import { createGzipDecoder, createTarDecoder } from 'modern-tar';
