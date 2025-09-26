@@ -116,7 +116,6 @@ export function packTarSources(sources: TarSource[]): Readable {
 					// to get the size. It's better to use Blob if possible.
 					if (content instanceof ReadableStream) {
 						const chunks: Buffer[] = [];
-
 						for await (const chunk of Readable.fromWeb(content)) {
 							chunks.push(chunk as Buffer);
 						}
