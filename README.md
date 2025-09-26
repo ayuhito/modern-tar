@@ -116,7 +116,7 @@ const tarStream = response.body.pipeThrough(createGzipDecoder());
 
 // Use `unpackTar` for buffered extraction or `createTarDecoder` for streaming
 const entries = await unpackTar(tarStream);
-for await (const entry of entries) {
+for (const entry of entries) {
 	console.log(`Extracted: ${entry.header.name}`);
 	const content = new TextDecoder().decode(entry.data);
 	console.log(`Content: ${content}`);
