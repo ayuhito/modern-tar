@@ -1,13 +1,12 @@
+import { writeChecksum } from "./checksum";
 import {
 	BLOCK_SIZE,
-	CHECKSUM_SPACE,
 	DEFAULT_DIR_MODE,
 	DEFAULT_FILE_MODE,
 	TYPEFLAG,
 	USTAR,
 	USTAR_VERSION,
 } from "./constants";
-
 import type { TarHeader } from "./types";
 import { encoder, writeOctal, writeString } from "./utils";
 
@@ -316,22 +315,8 @@ export function createTarHeader(header: TarHeader): Uint8Array {
 	writeString(view, USTAR.gname.offset, USTAR.gname.size, header.gname);
 	writeString(view, USTAR.prefix.offset, USTAR.prefix.size, prefix);
 
-	// Fill the checksum field with spaces before calculating.
-	view.fill(
-		CHECKSUM_SPACE,
-		USTAR.checksum.offset,
-		USTAR.checksum.offset + USTAR.checksum.size,
-	);
-
-	// Sum all bytes in the header.
-	let checksum = 0;
-	for (const byte of view) {
-		checksum += byte;
-	}
-
-	// Write the final checksum value, formatted as a 6-digit octal string followed by a NUL and a space.
-	const checksumString = `${checksum.toString(8).padStart(6, "0")}\0 `;
-	writeString(view, USTAR.checksum.offset, USTAR.checksum.size, checksumString);
+	// Calculate and write the checksum.
+	writeChecksum(view);
 
 	return view;
 }
