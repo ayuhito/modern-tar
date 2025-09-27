@@ -247,8 +247,7 @@ function parseUstarHeader(block: Uint8Array, strict: boolean): InternalTarHeader
 	) as keyof typeof FLAGTYPE;
 
 	const magic = readString(block, USTAR.magic.offset, USTAR.magic.size);
-
-	if (strict && !magic.startsWith("ustar")) {
+	if (strict && magic !== "ustar") {
 		throw new Error(`Invalid USTAR magic: expected "ustar", got "${magic}"`);
 	}
 
