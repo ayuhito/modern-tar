@@ -85,6 +85,240 @@ describe("extract", () => {
 		expect(extractedStat.mode).toBe(originalStat.mode);
 	});
 
+	it("handles directory mode override", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+
+		const entries = [
+			{
+				header: {
+					name: "testdir",
+					size: 0,
+					type: "directory" as const,
+					mode: 0o700,
+				},
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir, {
+			dmode: 0o755, // Override directory mode
+		});
+
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		const dirPath = path.join(destDir, "testdir");
+		const stats = await fs.stat(dirPath);
+
+		// Check that directory mode override was applied
+		if (process.platform === "win32") {
+			// On Windows, file permissions work differently - just check it's a directory
+			expect(stats.isDirectory()).toBe(true);
+		} else {
+			expect(stats.mode & 0o777).toBe(0o755);
+		}
+	});
+
+	it("handles symlink validation with cache invalidation", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+
+		// First create a directory, then replace it with a symlink
+		const entries = [
+			{
+				header: {
+					name: "testdir",
+					size: 0,
+					type: "directory" as const,
+					mode: 0o755,
+				},
+			},
+			{
+				header: {
+					name: "testsymlink",
+					size: 0,
+					type: "symlink" as const,
+					linkname: "testdir", // Safe symlink within extraction directory
+				},
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+
+		// This should handle cache invalidation properly
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		// Verify both directory and symlink were created
+		const dirStats = await fs.lstat(path.join(destDir, "testdir"));
+		expect(dirStats.isDirectory()).toBe(true);
+
+		const linkStats = await fs.lstat(path.join(destDir, "testsymlink"));
+		expect(linkStats.isSymbolicLink()).toBe(true);
+
+		const linkTarget = await fs.readlink(path.join(destDir, "testsymlink"));
+		expect(linkTarget).toBe("testdir");
+	});
+
+	it("handles file permissions and timestamps correctly", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+		const testTime = new Date("2020-01-01T12:00:00Z");
+
+		const entries = [
+			{
+				header: {
+					name: "test-file.txt",
+					size: 12,
+					type: "file" as const,
+					mode: 0o600, // Specific permissions
+					mtime: testTime,
+				},
+				body: "hello world\n",
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir, {
+			fmode: 0o644, // Override file mode
+		});
+
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		const filePath = path.join(destDir, "test-file.txt");
+		const stats = await fs.stat(filePath);
+
+		// Check that file mode override was applied
+		if (process.platform === "win32") {
+			// On Windows, file permissions work differently - just check it's a file
+			expect(stats.isFile()).toBe(true);
+		} else {
+			expect(stats.mode & 0o777).toBe(0o644);
+		}
+
+		const content = await fs.readFile(filePath, "utf8");
+		expect(content).toBe("hello world\n");
+	});
+
+	it("handles maxDepth validation", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+
+		const entries = [
+			{
+				header: {
+					name: "a/very/deep/nested/path/that/exceeds/max/depth.txt",
+					size: 12,
+					type: "file" as const,
+					mode: 0o644,
+				},
+				body: "hello world\n",
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir, { maxDepth: 3 });
+
+		await expect(
+			pipeline(Readable.from([tarBuffer]), unpackStream),
+		).rejects.toThrow(/Path depth.*exceeds the maximum allowed depth/);
+	});
+
+	it("handles absolute paths in entries", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+
+		const entries = [
+			{
+				header: {
+					name: "/absolute/path.txt",
+					size: 12,
+					type: "file" as const,
+					mode: 0o644,
+				},
+				body: "hello world\n",
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+
+		await expect(
+			pipeline(Readable.from([tarBuffer]), unpackStream),
+		).rejects.toThrow("Path traversal attempt detected");
+	});
+
+	it("handles symlink validation disabled", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+
+		const entries = [
+			{
+				header: {
+					name: "safe-link",
+					size: 0,
+					type: "symlink" as const,
+					linkname: "../outside",
+				},
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir, { validateSymlinks: false });
+
+		// Should not throw when validation is disabled
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		const linkPath = path.join(destDir, "safe-link");
+		const linkTarget = await fs.readlink(linkPath);
+		// On Windows, symlinks may use backslashes instead of forward slashes
+		const normalizedTarget = linkTarget.replace(/\\/g, "/");
+		expect(normalizedTarget).toBe("../outside");
+	});
+
+	it("handles hardlink with absolute target", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+
+		const entries = [
+			{
+				header: {
+					name: "hardlink",
+					size: 0,
+					type: "link" as const,
+					linkname: "/absolute/target",
+				},
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+
+		await expect(
+			pipeline(Readable.from([tarBuffer]), unpackStream),
+		).rejects.toThrow("Hardlink target");
+	});
+
+	it("handles timestamps on symlinks", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+		const testTime = new Date("2020-01-01T00:00:00Z");
+
+		const entries = [
+			{
+				header: {
+					name: "test-symlink",
+					size: 0,
+					type: "symlink" as const,
+					linkname: "target",
+					mtime: testTime,
+				},
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		// Verify the symlink was created (timestamp setting is best-effort)
+		const linkPath = path.join(destDir, "test-symlink");
+		const linkTarget = await fs.readlink(linkPath);
+		expect(linkTarget).toBe("target");
+	});
+
 	it("safely skips unsupported file types", async () => {
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -135,5 +369,79 @@ describe("extract", () => {
 			"utf8",
 		);
 		expect(content).toBe("hello world\n");
+	});
+
+	it("handles errors during processing", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+
+		// Create a tar with an invalid symlink that will cause an error
+		const entries = [
+			{
+				header: {
+					name: "bad-symlink",
+					size: 0,
+					type: "symlink" as const,
+					linkname: "../../../escape-attempt",
+				},
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+
+		// This should trigger the processingPromise.catch block due to path validation
+		await expect(
+			pipeline(Readable.from([tarBuffer]), unpackStream),
+		).rejects.toThrow("Symlink target");
+	});
+
+	describe("edge cases", () => {
+		it("handles validate path with non-directory/non-symlink file blocking path", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+			await fs.mkdir(destDir, { recursive: true });
+
+			// Create a regular file where we need a directory
+			const blockingFile = path.join(destDir, "blocking");
+			await fs.writeFile(blockingFile, "content");
+
+			const entries = [
+				{
+					header: {
+						name: "blocking/file.txt",
+						size: 12,
+						type: "file" as const,
+						mode: 0o644,
+					},
+					body: "hello world\n",
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const unpackStream = unpackTar(destDir);
+
+			await expect(
+				pipeline(Readable.from([tarBuffer]), unpackStream),
+			).rejects.toThrow("is not a valid directory component");
+		});
+
+		it("handles ReadableStream cancel with non Error reason", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+			const unpackStream = unpackTar(destDir);
+
+			unpackStream.on("error", () => {
+				// Expected error, do nothing
+			});
+
+			// Write some data and then destroy with a string reason
+			unpackStream.write(Buffer.from("test data"));
+
+			// Web Streams can be cancelled with any type, including strings
+			unpackStream.destroy("test cancel reason" as unknown as Error);
+
+			// The destroy should complete without throwing
+			await new Promise((resolve) => {
+				unpackStream.on("close", resolve);
+			});
+		});
 	});
 });

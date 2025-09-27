@@ -1,6 +1,8 @@
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
+import { writeChecksum } from "../../src/web/checksum";
+import { BLOCK_SIZE, TYPEFLAG, USTAR } from "../../src/web/constants";
 import { decoder, encoder } from "../../src/web/utils";
 import {
 	INCOMPLETE_TAR,
@@ -212,5 +214,275 @@ describe("extract", () => {
 			expect(partialContent.replace(/\0+$/, "")).toBe(smallBody);
 			bodyReader.releaseLock();
 		}
+	});
+
+	it("handles malformed tar archive with invalid checksum", async () => {
+		// Create a buffer that looks like a tar header but has invalid checksum
+		const invalidHeader = new Uint8Array(BLOCK_SIZE);
+
+		// Fill in some basic header fields but leave checksum invalid
+		const nameBytes = encoder.encode("test.txt");
+		invalidHeader.set(nameBytes, USTAR.name.offset);
+
+		// Set some other fields to make it look like a valid header
+		const modeBytes = encoder.encode("0000644 ");
+		invalidHeader.set(modeBytes, USTAR.mode.offset);
+
+		// Invalid checksum
+		const checksumBytes = encoder.encode("000000 ");
+		invalidHeader.set(checksumBytes, USTAR.checksum.offset);
+
+		// @ts-expect-error ReadableStream.from is supported in tests.
+		const sourceStream = ReadableStream.from([invalidHeader]);
+		const entryStream = sourceStream.pipeThrough(createTarDecoder());
+		const reader = entryStream.getReader();
+
+		await expect(reader.read()).rejects.toThrow("Invalid tar header checksum");
+	});
+
+	it("handles malformed PAX records with invalid length", async () => {
+		// Create a PAX header with malformed length record
+		const paxData = encoder.encode("abc path=test.txt\n"); // Invalid length format
+
+		// Pad to block size
+		const paxDataPadded = new Uint8Array(BLOCK_SIZE);
+		paxDataPadded.set(paxData);
+
+		// Create PAX header
+		const paxHeader = new Uint8Array(BLOCK_SIZE);
+		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
+		paxHeader.set(nameBytes, USTAR.name.offset);
+
+		const modeBytes = encoder.encode("0000644 ");
+		paxHeader.set(modeBytes, USTAR.mode.offset);
+
+		const sizeBytes = encoder.encode(
+			`${paxData.length.toString(8).padStart(11, "0")} `,
+		);
+		paxHeader.set(sizeBytes, USTAR.size.offset);
+
+		// Set type flag for PAX header
+		paxHeader[USTAR.typeflag.offset] = encoder.encode(
+			TYPEFLAG["pax-header"],
+		)[0];
+
+		writeChecksum(paxHeader);
+
+		const combined = new Uint8Array(BLOCK_SIZE * 2);
+		combined.set(paxHeader, 0);
+		combined.set(paxDataPadded, BLOCK_SIZE);
+
+		// @ts-expect-error ReadableStream.from is supported.
+		const sourceStream = ReadableStream.from([combined]);
+		const entryStream = sourceStream.pipeThrough(createTarDecoder());
+		const reader = entryStream.getReader();
+
+		// Should handle malformed PAX records gracefully
+		const result = await reader.read();
+
+		expect(result.done).toBe(true);
+	});
+
+	it("handles single zero block without second zero block", async () => {
+		// Create a tar with one entry followed by only one zero block
+		const entry = {
+			header: {
+				name: "test.txt",
+				size: 5,
+				type: "file" as const,
+			},
+			body: "hello",
+		};
+
+		const tarBuffer = await packTar([entry]);
+
+		// Truncate to remove the second zero block
+		const truncated = tarBuffer.slice(0, tarBuffer.length - BLOCK_SIZE);
+
+		// @ts-expect-error ReadableStream.from is supported.
+		const sourceStream = ReadableStream.from([truncated]);
+		const entryStream = sourceStream.pipeThrough(createTarDecoder());
+		const reader = entryStream.getReader();
+
+		// Should read the entry successfully
+		const result = await reader.read();
+		expect(result.done).toBe(false);
+		expect(result.value?.header.name).toBe("test.txt");
+
+		// Next read should not terminate immediately due to single zero block
+		const nextResult = await reader.read();
+		expect(nextResult.done).toBe(true);
+	});
+
+	it("handles stream body controller close errors", async () => {
+		// Create a tar entry with empty body to trigger controller.close()
+		const entry = {
+			header: {
+				name: "empty.txt",
+				size: 0,
+				type: "file" as const,
+			},
+			body: "",
+		};
+
+		const tarBuffer = await packTar([entry]);
+
+		// @ts-expect-error ReadableStream.from is supported.
+		const sourceStream = ReadableStream.from([tarBuffer]);
+		const entryStream = sourceStream.pipeThrough(createTarDecoder());
+		const reader = entryStream.getReader();
+
+		const result = await reader.read();
+		expect(result.done).toBe(false);
+
+		if (!result.done) {
+			// The body should be empty and controller should be closed
+			const bodyReader = result.value.body.getReader();
+			const bodyResult = await bodyReader.read();
+			expect(bodyResult.done).toBe(true);
+		}
+	});
+
+	it("handles truncated archive in middle of entry", async () => {
+		const validEntry = {
+			header: {
+				name: "test.txt",
+				size: 10,
+				type: "file" as const,
+			},
+			body: "hello test",
+		};
+
+		const validTarBuffer = await packTar([validEntry]);
+
+		// Truncate the archive in the middle of the entry data
+		const truncated = validTarBuffer.slice(0, BLOCK_SIZE + 5); // Header + 5 bytes of 10-byte data
+
+		// @ts-expect-error ReadableStream.from is supported in tests.
+		const sourceStream = ReadableStream.from([truncated]);
+		const decoder = createTarDecoder();
+
+		const writable = new WritableStream({
+			write() {
+				// Do nothing
+			},
+		});
+
+		// Should handle truncation in flush method
+		await expect(
+			sourceStream.pipeThrough(decoder).pipeTo(writable),
+		).rejects.toThrow("Tar archive is truncated");
+	});
+
+	it("handles unexpected data at end of archive", async () => {
+		let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+		const sourceStream = new ReadableStream<Uint8Array>({
+			start(c) {
+				controller = c;
+			},
+		});
+
+		const decoder = createTarDecoder();
+		const entriesStream = sourceStream.pipeThrough(decoder);
+		const reader = entriesStream.getReader();
+		const readPromise = reader.read();
+
+		// Leftover data
+		// biome-ignore lint/style/noNonNullAssertion: Already setup.
+		controller!.enqueue(new Uint8Array([0x42, 0x43, 0x44]));
+
+		// Should trigger flush with non-zero buffer
+		// biome-ignore lint/style/noNonNullAssertion: Already setup.
+		controller!.close();
+
+		// The flush method should detect non-zero buffer and error
+		await expect(readPromise).rejects.toThrow(
+			"Unexpected data at end of archive",
+		);
+	});
+
+	it("handles PAX record with zero length", async () => {
+		// Create malformed PAX data with zero-length record
+		const paxData = encoder.encode("0 \n"); // Zero length record
+
+		// Pad to block size
+		const paxDataPadded = new Uint8Array(BLOCK_SIZE);
+		paxDataPadded.set(paxData);
+
+		// Create PAX header similar to previous test
+		const paxHeader = new Uint8Array(BLOCK_SIZE);
+		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
+		paxHeader.set(nameBytes, USTAR.name.offset);
+
+		const modeBytes = encoder.encode("0000644 ");
+		paxHeader.set(modeBytes, USTAR.mode.offset);
+
+		const sizeBytes = encoder.encode(
+			`${paxData.length.toString(8).padStart(11, "0")} `,
+		);
+		paxHeader.set(sizeBytes, USTAR.size.offset);
+
+		paxHeader[USTAR.typeflag.offset] = encoder.encode(
+			TYPEFLAG["pax-header"],
+		)[0];
+
+		// Calculate and set checksum
+		writeChecksum(paxHeader);
+
+		const combined = new Uint8Array(BLOCK_SIZE * 2);
+		combined.set(paxHeader, 0);
+		combined.set(paxDataPadded, BLOCK_SIZE);
+
+		// @ts-expect-error ReadableStream.from is supported.
+		const sourceStream = ReadableStream.from([combined]);
+		const entryStream = sourceStream.pipeThrough(createTarDecoder());
+		const reader = entryStream.getReader();
+
+		// Should handle zero-length PAX records gracefully
+		const result = await reader.read();
+		expect(result.done).toBe(true);
+	});
+
+	it("handles PAX record with missing equals sign", async () => {
+		// Create PAX data without proper key=value format
+		const paxData = encoder.encode("20 pathwithoutequals\n");
+
+		// Pad to block size
+		const paxDataPadded = new Uint8Array(BLOCK_SIZE);
+		paxDataPadded.set(paxData);
+
+		// Create PAX header
+		const paxHeader = new Uint8Array(BLOCK_SIZE);
+		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
+		paxHeader.set(nameBytes, USTAR.name.offset);
+
+		const modeBytes = encoder.encode("0000644 ");
+		paxHeader.set(modeBytes, USTAR.mode.offset);
+
+		const sizeBytes = encoder.encode(
+			`${paxData.length.toString(8).padStart(11, "0")} `,
+		);
+		paxHeader.set(sizeBytes, USTAR.size.offset);
+
+		paxHeader[USTAR.typeflag.offset] = encoder.encode(
+			TYPEFLAG["pax-header"],
+		)[0];
+
+		// Calculate and set checksum
+		writeChecksum(paxHeader);
+
+		const combined = new Uint8Array(BLOCK_SIZE * 2);
+		combined.set(paxHeader, 0);
+		combined.set(paxDataPadded, BLOCK_SIZE);
+
+		// @ts-expect-error ReadableStream.from is supported.
+		const sourceStream = ReadableStream.from([combined]);
+		const entryStream = sourceStream.pipeThrough(createTarDecoder());
+		const reader = entryStream.getReader();
+
+		// Should handle malformed PAX records gracefully
+		const result = await reader.read();
+		expect(result.done).toBe(true);
 	});
 });
