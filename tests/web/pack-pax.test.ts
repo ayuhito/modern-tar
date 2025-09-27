@@ -370,5 +370,58 @@ describe("PAX format support", () => {
 			expect(extracted[1].header.linkname).toBe(longLinkTarget);
 			expect(extracted[1].header.type).toBe("symlink");
 		});
+
+		it("handles Unicode characters in filenames with correct PAX record byte lengths", async () => {
+			// Test filenames with multi-byte Unicode characters (emojis)
+			const nameWithEmoji = "long_filename_ending_with_😀";
+			const longNameWithEmoji = nameWithEmoji.repeat(10); // Creates ~280 char filename with emojis
+
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: longNameWithEmoji,
+						size: 4,
+						type: "file",
+					},
+					body: "test",
+				},
+			];
+
+			// Pack and unpack should preserve the full Unicode filename
+			const buffer = await packTar(entries);
+			const extracted = await unpackTar(buffer);
+
+			expect(extracted).toHaveLength(1);
+			expect(extracted[0].header.name).toBe(longNameWithEmoji);
+			expect(extracted[0].header.pax?.path).toBe(longNameWithEmoji);
+			expect(decoder.decode(extracted[0].data)).toBe("test");
+		});
+
+		it("safely truncates PAX header names containing Unicode at byte boundaries", async () => {
+			// The PAX header name "PaxHeader/{filename}" is limited to 100 bytes and must be truncated safely
+
+			const nameWithTrailingEmoji = `${"a".repeat(95)}😀`; // Ends with 4-byte emoji
+			const longNameWithEmoji = nameWithTrailingEmoji.repeat(3);
+
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: longNameWithEmoji,
+						size: 4,
+						type: "file",
+					},
+					body: "test",
+				},
+			];
+
+			// The PAX header name will be safely truncated at byte boundaries
+			// but the full filename should be preserved in PAX records
+			const buffer = await packTar(entries);
+			const extracted = await unpackTar(buffer);
+
+			expect(extracted).toHaveLength(1);
+			expect(extracted[0].header.name).toBe(longNameWithEmoji);
+			expect(extracted[0].header.pax?.path).toBe(longNameWithEmoji);
+		});
 	});
 });

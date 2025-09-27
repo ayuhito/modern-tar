@@ -1,7 +1,7 @@
 import { USTAR, USTAR_MAX_SIZE, USTAR_MAX_UID_GID } from "./constants";
 import { createTarHeader } from "./pack";
 import type { TarHeader } from "./types";
-import { encoder } from "./utils";
+import { decoder, encoder } from "./utils";
 
 // Checks a tar header for fields that exceed USTAR limits and generates a PAX header entry if necessary.
 export function generatePax(header: TarHeader): {
@@ -61,27 +61,30 @@ export function generatePax(header: TarHeader): {
 	}
 
 	// Else, format PAX records into a string.
-	const paxRecordsString = paxEntries
-		.map(([key, value]) => {
-			const record = `${key}=${value}\n`;
-			// The PAX record length includes the length of the length-prefix itself.
-			let length = record.length + 1; // +1 for the space
-			const lengthOfLength = String(length).length;
-			length += lengthOfLength;
+	const paxBody = encoder.encode(
+		paxEntries
+			.map(([key, value]) => {
+				const record = `${key}=${value}\n`;
 
-			// Re-check if adding the length prefix's length changed its own number of digits.
-			if (String(length).length !== lengthOfLength) {
-				length++;
-			}
+				// Get byte length to handle multi-byte Unicode characters correctly.
+				const partLength = encoder.encode(record).length + 1; // +1 for the space
 
-			return `${length} ${record}`;
-		})
-		.join("");
+				let totalLength = partLength + String(partLength).length;
 
-	const paxBody = encoder.encode(paxRecordsString);
+				// Calculate again to handle the new length increase.
+				totalLength = partLength + String(totalLength).length;
+
+				return `${totalLength} ${record}`;
+			})
+			.join(""),
+	);
 
 	const paxHeader = createTarHeader({
-		name: `PaxHeader/${header.name}`.slice(0, 100),
+		// We decode like this specifically to ensure no multi-byte chars sneak in
+		// and exceed 100 bytes.
+		name: decoder.decode(
+			encoder.encode(`PaxHeader/${header.name}`).slice(0, 100),
+		),
 		size: paxBody.length,
 		type: "pax-header",
 		mode: 0o644,
@@ -110,8 +113,7 @@ export function findUstarSplit(
 	// Find the rightmost slash that respects the prefix length limit (155).
 	const slashIndex = path.lastIndexOf("/", USTAR.prefix.size);
 
-	// A valid split exists if we found a slash (index > 0) and it also
-	// satisfies the minimum index required for the name part to fit.
+	// A valid split exists if we found a slash and it allows both parts to fit.
 	if (slashIndex > 0 && slashIndex >= minSlashIndex) {
 		return {
 			prefix: path.slice(0, slashIndex),
