@@ -200,7 +200,7 @@ export function createTarDecoder(): TransformStream<
 				controller.error(error);
 			}
 
-			// If there's any non-zero data left in the buffer, it's unexpected.
+			// Any leftover data in the buffer must be zeroes (padding).
 			if (buffer.some((b) => b !== 0)) {
 				controller.error(new Error("Unexpected data at end of archive."));
 			}
