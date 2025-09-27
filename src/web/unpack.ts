@@ -292,7 +292,7 @@ function parsePax(buffer: Uint8Array): HeaderOverrides {
 		if (spaceIndex === -1) break;
 
 		// The length is the number before the space.
-		const length = Number.parseInt(
+		const length = parseInt(
 			decoder.decode(buffer.subarray(offset, spaceIndex)),
 			10,
 		);
@@ -316,16 +316,16 @@ function parsePax(buffer: Uint8Array): HeaderOverrides {
 					overrides.linkname = value;
 					break;
 				case "size":
-					overrides.size = Number.parseInt(value, 10);
+					overrides.size = parseInt(value, 10);
 					break;
 				case "mtime":
-					overrides.mtime = Number.parseFloat(value);
+					overrides.mtime = parseFloat(value);
 					break;
 				case "uid":
-					overrides.uid = Number.parseInt(value, 10);
+					overrides.uid = parseInt(value, 10);
 					break;
 				case "gid":
-					overrides.gid = Number.parseInt(value, 10);
+					overrides.gid = parseInt(value, 10);
 					break;
 				case "uname":
 					overrides.uname = value;

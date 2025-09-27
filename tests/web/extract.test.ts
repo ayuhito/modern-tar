@@ -217,7 +217,7 @@ describe("extract", () => {
 		if (entry) {
 			expect(entry.header.name).toBe("huge.txt");
 			// Verify that the size was correctly parsed from the PAX header
-			expect(entry.header.size).toBe(Number.parseInt(hugeFileSize, 10));
+			expect(entry.header.size).toBe(parseInt(hugeFileSize, 10));
 
 			// Read just a small portion of the body to verify it starts correctly
 			const bodyReader = entry.body.getReader();
