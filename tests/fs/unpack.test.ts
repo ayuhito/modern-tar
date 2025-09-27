@@ -1,10 +1,12 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
+import { packTar as packTarWeb } from "../../src/web";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
@@ -81,5 +83,57 @@ describe("extract", () => {
 		const extractedStat = await fs.stat(path.join(destDir, "hello.txt"));
 
 		expect(extractedStat.mode).toBe(originalStat.mode);
+	});
+
+	it("safely skips unsupported file types", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+
+		const entries = [
+			{
+				header: {
+					name: "normal-file.txt",
+					size: 12,
+					type: "file" as const,
+				},
+				body: "hello world\n",
+			},
+			{
+				header: {
+					name: "char-device",
+					size: 0,
+					type: "character-device" as const,
+				},
+			},
+			{
+				header: {
+					name: "block-device",
+					size: 0,
+					type: "block-device" as const,
+				},
+			},
+			{
+				header: {
+					name: "fifo-pipe",
+					size: 0,
+					type: "fifo" as const,
+				},
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+
+		const unpackStream = unpackTar(destDir);
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		// Check that only the normal file was extracted
+		const files = await fs.readdir(destDir);
+		expect(files).toEqual(["normal-file.txt"]);
+
+		// Verify the normal file was extracted correctly
+		const content = await fs.readFile(
+			path.join(destDir, "normal-file.txt"),
+			"utf8",
+		);
+		expect(content).toBe("hello world\n");
 	});
 });

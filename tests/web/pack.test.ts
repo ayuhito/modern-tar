@@ -279,4 +279,61 @@ describe("pack", () => {
 			/Unsupported content type/,
 		);
 	});
+
+	it("packs and parses special file types correctly", async () => {
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: "regular-file.txt",
+					size: 5,
+					type: "file",
+				},
+				body: "hello",
+			},
+			{
+				header: {
+					name: "char-device",
+					size: 0,
+					type: "character-device",
+				},
+			},
+			{
+				header: {
+					name: "block-device",
+					size: 0,
+					type: "block-device",
+				},
+			},
+			{
+				header: {
+					name: "fifo-pipe",
+					size: 0,
+					type: "fifo",
+				},
+			},
+		];
+
+		const packedBuffer = await packTar(entries);
+
+		// Verify all entries are parsed correctly with their types preserved
+		const extracted = await unpackTar(packedBuffer);
+		expect(extracted).toHaveLength(4);
+
+		expect(extracted[0].header.name).toBe("regular-file.txt");
+		expect(extracted[0].header.type).toBe("file");
+		expect(extracted[0].header.size).toBe(5);
+		expect(decoder.decode(extracted[0].data)).toBe("hello");
+
+		expect(extracted[1].header.name).toBe("char-device");
+		expect(extracted[1].header.type).toBe("character-device");
+		expect(extracted[1].header.size).toBe(0);
+
+		expect(extracted[2].header.name).toBe("block-device");
+		expect(extracted[2].header.type).toBe("block-device");
+		expect(extracted[2].header.size).toBe(0);
+
+		expect(extracted[3].header.name).toBe("fifo-pipe");
+		expect(extracted[3].header.type).toBe("fifo");
+		expect(extracted[3].header.size).toBe(0);
+	});
 });

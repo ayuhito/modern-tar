@@ -36,7 +36,10 @@ export const TYPEFLAG = {
 	file: "0",
 	link: "1",
 	symlink: "2",
+	"character-device": "3",
+	"block-device": "4",
 	directory: "5",
+	fifo: "6",
 	// POSIX.1-2001 extensions
 	"pax-header": "x",
 	"pax-global-header": "g",
@@ -50,7 +53,10 @@ export const FLAGTYPE = {
 	"0": "file",
 	"1": "link",
 	"2": "symlink",
+	"3": "character-device",
+	"4": "block-device",
 	"5": "directory",
+	"6": "fifo",
 	// POSIX.1-2001 extensions
 	x: "pax-header",
 	g: "pax-global-header",

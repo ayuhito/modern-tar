@@ -212,6 +212,14 @@ export function unpackTar(
 						await fs.link(resolvedLinkTarget, outPath);
 						break;
 					}
+
+					case "character-device":
+					case "block-device":
+					case "fifo": {
+						// Unsupported type, skip it.
+						await entry.body.cancel();
+						break;
+					}
 				}
 
 				// Apply timestamps if available
