@@ -66,6 +66,34 @@ export function readOctal(
 }
 
 /**
+ * Reads a numeric field that can be octal or POSIX base-256.
+ * This implementation handles positive integers, such as uid, gid, and size.
+ */
+export function readNumeric(
+	view: Uint8Array,
+	offset: number,
+	size: number,
+): number {
+	// POSIX base-256 encoding uses the high bit of the first byte to indicate
+	// that the field is in base-256.
+	if (view[offset] & 0x80) {
+		let result = view[offset] & 0x7f; // Handle the first byte separately, clearing the high bit.
+
+		// Start loop from the second byte.
+		for (let i = 1; i < size; i++) {
+			// (result << 8) is equivalent to (result * 256) but faster.
+			// | view[offset + i] is equivalent to + view[offset + i] for positive numbers.
+			result = (result << 8) | view[offset + i];
+		}
+
+		return result;
+	}
+
+	// Fallback to standard octal parsing.
+	return readOctal(view, offset, size);
+}
+
+/**
  * Reads an entire ReadableStream of Uint8Arrays into a single, combined Uint8Array.
  *
  * The easy way to do this is `new Response(stream).arrayBuffer()`, but we can be more
