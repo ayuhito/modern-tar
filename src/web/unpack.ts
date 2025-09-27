@@ -3,6 +3,17 @@ import { BLOCK_SIZE, FLAGTYPE, USTAR } from "./constants";
 import type { ParsedTarEntry, TarHeader } from "./types";
 import { decoder, readOctal, readString } from "./utils";
 
+interface InternalTarHeader extends TarHeader {
+	checksum: number;
+	magic: string;
+	prefix: string;
+}
+
+type HeaderOverrides = Omit<Partial<TarHeader>, "mtime"> & {
+	// PAX mtime is a float, handle it as a number before converting to Date
+	mtime?: number;
+};
+
 /**
  * Create a transform stream that parses tar bytes into entries.
  *
@@ -29,8 +40,8 @@ export function createTarDecoder(): TransformStream<
 		bytesLeft: number;
 		controller: ReadableStreamDefaultController<Uint8Array>;
 	} | null = null;
-	let pax: Record<string, string> | null = null;
-	let paxGlobal: Record<string, string> = {};
+	let paxGlobals: HeaderOverrides = {};
+	let nextEntryOverrides: HeaderOverrides = {};
 
 	return new TransformStream({
 		transform(chunk, controller) {
@@ -42,13 +53,11 @@ export function createTarDecoder(): TransformStream<
 			let offset = 0;
 
 			while (true) {
-				const remainingBytes = combined.length - offset;
-
 				// Read an entry's body.
 				if (currentEntry) {
 					const toWrite = combined.subarray(
 						offset,
-						offset + Math.min(remainingBytes, currentEntry.bytesLeft),
+						offset + Math.min(combined.length - offset, currentEntry.bytesLeft),
 					);
 
 					currentEntry.controller.enqueue(toWrite);
@@ -63,7 +72,7 @@ export function createTarDecoder(): TransformStream<
 							(BLOCK_SIZE - (currentEntry.header.size % BLOCK_SIZE)) %
 							BLOCK_SIZE;
 
-						if (remainingBytes - toWrite.length < padding) {
+						if (combined.length - offset < padding) {
 							break;
 						}
 
@@ -82,123 +91,139 @@ export function createTarDecoder(): TransformStream<
 				}
 
 				// Read the next header block.
-				if (remainingBytes < BLOCK_SIZE) {
-					break;
+				if (combined.length - offset < BLOCK_SIZE) {
+					break; // Not enough data for a header
 				}
 
 				// Check for two consecutive zero blocks indicating end of archive.
 				const headerBlock = combined.subarray(offset, offset + BLOCK_SIZE);
 				if (headerBlock.every((b) => b === 0)) {
-					controller.terminate();
-					return;
-				}
+					// Check if there's enough data to read before validating.
+					if (combined.length - offset < BLOCK_SIZE * 2) break;
 
-				const header = parseHeader(headerBlock);
-				offset += BLOCK_SIZE;
-
-				// Handle PAX headers.
-				if (
-					header.type === "pax-header" ||
-					header.type === "pax-global-header"
-				) {
-					const totalPaxSize =
-						header.size +
-						((BLOCK_SIZE - (header.size % BLOCK_SIZE)) % BLOCK_SIZE);
-
-					// Ensure the full PAX data is available.
-					if (combined.length - offset < totalPaxSize) {
-						offset -= BLOCK_SIZE; // Rewind
-						break;
-					}
-
-					const parsedPax = parsePax(
-						combined.subarray(offset, offset + header.size),
+					// If the next block is also zero, then it's the end of the archive and we can stop.
+					const nextBlock = combined.subarray(
+						offset + BLOCK_SIZE,
+						offset + BLOCK_SIZE * 2,
 					);
 
-					if (header.type === "pax-header") {
-						pax = parsedPax;
-					} else {
-						paxGlobal = { ...paxGlobal, ...parsedPax };
+					if (nextBlock.every((b) => b === 0)) {
+						controller.terminate();
+						return;
+					}
+				}
+
+				// First parse USTAR headers as a base. Extension headers will override this as needed.
+				const header = parseUstarHeader(headerBlock);
+				const dataSize = header.size;
+				const dataBlocksSize = Math.ceil(dataSize / BLOCK_SIZE) * BLOCK_SIZE; // Padded to block size.
+
+				// Handle special entry types for PAX extensions.
+				switch (header.type) {
+					case "pax-global-header":
+					case "pax-header": {
+						if (combined.length - offset - BLOCK_SIZE < dataBlocksSize) {
+							break; // Not enough data for PAX content
+						}
+
+						const paxData = parsePax(
+							combined.subarray(
+								offset + BLOCK_SIZE,
+								offset + BLOCK_SIZE + dataSize,
+							),
+						);
+
+						if (header.type === "pax-global-header") {
+							paxGlobals = { ...paxGlobals, ...paxData };
+						} else {
+							nextEntryOverrides = { ...nextEntryOverrides, ...paxData };
+						}
+
+						offset += BLOCK_SIZE + dataBlocksSize;
+						continue;
 					}
 
-					offset += totalPaxSize;
-					continue;
-				}
+					// Other headers are handled normally.
+					default: {
+						// Finalize the header for a regular entry
+						if (header.prefix) {
+							header.name = `${header.prefix}/${header.name}`;
+						}
 
-				const combinedPax = { ...paxGlobal, ...pax };
-				if (pax || Object.keys(paxGlobal).length > 0) {
-					applyPax(header, combinedPax);
-					pax = null;
-				}
+						applyOverrides(header, paxGlobals);
+						applyOverrides(header, nextEntryOverrides);
 
-				// Enqueue the new entry with its body stream.
-				let bodyController: ReadableStreamDefaultController<Uint8Array>;
+						nextEntryOverrides = {}; // Reset for the next cycle.
 
-				// biome-ignore lint/suspicious/noAssignInExpressions: This is intentional.
-				const body = new ReadableStream({ start: (c) => (bodyController = c) });
-				controller.enqueue({ header, body });
+						let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+						const body = new ReadableStream({
+							// biome-ignore lint/suspicious/noAssignInExpressions: This is more concise.
+							start: (c) => (bodyController = c),
+						});
 
-				if (header.size > 0) {
-					currentEntry = {
-						header,
-						bytesLeft: header.size,
-						// biome-ignore lint/style/noNonNullAssertion: This is safe because start is called.
-						controller: bodyController!,
-					};
-				} else {
-					try {
-						// biome-ignore lint/style/noNonNullAssertion: This is safe because start is called.
-						bodyController!.close();
-					} catch {}
+						controller.enqueue({
+							header,
+							body,
+						});
+
+						offset += BLOCK_SIZE;
+
+						if (header.size > 0) {
+							currentEntry = {
+								header,
+								bytesLeft: header.size,
+								controller: bodyController,
+							};
+						} else {
+							// No body to read, close immediately.
+							try {
+								bodyController.close();
+							} catch {
+								// Suppress errors if stream is already closed.
+							}
+						}
+						continue;
+					}
 				}
 			}
 
-			// Save any leftover bytes for the next chunk.
+			// Save any remaining bytes for the next chunk.
 			buffer = combined.subarray(offset);
 		},
 
 		flush(controller) {
+			// If we were in the middle of reading an entry, that's an error.
 			if (currentEntry) {
 				const error = new Error("Tar archive is truncated.");
-
 				// Error both the current entry and the main stream.
 				currentEntry.controller.error(error);
 				controller.error(error);
 			}
 
-			// Check for non-zero bytes in the leftover buffer.
-			if (buffer.some((b) => b !== 0))
+			// Any leftover data in the buffer must be zeroes (padding).
+			if (buffer.some((b) => b !== 0)) {
 				controller.error(new Error("Unexpected data at end of archive."));
+			}
 		},
 	});
 }
 
-function parseHeader(block: Uint8Array): TarHeader {
+/**
+ * Parses a 512-byte block into a USTAR header object using USTAR constants.
+ */
+function parseUstarHeader(block: Uint8Array): InternalTarHeader {
 	if (!validateChecksum(block)) {
 		throw new Error("Invalid tar header checksum.");
 	}
 
-	let name = readString(block, USTAR.name.offset, USTAR.name.size);
-
-	// The "ustar" magic string is 5 bytes, followed by a NUL.
-	const isUstar =
-		readString(block, USTAR.magic.offset, USTAR.magic.size) === "ustar";
-
-	if (isUstar) {
-		const prefix = readString(block, USTAR.prefix.offset, USTAR.prefix.size);
-		if (prefix) {
-			name = `${prefix}/${name}`;
-		}
-	}
-
-	const typeFlag = readString(
+	const typeflag = readString(
 		block,
 		USTAR.typeflag.offset,
 		USTAR.typeflag.size,
 	) as keyof typeof FLAGTYPE;
 
 	return {
-		name,
+		name: readString(block, USTAR.name.offset, USTAR.name.size),
 		mode: readOctal(block, USTAR.mode.offset, USTAR.mode.size),
 		uid: readOctal(block, USTAR.uid.offset, USTAR.uid.size),
 		gid: readOctal(block, USTAR.gid.offset, USTAR.gid.size),
@@ -206,53 +231,94 @@ function parseHeader(block: Uint8Array): TarHeader {
 		mtime: new Date(
 			readOctal(block, USTAR.mtime.offset, USTAR.mtime.size) * 1000,
 		),
-		type: FLAGTYPE[typeFlag] || "file",
+		checksum: readOctal(block, USTAR.checksum.offset, USTAR.checksum.size),
+		type: FLAGTYPE[typeflag] || "file",
 		linkname: readString(block, USTAR.linkname.offset, USTAR.linkname.size),
+		magic: readString(block, USTAR.magic.offset, USTAR.magic.size),
 		uname: readString(block, USTAR.uname.offset, USTAR.uname.size),
 		gname: readString(block, USTAR.gname.offset, USTAR.gname.size),
+		prefix: readString(block, USTAR.prefix.offset, USTAR.prefix.size),
 	};
 }
 
-function parsePax(buffer: Uint8Array): Record<string, string> {
-	const pax: Record<string, string> = {};
+/**
+ * Applies header extension overrides to a parsed USTAR header.
+ */
+function applyOverrides(header: TarHeader, overrides: HeaderOverrides) {
+	if (overrides.name !== undefined) header.name = overrides.name;
+	if (overrides.linkname !== undefined) header.linkname = overrides.linkname;
+	if (overrides.size !== undefined) header.size = overrides.size;
+	if (overrides.mtime !== undefined)
+		header.mtime = new Date(overrides.mtime * 1000);
+	if (overrides.uid !== undefined) header.uid = overrides.uid;
+	if (overrides.gid !== undefined) header.gid = overrides.gid;
+	if (overrides.uname !== undefined) header.uname = overrides.uname;
+	if (overrides.gname !== undefined) header.gname = overrides.gname;
+	if (overrides.pax) header.pax = { ...(header.pax ?? {}), ...overrides.pax };
+}
 
+/**
+ * Parses PAX record data into an overrides object.
+ */
+function parsePax(buffer: Uint8Array): HeaderOverrides {
+	const overrides: HeaderOverrides = {};
+	const pax: Record<string, string> = {};
 	let offset = 0;
+
 	while (offset < buffer.length) {
 		// Find the first space character to find the length of the record.
 		const spaceIndex = buffer.indexOf(32, offset);
 		if (spaceIndex === -1) break;
 
-		const lengthStr = decoder.decode(buffer.subarray(offset, spaceIndex));
-		const length = Number.parseInt(lengthStr, 10);
-		if (!length) break;
+		// The length is the number before the space.
+		const length = Number.parseInt(
+			decoder.decode(buffer.subarray(offset, spaceIndex)),
+			10,
+		);
+
+		if (Number.isNaN(length) || length === 0) break;
 
 		const recordEnd = offset + length;
 		const recordStr = decoder.decode(
 			buffer.subarray(spaceIndex + 1, recordEnd - 1),
 		);
 
+		// Split at the first '=' to get key and value.
 		const [key, value] = recordStr.split("=", 2);
 		if (key && value !== undefined) {
 			pax[key] = value;
+			switch (key) {
+				case "path":
+					overrides.name = value;
+					break;
+				case "linkpath":
+					overrides.linkname = value;
+					break;
+				case "size":
+					overrides.size = Number.parseInt(value, 10);
+					break;
+				case "mtime":
+					overrides.mtime = Number.parseFloat(value);
+					break;
+				case "uid":
+					overrides.uid = Number.parseInt(value, 10);
+					break;
+				case "gid":
+					overrides.gid = Number.parseInt(value, 10);
+					break;
+				case "uname":
+					overrides.uname = value;
+					break;
+				case "gname":
+					overrides.gname = value;
+					break;
+			}
 		}
 
 		offset = recordEnd;
 	}
 
-	return pax;
-}
+	if (Object.keys(pax).length > 0) overrides.pax = pax;
 
-// Helper to apply PAX metadata to a USTAR header.
-function applyPax(header: TarHeader, pax: Record<string, string>) {
-	header.name = pax.path ?? header.name;
-	header.linkname = pax.linkpath ?? header.linkname;
-
-	if (pax.size) header.size = Number.parseInt(pax.size, 10);
-	if (pax.mtime) header.mtime = new Date(Number.parseFloat(pax.mtime) * 1000);
-	if (pax.uid) header.uid = Number.parseInt(pax.uid, 10);
-	if (pax.gid) header.gid = Number.parseInt(pax.gid, 10);
-
-	header.uname = pax.uname ?? header.uname;
-	header.gname = pax.gname ?? header.gname;
-	header.pax = pax;
+	return overrides;
 }
