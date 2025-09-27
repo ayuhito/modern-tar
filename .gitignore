@@ -5,3 +5,4 @@ dist
 .mise.toml
 *.tsbuildinfo
 coverage
+AGENT.md

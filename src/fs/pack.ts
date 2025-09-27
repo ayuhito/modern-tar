@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { BLOCK_SIZE } from "../web/constants";
 import { createTarHeader } from "../web/pack";
+import { generatePax } from "../web/pack-pax";
 import type { TarHeader } from "../web/types";
 import type { PackOptionsFS } from "./types";
 
@@ -91,6 +92,20 @@ export function packTar(
 		}
 
 		const finalHeader = options.map ? options.map(header) : header;
+
+		// Automatically generate and yield a PAX header if needed.
+		const paxData = generatePax(finalHeader);
+		if (paxData) {
+			yield paxData.paxHeader;
+			yield paxData.paxBody;
+
+			const paxPadding =
+				(BLOCK_SIZE - (paxData.paxBody.length % BLOCK_SIZE)) % BLOCK_SIZE;
+			if (paxPadding > 0) {
+				yield Buffer.alloc(paxPadding);
+			}
+		}
+
 		yield createTarHeader(finalHeader);
 
 		// Yield file content and padding

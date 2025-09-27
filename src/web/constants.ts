@@ -31,6 +31,12 @@ export const USTAR = {
 /** USTAR version ("00"). */
 export const USTAR_VERSION = "00";
 
+/** USTAR max value in 8-byte octal field. */
+export const USTAR_MAX_UID_GID = 0o7777777;
+
+/** USTAR max value in 12-byte octal field (~8GB). */
+export const USTAR_MAX_SIZE = 0o77777777777;
+
 /** Type flag constants for file types. */
 export const TYPEFLAG = {
 	file: "0",

@@ -103,6 +103,29 @@ describe("pack", () => {
 		expect(content).toBe("long path test");
 	});
 
+	it("handles PAX long filenames on a round trip", async () => {
+		// This filename has a component longer than 100 chars and cannot use USTAR prefixing.
+		const longFileName =
+			"a-very-long-directory-name-that-is-well-over-one-hundred-characters-long-and-cannot-be-split-easily/file.txt";
+
+		const sourceDir = path.join(tmpDir, "source");
+		const longPathDir = path.join(sourceDir, path.dirname(longFileName));
+		const fullPath = path.join(sourceDir, longFileName);
+
+		await fs.mkdir(longPathDir, { recursive: true });
+		await fs.writeFile(fullPath, "pax path test");
+
+		const destDir = path.join(tmpDir, "extracted");
+		const packStream = packTar(sourceDir);
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
+
+		const extractedFile = path.join(destDir, longFileName);
+		const content = await fs.readFile(extractedFile, "utf-8");
+		expect(content).toBe("pax path test");
+	});
+
 	it("filters entries on pack", async () => {
 		const sourceDir = path.join(FIXTURES_DIR, "c");
 		const destDir = path.join(tmpDir, "extracted");
