@@ -6,6 +6,7 @@ export {
 	type TarPackController,
 } from "./pack";
 export type {
+	DecoderOptions,
 	ParsedTarEntry,
 	ParsedTarEntryWithData,
 	TarEntry,

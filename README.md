@@ -246,7 +246,7 @@ const entries = [
 const tarBuffer = await packTar(entries);
 ```
 
-#### `unpackTar(archive: ArrayBuffer | Uint8Array, options?: UnpackOptions): Promise<ParsedTarEntryWithData[]>`
+#### `unpackTar(archive: ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>, options?: UnpackOptions): Promise<ParsedTarEntryWithData[]>`
 
 Extract all entries from a tar archive buffer with optional filtering and transformation.
 
@@ -287,7 +287,7 @@ const stream2 = controller.add({ name: "file2.txt", size: 4 });
 controller.finalize();
 ```
 
-#### `createTarDecoder(): TransformStream<Uint8Array, ParsedTarEntry>`
+#### `createTarDecoder(options?: DecoderOptions): TransformStream<Uint8Array, ParsedTarEntry>`
 
 Create a transform stream that parses tar bytes into entries.
 
@@ -387,6 +387,7 @@ const tarStream = createReadStream('backup.tar');
 const extractStream = unpackTar('/restore/location', {
   strip: 1,
   fmode: 0o644, // Set consistent file permissions
+  strict: true, // Enable strict validation
 });
 await pipeline(tarStream, extractStream);
 ```
@@ -455,8 +456,13 @@ interface ParsedTarEntryWithData {
 }
 
 // Platform-neutral configuration for unpacking
-interface UnpackOptions {
-  /** Number of leading path components to strip from entry names (e.g., strip: 1 removes first directory) */
+interface DecoderOptions {
+  /** Enable strict validation (e.g., throw on invalid checksums) */
+  strict?: boolean;
+}
+
+interface UnpackOptions extends DecoderOptions {
+	/** Number of leading path components to strip from entry names (e.g., strip: 1 removes first directory) */
   strip?: number;
   /** Filter function to include/exclude entries (return false to skip) */
   filter?: (header: TarHeader) => boolean;

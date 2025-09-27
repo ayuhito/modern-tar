@@ -15,7 +15,7 @@ describe("checksum validation", () => {
 		// Corrupt the checksum by changing the first byte
 		buffer[USTAR.checksum.offset] = buffer[USTAR.checksum.offset] + 1;
 
-		await expect(unpackTar(buffer)).rejects.toThrow(
+		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
 		);
 	});
@@ -33,7 +33,7 @@ describe("checksum validation", () => {
 			buffer[USTAR.checksum.offset + i] = 0;
 		}
 
-		await expect(unpackTar(buffer)).rejects.toThrow(
+		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
 		);
 	});
@@ -49,7 +49,7 @@ describe("checksum validation", () => {
 		// Change the first character of the filename
 		buffer[USTAR.name.offset] = buffer[USTAR.name.offset] + 1;
 
-		await expect(unpackTar(buffer)).rejects.toThrow(
+		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
 		);
 	});
@@ -65,7 +65,7 @@ describe("checksum validation", () => {
 		// Corrupt one byte in the size field
 		buffer[USTAR.size.offset] = buffer[USTAR.size.offset] + 1;
 
-		await expect(unpackTar(buffer)).rejects.toThrow(
+		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
 		);
 	});
@@ -109,7 +109,7 @@ describe("checksum validation", () => {
 		buffer[secondChecksumOffset] = buffer[secondChecksumOffset] + 1;
 
 		// The entire extraction should fail when encountering the corrupted second entry
-		await expect(unpackTar(buffer)).rejects.toThrow(
+		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
 		);
 	});
@@ -124,7 +124,7 @@ describe("checksum validation", () => {
 		// Corrupt the checksum
 		buffer[USTAR.checksum.offset] = buffer[USTAR.checksum.offset] + 1;
 
-		await expect(unpackTar(buffer)).rejects.toThrow(
+		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
 		);
 	});

@@ -85,7 +85,7 @@ export function unpackTar(
 		await fs.mkdir(resolvedDestDir, { recursive: true });
 
 		const entryStream = readable
-			.pipeThrough(createTarDecoder())
+			.pipeThrough(createTarDecoder(options))
 			.pipeThrough(createTarOptionsTransformer(options));
 
 		const reader = entryStream.getReader();
