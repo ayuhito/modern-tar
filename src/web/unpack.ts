@@ -46,10 +46,7 @@ const metaEntryParsers: Record<string, (data: Uint8Array) => HeaderOverrides> =
  */
 export function createTarDecoder(
 	options: DecoderOptions = {},
-): TransformStream<
-	Uint8Array,
-	ParsedTarEntry
-> {
+): TransformStream<Uint8Array, ParsedTarEntry> {
 	const strict = options.strict ?? false;
 
 	let buffer = new Uint8Array(0);
@@ -220,14 +217,24 @@ export function createTarDecoder(
 		flush(controller) {
 			// If we were in the middle of reading an entry, that's an error.
 			if (currentEntry) {
-				const error = new Error("Tar archive is truncated.");
-				// Error both the current entry and the main stream.
-				currentEntry.controller.error(error);
-				controller.error(error);
+				if (strict) {
+					const error = new Error(
+						`Tar archive is truncated. Expected ${currentEntry.header.size} bytes but received ${currentEntry.header.size - currentEntry.bytesLeft}.`,
+					);
+					currentEntry.controller.error(error);
+					controller.error(error);
+				} else {
+					// In non-strict mode, just close the current entry stream.
+					try {
+						currentEntry.controller.close();
+					} catch {
+						// Suppress errors if stream is already closed or errored.
+					}
+				}
 			}
 
 			// Any leftover data in the buffer must be zeroes (padding).
-			if (buffer.some((b) => b !== 0)) {
+			if (strict && buffer.some((b) => b !== 0)) {
 				controller.error(new Error("Unexpected data at end of archive."));
 			}
 		},
@@ -235,7 +242,10 @@ export function createTarDecoder(
 }
 
 // Parses a 512-byte block into a USTAR header object using USTAR constants.
-function parseUstarHeader(block: Uint8Array, strict: boolean): InternalTarHeader {
+function parseUstarHeader(
+	block: Uint8Array,
+	strict: boolean,
+): InternalTarHeader {
 	if (strict && !validateChecksum(block)) {
 		throw new Error("Invalid tar header checksum.");
 	}

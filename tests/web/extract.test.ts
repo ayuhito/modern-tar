@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
 import { writeChecksum } from "../../src/web/checksum";
 import { BLOCK_SIZE, TYPEFLAG, USTAR } from "../../src/web/constants";
+import type { ParsedTarEntry } from "../../src/web/types";
 import { decoder, encoder } from "../../src/web/utils";
 import {
 	INCOMPLETE_TAR,
@@ -144,13 +145,25 @@ describe("extract", () => {
 		expect(decoder.decode(entries[0].data)).toBe("hello\n");
 	});
 
-	it("throws an error for an incomplete archive", async () => {
+	it("throws an error for an incomplete archive in strict mode", async () => {
 		const buffer = await fs.readFile(INCOMPLETE_TAR);
 
-		// We expect unpackTar to reject because the archive is truncated
-		await expect(unpackTar(buffer)).rejects.toThrow(
+		// We expect unpackTar to reject because the archive is truncated in strict mode
+		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Tar archive is truncated.",
 		);
+	});
+
+	it("handles incomplete archive gracefully in non-strict mode", async () => {
+		const buffer = await fs.readFile(INCOMPLETE_TAR);
+
+		// In non-strict mode, it should extract what it can and warn about truncation
+		const entries = await unpackTar(buffer, { strict: false });
+
+		// Should extract the complete entry successfully
+		expect(entries).toHaveLength(1);
+		expect(entries[0].header.name).toBe("file-1.txt");
+		expect(decoder.decode(entries[0].data)).toBe("i am file-1\n");
 	});
 
 	it("extracts a tar with a huge file using PAX headers for size", async () => {
@@ -234,7 +247,9 @@ describe("extract", () => {
 
 		// @ts-expect-error ReadableStream.from is supported in tests.
 		const sourceStream = ReadableStream.from([invalidHeader]);
-		const entryStream = sourceStream.pipeThrough(createTarDecoder({ strict: true }));
+		const entryStream = sourceStream.pipeThrough(
+			createTarDecoder({ strict: true }),
+		);
 		const reader = entryStream.getReader();
 
 		await expect(reader.read()).rejects.toThrow("Invalid tar header checksum");
@@ -343,7 +358,7 @@ describe("extract", () => {
 		}
 	});
 
-	it("handles truncated archive in middle of entry", async () => {
+	it("handles truncated archive in middle of entry in strict mode", async () => {
 		const validEntry = {
 			header: {
 				name: "test.txt",
@@ -360,7 +375,7 @@ describe("extract", () => {
 
 		// @ts-expect-error ReadableStream.from is supported in tests.
 		const sourceStream = ReadableStream.from([truncated]);
-		const decoder = createTarDecoder();
+		const decoder = createTarDecoder({ strict: true });
 
 		const writable = new WritableStream({
 			write() {
@@ -374,7 +389,42 @@ describe("extract", () => {
 		).rejects.toThrow("Tar archive is truncated");
 	});
 
-	it("handles unexpected data at end of archive", async () => {
+	it("handles truncated archive in middle of entry gracefully in non-strict mode", async () => {
+		// Create a valid entry
+		const validEntry = {
+			header: {
+				name: "test.txt",
+				size: 10,
+				type: "file" as const,
+			},
+			body: "hello test",
+		};
+
+		const validTarBuffer = await packTar([validEntry]);
+
+		// Truncate the archive in the middle of the entry data
+		const truncated = validTarBuffer.slice(0, BLOCK_SIZE + 5); // Header + 5 bytes of 10-byte data
+
+		// @ts-expect-error ReadableStream.from is supported in tests.
+		const sourceStream = ReadableStream.from([truncated]);
+		const decoder = createTarDecoder({ strict: false });
+
+		const entries: ParsedTarEntry[] = [];
+		const writable = new WritableStream({
+			write(entry: ParsedTarEntry) {
+				entries.push(entry);
+			},
+		});
+
+		// Should handle truncation gracefully in non-strict mode
+		await sourceStream.pipeThrough(decoder).pipeTo(writable);
+
+		expect(entries).toHaveLength(1);
+		expect(entries[0].header.name).toBe("test.txt");
+		// The body stream should be closed gracefully even though truncated
+	});
+
+	it("handles unexpected data at end of archive in strict mode", async () => {
 		let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
 
 		const sourceStream = new ReadableStream<Uint8Array>({
@@ -383,7 +433,7 @@ describe("extract", () => {
 			},
 		});
 
-		const decoder = createTarDecoder();
+		const decoder = createTarDecoder({ strict: true });
 		const entriesStream = sourceStream.pipeThrough(decoder);
 		const reader = entriesStream.getReader();
 		const readPromise = reader.read();
@@ -396,10 +446,37 @@ describe("extract", () => {
 		// biome-ignore lint/style/noNonNullAssertion: Already setup.
 		controller!.close();
 
-		// The flush method should detect non-zero buffer and error
+		// The flush method should detect non-zero buffer and error in strict mode
 		await expect(readPromise).rejects.toThrow(
 			"Unexpected data at end of archive",
 		);
+	});
+
+	it("handles unexpected data at end of archive gracefully in non-strict mode", async () => {
+		let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+		const sourceStream = new ReadableStream<Uint8Array>({
+			start(c) {
+				controller = c;
+			},
+		});
+
+		const decoder = createTarDecoder({ strict: false });
+		const entriesStream = sourceStream.pipeThrough(decoder);
+		const reader = entriesStream.getReader();
+		const readPromise = reader.read();
+
+		// Leftover data
+		// biome-ignore lint/style/noNonNullAssertion: Already setup.
+		controller!.enqueue(new Uint8Array([0x42, 0x43, 0x44]));
+
+		// Should trigger flush with non-zero buffer
+		// biome-ignore lint/style/noNonNullAssertion: Already setup.
+		controller!.close();
+
+		// The flush method should warn but not error in non-strict mode
+		const result = await readPromise;
+		expect(result.done).toBe(true);
 	});
 
 	it("handles PAX record with zero length", async () => {
