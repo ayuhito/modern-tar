@@ -34,14 +34,6 @@ export interface TarHeader {
 
 /**
  * Union type for entry body data that can be packed into a tar archive.
- *
- * Supports multiple input types for convenience:
- * - `string` - Text content (encoded as UTF-8)
- * - `Uint8Array` - Binary data
- * - `ArrayBuffer` - Binary data
- * - `ReadableStream<Uint8Array>` - Streaming data
- * - `Blob` - File-like data
- * - `null` - No content (for directories, etc.)
  */
 export type TarEntryData =
 	| string
@@ -73,7 +65,6 @@ export interface ParsedTarEntry {
 
 /**
  * Represents an extracted entry with fully buffered content.
-
  */
 export interface ParsedTarEntryWithData {
 	header: TarHeader;
