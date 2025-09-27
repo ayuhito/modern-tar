@@ -62,7 +62,7 @@ export function readOctal(
 	const octalString = readString(view, offset, size).trim();
 
 	// An empty or invalid octal string is treated as zero.
-	return octalString ? Number.parseInt(octalString, 8) : 0;
+	return octalString ? parseInt(octalString, 8) : 0;
 }
 
 /**

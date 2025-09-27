@@ -194,10 +194,7 @@ describe("PAX format support", () => {
 				for (const line of lines) {
 					const spaceIndex = line.indexOf(" ");
 					expect(spaceIndex).toBeGreaterThan(0);
-					const declaredLength = Number.parseInt(
-						line.substring(0, spaceIndex),
-						10,
-					);
+					const declaredLength = parseInt(line.substring(0, spaceIndex), 10);
 					expect(declaredLength).toBe(line.length + 1); // +1 for the newline
 				}
 			}
