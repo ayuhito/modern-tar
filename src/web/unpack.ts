@@ -62,15 +62,16 @@ export function createTarDecoder(): TransformStream<
 			const combined = new Uint8Array(buffer.length + chunk.length);
 			combined.set(buffer);
 			combined.set(chunk, buffer.length);
+			buffer = combined;
 
 			let offset = 0;
 
 			while (true) {
 				// Read an entry's body.
 				if (currentEntry) {
-					const toWrite = combined.subarray(
+					const toWrite = buffer.subarray(
 						offset,
-						offset + Math.min(combined.length - offset, currentEntry.bytesLeft),
+						offset + Math.min(buffer.length - offset, currentEntry.bytesLeft),
 					);
 
 					currentEntry.controller.enqueue(toWrite);
@@ -85,7 +86,7 @@ export function createTarDecoder(): TransformStream<
 							(BLOCK_SIZE - (currentEntry.header.size % BLOCK_SIZE)) %
 							BLOCK_SIZE;
 
-						if (combined.length - offset < padding) {
+						if (buffer.length - offset < padding) {
 							break;
 						}
 
@@ -104,18 +105,18 @@ export function createTarDecoder(): TransformStream<
 				}
 
 				// Read the next header block.
-				if (combined.length - offset < BLOCK_SIZE) {
+				if (buffer.length - offset < BLOCK_SIZE) {
 					break; // Not enough data for a header
 				}
 
 				// Check for two consecutive zero blocks indicating end of archive.
-				const headerBlock = combined.subarray(offset, offset + BLOCK_SIZE);
+				const headerBlock = buffer.subarray(offset, offset + BLOCK_SIZE);
 				if (headerBlock.every((b) => b === 0)) {
 					// Check if there's enough data to read before validating.
-					if (combined.length - offset < BLOCK_SIZE * 2) break;
+					if (buffer.length - offset < BLOCK_SIZE * 2) break;
 
 					// If the next block is also zero, then it's the end of the archive and we can stop.
-					const nextBlock = combined.subarray(
+					const nextBlock = buffer.subarray(
 						offset + BLOCK_SIZE,
 						offset + BLOCK_SIZE * 2,
 					);
@@ -137,11 +138,11 @@ export function createTarDecoder(): TransformStream<
 					const dataSize = header.size;
 					const dataBlocksSize = Math.ceil(dataSize / BLOCK_SIZE) * BLOCK_SIZE; // Padded to block size.
 
-					if (combined.length - offset - BLOCK_SIZE < dataBlocksSize) {
+					if (buffer.length - offset - BLOCK_SIZE < dataBlocksSize) {
 						break; // Not enough data for the meta content
 					}
 
-					const data = combined.subarray(
+					const data = buffer.subarray(
 						offset + BLOCK_SIZE,
 						offset + BLOCK_SIZE + dataSize,
 					);
@@ -205,8 +206,10 @@ export function createTarDecoder(): TransformStream<
 				}
 			}
 
-			// Save any remaining bytes for the next chunk.
-			buffer = combined.subarray(offset);
+			// Save any remaining bytes for the next chunk. The GC can then reclaim the old buffer.
+			if (offset > 0) {
+				buffer = buffer.slice(offset);
+			}
 		},
 
 		flush(controller) {
