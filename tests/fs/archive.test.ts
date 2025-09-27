@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTarSources, type TarSource, unpackTar } from "../../src/fs";
+import { encoder } from "../../src/web/utils";
 
 const isWindows = process.platform === "win32";
 
@@ -166,7 +167,6 @@ describe("packTarSources", () => {
 		const streamContent = "Hello from ReadableStream!";
 		const stream = new ReadableStream({
 			start(controller) {
-				const encoder = new TextEncoder();
 				controller.enqueue(encoder.encode(streamContent));
 				controller.close();
 			},

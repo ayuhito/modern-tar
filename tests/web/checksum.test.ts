@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTarPacker, packTar, unpackTar } from "../../src/web";
 import { USTAR } from "../../src/web/constants";
-import { streamToBuffer } from "../../src/web/utils";
+import { decoder, encoder, streamToBuffer } from "../../src/web/utils";
 
 describe("checksum validation", () => {
 	it("should reject tar entries with corrupted checksums", async () => {
@@ -80,7 +80,7 @@ describe("checksum validation", () => {
 			type: "file",
 		});
 		let writer = file1Stream.getWriter();
-		await writer.write(new TextEncoder().encode("valid"));
+		await writer.write(encoder.encode("valid"));
 		await writer.close();
 
 		// Second entry (will be corrupted)
@@ -91,7 +91,7 @@ describe("checksum validation", () => {
 		});
 
 		writer = file2Stream.getWriter();
-		await writer.write(new TextEncoder().encode("corrupt"));
+		await writer.write(encoder.encode("corrupt"));
 		await writer.close();
 
 		controller.finalize();
@@ -143,6 +143,6 @@ describe("checksum validation", () => {
 		const entries = await unpackTar(buffer);
 		expect(entries).toHaveLength(1);
 		expect(entries[0].header.name).toBe("checksum-test.txt");
-		expect(new TextDecoder().decode(entries[0].data)).toBe("hello world");
+		expect(decoder.decode(entries[0].data)).toBe("hello world");
 	});
 });

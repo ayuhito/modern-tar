@@ -1,5 +1,5 @@
 import { USTAR } from "./constants";
-import { readOctal } from "./utils";
+import { encoder, readOctal } from "./utils";
 
 // ASCII code for a space character.
 const CHECKSUM_SPACE = 32;
@@ -46,7 +46,7 @@ export function writeChecksum(block: Uint8Array): void {
 
 	// Format as a 6-digit octal string, NUL-terminated, and space-padded.
 	const checksumString = `${checksum.toString(8).padStart(6, "0")}\0 `;
-	const checksumBytes = new TextEncoder().encode(checksumString);
+	const checksumBytes = encoder.encode(checksumString);
 
 	// Write the checksum bytes into the block.
 	block.set(checksumBytes, USTAR.checksum.offset);
