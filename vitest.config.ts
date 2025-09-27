@@ -12,7 +12,6 @@ export default defineConfig({
 			"**/tests/fs/fixtures/e/symlink",
 		],
 		coverage: {
-			reporter: ["text", "json-summary", "json"],
 			exclude: [
 				"**/node_modules/**",
 				"**/dist/**",
