@@ -1,7 +1,7 @@
 import { validateChecksum } from "./checksum";
 import { BLOCK_SIZE, FLAGTYPE, USTAR } from "./constants";
 import type { ParsedTarEntry, TarHeader } from "./types";
-import { decoder, readOctal, readString } from "./utils";
+import { decoder, readNumeric, readOctal, readString } from "./utils";
 
 interface InternalTarHeader extends TarHeader {
 	checksum: number;
@@ -244,11 +244,11 @@ function parseUstarHeader(block: Uint8Array): InternalTarHeader {
 	return {
 		name: readString(block, USTAR.name.offset, USTAR.name.size),
 		mode: readOctal(block, USTAR.mode.offset, USTAR.mode.size),
-		uid: readOctal(block, USTAR.uid.offset, USTAR.uid.size),
-		gid: readOctal(block, USTAR.gid.offset, USTAR.gid.size),
-		size: readOctal(block, USTAR.size.offset, USTAR.size.size),
+		uid: readNumeric(block, USTAR.uid.offset, USTAR.uid.size),
+		gid: readNumeric(block, USTAR.gid.offset, USTAR.gid.size),
+		size: readNumeric(block, USTAR.size.offset, USTAR.size.size),
 		mtime: new Date(
-			readOctal(block, USTAR.mtime.offset, USTAR.mtime.size) * 1000,
+			readNumeric(block, USTAR.mtime.offset, USTAR.mtime.size) * 1000,
 		),
 		checksum: readOctal(block, USTAR.checksum.offset, USTAR.checksum.size),
 		type: FLAGTYPE[typeflag] || "file",

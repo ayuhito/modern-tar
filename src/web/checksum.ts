@@ -14,20 +14,26 @@ export function validateChecksum(block: Uint8Array): boolean {
 		USTAR.checksum.size,
 	);
 
-	// Sum the bytes to get the checksum.
-	let calculatedChecksum = 0;
-	const checksumEnd = USTAR.checksum.offset + USTAR.checksum.size;
+	let unsignedSum = 0;
 
-	for (let i = 0; i < block.length; i++) {
-		// If the checksum field is included in the sum, it should be treated as if it were filled with ASCII spaces.
-		if (i >= USTAR.checksum.offset && i < checksumEnd) {
-			calculatedChecksum += CHECKSUM_SPACE; // Add space value for checksum field
-		} else {
-			calculatedChecksum += block[i];
-		}
+	// Sum the bytes BEFORE the checksum field.
+	for (let i = 0; i < USTAR.checksum.offset; i++) {
+		unsignedSum += block[i];
 	}
 
-	return storedChecksum === calculatedChecksum;
+	// Add the placeholder value for the checksum field itself.
+	unsignedSum += CHECKSUM_SPACE * USTAR.checksum.size;
+
+	// Sum the bytes AFTER the checksum field.
+	for (
+		let i = USTAR.checksum.offset + USTAR.checksum.size;
+		i < block.length;
+		i++
+	) {
+		unsignedSum += block[i];
+	}
+
+	return storedChecksum === unsignedSum;
 }
 
 /**
