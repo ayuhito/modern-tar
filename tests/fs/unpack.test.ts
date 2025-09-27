@@ -110,7 +110,12 @@ describe("extract", () => {
 		const stats = await fs.stat(dirPath);
 
 		// Check that directory mode override was applied
-		expect(stats.mode & 0o777).toBe(0o755);
+		if (process.platform === "win32") {
+			// On Windows, file permissions work differently - just check it's a directory
+			expect(stats.isDirectory()).toBe(true);
+		} else {
+			expect(stats.mode & 0o777).toBe(0o755);
+		}
 	});
 
 	it("handles symlink validation with cache invalidation", async () => {
@@ -181,7 +186,12 @@ describe("extract", () => {
 		const stats = await fs.stat(filePath);
 
 		// Check that file mode override was applied
-		expect(stats.mode & 0o777).toBe(0o644);
+		if (process.platform === "win32") {
+			// On Windows, file permissions work differently - just check it's a file
+			expect(stats.isFile()).toBe(true);
+		} else {
+			expect(stats.mode & 0o777).toBe(0o644);
+		}
 
 		const content = await fs.readFile(filePath, "utf8");
 		expect(content).toBe("hello world\n");
@@ -255,7 +265,9 @@ describe("extract", () => {
 
 		const linkPath = path.join(destDir, "safe-link");
 		const linkTarget = await fs.readlink(linkPath);
-		expect(linkTarget).toBe("../outside");
+		// On Windows, symlinks may use backslashes instead of forward slashes
+		const normalizedTarget = linkTarget.replace(/\\/g, "/");
+		expect(normalizedTarget).toBe("../outside");
 	});
 
 	it("handles hardlink with absolute target", async () => {
