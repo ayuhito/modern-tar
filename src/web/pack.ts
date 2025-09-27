@@ -7,8 +7,9 @@ import {
 	USTAR,
 	USTAR_VERSION,
 } from "./constants";
+import { findUstarSplit, generatePax } from "./pack-pax";
 import type { TarHeader } from "./types";
-import { encoder, writeOctal, writeString } from "./utils";
+import { writeOctal, writeString } from "./utils";
 
 /**
  * Controls a streaming tar packing process.
@@ -135,53 +136,19 @@ export function createTarPacker(): {
 				header.type === "link";
 			const size = isBodyless ? 0 : (header.size ?? 0);
 
-			// Generate PAX header if the pax field is present.
-			if (header.pax) {
-				let paxRecords = "";
-				for (const [key, value] of Object.entries(header.pax)) {
-					// Format for each PAX record is: "<length> <key>=<value>\n"
-					const record = `${key}=${value}\n`;
+			// Automatically generate and enqueue a PAX header if needed.
+			const paxData = generatePax(header);
+			if (paxData) {
+				// @ts-expect-error - TypeScript is overly strict here, but Uint8Array is compatible here.
+				streamController.enqueue(paxData.paxHeader);
+				// @ts-expect-error - TypeScript is overly strict here, but Uint8Array is compatible here.
+				streamController.enqueue(paxData.paxBody);
 
-					// The length field must include the bytes for the length string itself,
-					// plus a space and the record.
-					let length = record.length + 1; // +1 for the space
-					const lengthStr = String(length);
-					length += lengthStr.length;
+				const paxPadding =
+					(BLOCK_SIZE - (paxData.paxBody.length % BLOCK_SIZE)) % BLOCK_SIZE;
 
-					// If adding the length digits changes the total length's number of digits
-					// (e.g., from 99 to 100), we need to adjust the length one last time.
-					const finalLengthStr = String(length);
-					if (finalLengthStr.length !== lengthStr.length) {
-						length += finalLengthStr.length - lengthStr.length;
-					}
-
-					paxRecords += `${length} ${record}`;
-				}
-
-				// Only proceed if we actually generated PAX records.
-				if (paxRecords) {
-					const paxBytes = encoder.encode(paxRecords);
-
-					// Create and enqueue the PAX header entry.
-					const paxHeader = createTarHeader({
-						name: `PaxHeader/${header.name}`,
-						size: paxBytes.length,
-						type: "pax-header",
-						mode: 0o644,
-						mtime: header.mtime,
-					});
-					streamController.enqueue(paxHeader as Uint8Array<ArrayBuffer>);
-
-					// Enqueue the PAX data itself.
-					streamController.enqueue(paxBytes);
-
-					// Add padding to align the PAX data to a 512-byte block boundary.
-					const paxPadding =
-						(BLOCK_SIZE - (paxBytes.length % BLOCK_SIZE)) % BLOCK_SIZE;
-
-					if (paxPadding > 0) {
-						streamController.enqueue(new Uint8Array(paxPadding));
-					}
+				if (paxPadding > 0) {
+					streamController.enqueue(new Uint8Array(paxPadding));
 				}
 			}
 
@@ -257,25 +224,12 @@ export function createTarHeader(header: TarHeader): Uint8Array {
 	let name = header.name;
 	let prefix = "";
 
-	if (name.length > USTAR.name.size) {
-		// We search backwards for the rightmost '/' that allows a valid split.
-		let i = name.length;
-		while (i > 0) {
-			const slashIndex = name.lastIndexOf("/", i);
-			// No suitable slash found.
-			if (slashIndex === -1) break;
-
-			const p = name.slice(0, slashIndex);
-			const n = name.slice(slashIndex + 1);
-
-			if (p.length <= USTAR.prefix.size && n.length <= USTAR.name.size) {
-				prefix = p;
-				name = n;
-				break;
-			}
-
-			// Continue searching from before the current slash.
-			i = slashIndex - 1;
+	// Do not attempt to split if a PAX header is being used for the path.
+	if (!header.pax?.path) {
+		const split = findUstarSplit(name);
+		if (split) {
+			name = split.name;
+			prefix = split.prefix;
 		}
 	}
 
