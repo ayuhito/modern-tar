@@ -31,9 +31,6 @@ export const USTAR = {
 /** USTAR version ("00"). */
 export const USTAR_VERSION = "00";
 
-/** ASCII code for a space character, used as a placeholder in checksum calculation. */
-export const CHECKSUM_SPACE = 32;
-
 /** Type flag constants for file types. */
 export const TYPEFLAG = {
 	file: "0",
