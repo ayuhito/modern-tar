@@ -11,6 +11,17 @@ export default defineConfig({
 			// Exclude problematic symlink fixtures that cause ELOOP errors
 			"**/tests/fs/fixtures/e/symlink",
 		],
+		coverage: {
+			reporter: ["text", "json-summary", "json"],
+			exclude: [
+				"**/node_modules/**",
+				"**/dist/**",
+				"**/.{idea,git,cache,output,temp}/**",
+				"**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
+				"**/tests/**",
+				"tsdown.config.ts",
+			],
+		},
 	},
 	server: {
 		watch: {
