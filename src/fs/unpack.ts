@@ -213,10 +213,8 @@ export function unpackTar(
 						break;
 					}
 
-					case "character-device":
-					case "block-device":
-					case "fifo": {
-						// Unsupported type, skip it.
+					default: {
+						// Unsupported type, skip it. Handles "character-device", "block-device", "fifo", etc.
 						await entry.body.cancel();
 						break;
 					}
