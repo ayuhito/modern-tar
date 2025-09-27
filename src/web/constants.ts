@@ -40,6 +40,9 @@ export const TYPEFLAG = {
 	// POSIX.1-2001 extensions
 	"pax-header": "x",
 	"pax-global-header": "g",
+	// GNU extensions
+	"gnu-long-name": "L",
+	"gnu-long-link-name": "K",
 } as const;
 
 /** Reverse mapping from flag characters to type names. */
@@ -48,6 +51,10 @@ export const FLAGTYPE = {
 	"1": "link",
 	"2": "symlink",
 	"5": "directory",
+	// POSIX.1-2001 extensions
 	x: "pax-header",
 	g: "pax-global-header",
+	// GNU extensions
+	L: "gnu-long-name",
+	K: "gnu-long-link-name",
 } as const;

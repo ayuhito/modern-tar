@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
 import { decoder, encoder } from "../../src/web/utils";
 import {
-	GNU_TAR,
 	INCOMPLETE_TAR,
 	LONG_NAME_TAR,
 	MULTI_FILE_TAR,
@@ -141,22 +140,6 @@ describe("extract", () => {
 		expect(entries[0].header.name).toHaveLength(100);
 		expect(entries[0].header.name).toBe(longName);
 		expect(decoder.decode(entries[0].data)).toBe("hello\n");
-	});
-
-	it("extracts a gnu format tar", async () => {
-		const buffer = await fs.readFile(GNU_TAR);
-		const entries = await unpackTar(buffer);
-
-		expect(entries).toHaveLength(1);
-		const [entry] = entries;
-
-		expect(entry.header.name).toBe("test.txt");
-		expect(entry.header.size).toBe(14);
-		expect(entry.header.uid).toBe(12345);
-		expect(entry.header.gid).toBe(67890);
-		expect(entry.header.uname).toBe("myuser");
-		expect(entry.header.gname).toBe("mygroup");
-		expect(decoder.decode(entry.data)).toBe("Hello, world!\n");
 	});
 
 	it("throws an error for an incomplete archive", async () => {

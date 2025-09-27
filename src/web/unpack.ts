@@ -14,6 +14,19 @@ type HeaderOverrides = Omit<Partial<TarHeader>, "mtime"> & {
 	mtime?: number;
 };
 
+// A map of meta-header types to their respective data parsers.
+const metaEntryParsers: Record<string, (data: Uint8Array) => HeaderOverrides> =
+	{
+		"pax-global-header": parsePax,
+		"pax-header": parsePax,
+		"gnu-long-name": (data) => ({
+			name: readString(data, 0, data.length),
+		}),
+		"gnu-long-link-name": (data) => ({
+			linkname: readString(data, 0, data.length),
+		}),
+	};
+
 /**
  * Create a transform stream that parses tar bytes into entries.
  *
@@ -115,74 +128,79 @@ export function createTarDecoder(): TransformStream<
 
 				// First parse USTAR headers as a base. Extension headers will override this as needed.
 				const header = parseUstarHeader(headerBlock);
-				const dataSize = header.size;
-				const dataBlocksSize = Math.ceil(dataSize / BLOCK_SIZE) * BLOCK_SIZE; // Padded to block size.
 
-				// Handle special entry types for PAX extensions.
-				switch (header.type) {
-					case "pax-global-header":
-					case "pax-header": {
-						if (combined.length - offset - BLOCK_SIZE < dataBlocksSize) {
-							break; // Not enough data for PAX content
-						}
+				// Check if the entry is a meta-entry (PAX, GNU, etc.)
+				const metaParser =
+					metaEntryParsers[header.type as keyof typeof metaEntryParsers];
 
-						const paxData = parsePax(
-							combined.subarray(
-								offset + BLOCK_SIZE,
-								offset + BLOCK_SIZE + dataSize,
-							),
-						);
+				if (metaParser) {
+					const dataSize = header.size;
+					const dataBlocksSize = Math.ceil(dataSize / BLOCK_SIZE) * BLOCK_SIZE; // Padded to block size.
 
-						if (header.type === "pax-global-header") {
-							paxGlobals = { ...paxGlobals, ...paxData };
-						} else {
-							nextEntryOverrides = { ...nextEntryOverrides, ...paxData };
-						}
-
-						offset += BLOCK_SIZE + dataBlocksSize;
-						continue;
+					if (combined.length - offset - BLOCK_SIZE < dataBlocksSize) {
+						break; // Not enough data for the meta content
 					}
 
-					// Other headers are handled normally.
-					default: {
-						// Finalize the header for a regular entry
-						if (header.prefix) {
-							header.name = `${header.prefix}/${header.name}`;
-						}
+					const data = combined.subarray(
+						offset + BLOCK_SIZE,
+						offset + BLOCK_SIZE + dataSize,
+					);
+					const overrides = metaParser(data);
 
-						applyOverrides(header, paxGlobals);
-						applyOverrides(header, nextEntryOverrides);
+					if (header.type === "pax-global-header") {
+						paxGlobals = { ...paxGlobals, ...overrides };
+					} else {
+						// gnu-long-name, gnu-long-link-name, and pax-header all apply to the next entry
+						nextEntryOverrides = { ...nextEntryOverrides, ...overrides };
+					}
 
-						nextEntryOverrides = {}; // Reset for the next cycle.
+					offset += BLOCK_SIZE + dataBlocksSize;
+					continue; // Move to the next header
+				}
 
-						let bodyController!: ReadableStreamDefaultController<Uint8Array>;
-						const body = new ReadableStream({
-							// biome-ignore lint/suspicious/noAssignInExpressions: This is more concise.
-							start: (c) => (bodyController = c),
-						});
+				// If we reach here, it is a regular entry.
+				const finalHeader: TarHeader = header;
 
-						controller.enqueue({
-							header,
-							body,
-						});
+				applyOverrides(finalHeader, paxGlobals);
+				applyOverrides(finalHeader, nextEntryOverrides);
 
-						offset += BLOCK_SIZE;
+				// Only apply if name wasn't already overridden by PAX/GNU
+				if (
+					header.prefix &&
+					header.magic === "ustar" &&
+					!nextEntryOverrides.name &&
+					!paxGlobals.name
+				) {
+					finalHeader.name = `${header.prefix}/${finalHeader.name}`;
+				}
 
-						if (header.size > 0) {
-							currentEntry = {
-								header,
-								bytesLeft: header.size,
-								controller: bodyController,
-							};
-						} else {
-							// No body to read, close immediately.
-							try {
-								bodyController.close();
-							} catch {
-								// Suppress errors if stream is already closed.
-							}
-						}
-						continue;
+				nextEntryOverrides = {}; // Reset for next cycle.
+
+				let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+				const body = new ReadableStream({
+					// biome-ignore lint/suspicious/noAssignInExpressions: This is more concise.
+					start: (c) => (bodyController = c),
+				});
+
+				controller.enqueue({
+					header: finalHeader,
+					body,
+				});
+
+				offset += BLOCK_SIZE;
+
+				if (finalHeader.size > 0) {
+					currentEntry = {
+						header: finalHeader,
+						bytesLeft: finalHeader.size,
+						controller: bodyController,
+					};
+				} else {
+					// No body to read, close immediately.
+					try {
+						bodyController.close();
+					} catch {
+						// Suppress errors if stream is already closed.
 					}
 				}
 			}
@@ -208,9 +226,7 @@ export function createTarDecoder(): TransformStream<
 	});
 }
 
-/**
- * Parses a 512-byte block into a USTAR header object using USTAR constants.
- */
+// Parses a 512-byte block into a USTAR header object using USTAR constants.
 function parseUstarHeader(block: Uint8Array): InternalTarHeader {
 	if (!validateChecksum(block)) {
 		throw new Error("Invalid tar header checksum.");
@@ -241,25 +257,7 @@ function parseUstarHeader(block: Uint8Array): InternalTarHeader {
 	};
 }
 
-/**
- * Applies header extension overrides to a parsed USTAR header.
- */
-function applyOverrides(header: TarHeader, overrides: HeaderOverrides) {
-	if (overrides.name !== undefined) header.name = overrides.name;
-	if (overrides.linkname !== undefined) header.linkname = overrides.linkname;
-	if (overrides.size !== undefined) header.size = overrides.size;
-	if (overrides.mtime !== undefined)
-		header.mtime = new Date(overrides.mtime * 1000);
-	if (overrides.uid !== undefined) header.uid = overrides.uid;
-	if (overrides.gid !== undefined) header.gid = overrides.gid;
-	if (overrides.uname !== undefined) header.uname = overrides.uname;
-	if (overrides.gname !== undefined) header.gname = overrides.gname;
-	if (overrides.pax) header.pax = { ...(header.pax ?? {}), ...overrides.pax };
-}
-
-/**
- * Parses PAX record data into an overrides object.
- */
+// Parses PAX record data into an overrides object.
 function parsePax(buffer: Uint8Array): HeaderOverrides {
 	const overrides: HeaderOverrides = {};
 	const pax: Record<string, string> = {};
@@ -321,4 +319,18 @@ function parsePax(buffer: Uint8Array): HeaderOverrides {
 	if (Object.keys(pax).length > 0) overrides.pax = pax;
 
 	return overrides;
+}
+
+// Applies header extension overrides to a parsed USTAR header.
+function applyOverrides(header: TarHeader, overrides: HeaderOverrides) {
+	if (overrides.name !== undefined) header.name = overrides.name;
+	if (overrides.linkname !== undefined) header.linkname = overrides.linkname;
+	if (overrides.size !== undefined) header.size = overrides.size;
+	if (overrides.mtime !== undefined)
+		header.mtime = new Date(overrides.mtime * 1000);
+	if (overrides.uid !== undefined) header.uid = overrides.uid;
+	if (overrides.gid !== undefined) header.gid = overrides.gid;
+	if (overrides.uname !== undefined) header.uname = overrides.uname;
+	if (overrides.gname !== undefined) header.gname = overrides.gname;
+	if (overrides.pax) header.pax = { ...(header.pax ?? {}), ...overrides.pax };
 }
