@@ -1,3 +1,5 @@
+import type { TYPEFLAG } from "./constants.js";
+
 /**
  * Header information for a tar entry in USTAR format.
  */
@@ -11,13 +13,7 @@ export interface TarHeader {
 	/** Unix file permissions as an octal number (e.g., 0o644 for rw-r--r--). Defaults to 0o644 for files and 0o755 for directories. */
 	mode?: number;
 	/** Entry type. Defaults to "file" if not specified. */
-	type?:
-		| "file"
-		| "directory"
-		| "symlink"
-		| "link"
-		| "pax-header"
-		| "pax-global-header";
+	type?: keyof typeof TYPEFLAG;
 	/** User ID of the entry owner. */
 	uid?: number;
 	/** Group ID of the entry owner. */
