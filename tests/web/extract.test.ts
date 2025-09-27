@@ -228,7 +228,7 @@ describe("extract", () => {
 		const modeBytes = encoder.encode("0000644 ");
 		invalidHeader.set(modeBytes, USTAR.mode.offset);
 
-		// Invalid checksum - should cause parseUstarHeader to throw
+		// Invalid checksum
 		const checksumBytes = encoder.encode("000000 ");
 		invalidHeader.set(checksumBytes, USTAR.checksum.offset);
 
@@ -344,7 +344,6 @@ describe("extract", () => {
 	});
 
 	it("handles truncated archive in middle of entry", async () => {
-		// Create a valid tar entry first
 		const validEntry = {
 			header: {
 				name: "test.txt",
@@ -359,7 +358,7 @@ describe("extract", () => {
 		// Truncate the archive in the middle of the entry data
 		const truncated = validTarBuffer.slice(0, BLOCK_SIZE + 5); // Header + 5 bytes of 10-byte data
 
-		// @ts-expect-error ReadableStream.from is supported.
+		// @ts-expect-error ReadableStream.from is supported in tests.
 		const sourceStream = ReadableStream.from([truncated]);
 		const decoder = createTarDecoder();
 
@@ -376,7 +375,6 @@ describe("extract", () => {
 	});
 
 	it("handles unexpected data at end of archive", async () => {
-		// Create a stream that feeds data in chunks and then closes with non-zero buffer
 		let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
 
 		const sourceStream = new ReadableStream<Uint8Array>({
@@ -388,15 +386,13 @@ describe("extract", () => {
 		const decoder = createTarDecoder();
 		const entriesStream = sourceStream.pipeThrough(decoder);
 		const reader = entriesStream.getReader();
-
-		// Start reading in the background
 		const readPromise = reader.read();
 
-		// Feed some non-header data that should be treated as leftover
+		// Leftover data
 		// biome-ignore lint/style/noNonNullAssertion: Already setup.
-		controller!.enqueue(new Uint8Array([0x42, 0x43, 0x44])); // Non-zero data
+		controller!.enqueue(new Uint8Array([0x42, 0x43, 0x44]));
 
-		// Close the stream - this should trigger flush with non-zero buffer
+		// Should trigger flush with non-zero buffer
 		// biome-ignore lint/style/noNonNullAssertion: Already setup.
 		controller!.close();
 

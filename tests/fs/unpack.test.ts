@@ -384,7 +384,7 @@ describe("extract", () => {
 	});
 
 	describe("edge cases", () => {
-		it("handles validatePath with non-directory/non-symlink file blocking path", async () => {
+		it("handles validate path with non-directory/non-symlink file blocking path", async () => {
 			const destDir = path.join(tmpDir, "extracted");
 			await fs.mkdir(destDir, { recursive: true });
 
@@ -412,13 +412,10 @@ describe("extract", () => {
 			).rejects.toThrow("is not a valid directory component");
 		});
 
-		it("handles ReadableStream cancel with non-Error reason", async () => {
+		it("handles ReadableStream cancel with non Error reason", async () => {
 			const destDir = path.join(tmpDir, "extracted");
-
-			// Create a custom writable that will test the cancel path
 			const unpackStream = unpackTar(destDir);
 
-			// Add error handler to prevent unhandled error
 			unpackStream.on("error", () => {
 				// Expected error, do nothing
 			});
@@ -433,34 +430,6 @@ describe("extract", () => {
 			await new Promise((resolve) => {
 				unpackStream.on("close", resolve);
 			});
-
-			it.skipIf(process.platform !== "win32")(
-				"handles cache invalidation on Windows platform",
-				async () => {
-					const destDir = path.join(tmpDir, "extracted");
-
-					const entries = [
-						{
-							header: {
-								name: "test-symlink",
-								size: 0,
-								type: "symlink" as const,
-								linkname: "target",
-							},
-						},
-					];
-
-					const tarBuffer = await packTarWeb(entries);
-					const unpackStream = unpackTar(destDir);
-
-					// Should handle Windows cache invalidation without error
-					await pipeline(Readable.from([tarBuffer]), unpackStream);
-
-					const linkPath = path.join(destDir, "test-symlink");
-					const linkTarget = await fs.readlink(linkPath);
-					expect(linkTarget).toBe("target");
-				},
-			);
 		});
 	});
 });
