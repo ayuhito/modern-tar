@@ -8,7 +8,7 @@ import {
 	type TarEntry,
 	unpackTar,
 } from "../../src/web/index";
-import { decoder, streamToBuffer } from "../../src/web/utils";
+import { decoder, encoder, streamToBuffer } from "../../src/web/utils";
 
 describe("compression", () => {
 	describe("streaming compression", () => {
@@ -28,7 +28,7 @@ describe("compression", () => {
 				gname: "staff",
 			});
 			const writer = fileStream.getWriter();
-			await writer.write(new TextEncoder().encode("hello"));
+			await writer.write(encoder.encode("hello"));
 			await writer.close();
 			controller.finalize();
 
@@ -76,7 +76,7 @@ describe("compression", () => {
 				mtime: new Date(1387580181000),
 			});
 			const writer1 = file1Stream.getWriter();
-			await writer1.write(new TextEncoder().encode("content1"));
+			await writer1.write(encoder.encode("content1"));
 			await writer1.close();
 
 			const file2Stream = controller.add({
@@ -87,7 +87,7 @@ describe("compression", () => {
 				mtime: new Date(1387580181000),
 			});
 			const writer2 = file2Stream.getWriter();
-			await writer2.write(new TextEncoder().encode("content2"));
+			await writer2.write(encoder.encode("content2"));
 			await writer2.close();
 
 			controller.finalize();
@@ -156,7 +156,7 @@ describe("decompression", () => {
 			);
 
 			for (const entry of entries) {
-				const content = new TextDecoder().decode(entry.data);
+				const content = decoder.decode(entry.data);
 				expect(content).toBe("test content");
 			}
 
@@ -388,7 +388,7 @@ describe("decompression", () => {
 			});
 
 			const writer = fileStream.getWriter();
-			await writer.write(new TextEncoder().encode("partial")); // Only 7 bytes
+			await writer.write(encoder.encode("partial")); // Only 7 bytes
 
 			// This should throw due to size mismatch
 			await expect(writer.close()).rejects.toThrow(/Size mismatch/);
@@ -412,9 +412,9 @@ describe("decompression", () => {
 			const writer = fileStream.getWriter();
 
 			// This should throw when we try to write more than the declared size
-			await writer.write(new TextEncoder().encode("hello")); // 5 bytes - OK
+			await writer.write(encoder.encode("hello")); // 5 bytes - OK
 			await expect(
-				writer.write(new TextEncoder().encode(" world")), // 6 more bytes - should fail
+				writer.write(encoder.encode(" world")), // 6 more bytes - should fail
 			).rejects.toThrow(/larger than its specified size/);
 
 			// Stream should also fail

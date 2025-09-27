@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
-import { decoder } from "../../src/web/utils";
+import { decoder, encoder } from "../../src/web/utils";
 import {
 	GNU_TAR,
 	INCOMPLETE_TAR,
@@ -171,7 +171,7 @@ describe("extract", () => {
 	it("extracts a tar with a huge file using PAX headers for size", async () => {
 		const hugeFileSize = "8804630528"; // ~8.2 GB, as a string
 		const smallBody = "this is a placeholder body";
-		const bodyBuffer = new TextEncoder().encode(smallBody);
+		const bodyBuffer = encoder.encode(smallBody);
 
 		const archive = await packTar([
 			{
@@ -191,7 +191,6 @@ describe("extract", () => {
 		// Use streaming API to test just the header parsing without reading full body
 		// @ts-expect-error ReadableStream.from is supported.
 		const sourceStream = ReadableStream.from([archive]);
-		const decoder = new TextDecoder();
 
 		let headerParsed = false;
 		let entry: {
