@@ -68,12 +68,26 @@ export interface ParsedTarEntryWithData {
 }
 
 /**
+ * Configuration options for creating a tar decoder stream.
+ */
+export interface DecoderOptions {
+	/**
+	 * Enable strict validation of the tar archive.
+	 * When true, the decoder will throw errors for data corruption issues:
+	 * - Invalid checksums (indicates header corruption)
+	 * - Invalid USTAR magic string (format violation)
+	 * @default false
+	 */
+	strict?: boolean;
+}
+
+/**
  * Platform-neutral configuration options for extracting tar archives.
  *
  * These options work with any tar extraction implementation and are not tied
  * to specific platforms like Node.js filesystem APIs.
  */
-export interface UnpackOptions {
+export interface UnpackOptions extends DecoderOptions {
 	/** Number of leading path components to strip from entry names (e.g., strip: 1 removes first directory) */
 	strip?: number;
 	/** Filter function to include/exclude entries (return false to skip) */

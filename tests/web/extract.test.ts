@@ -234,7 +234,7 @@ describe("extract", () => {
 
 		// @ts-expect-error ReadableStream.from is supported in tests.
 		const sourceStream = ReadableStream.from([invalidHeader]);
-		const entryStream = sourceStream.pipeThrough(createTarDecoder());
+		const entryStream = sourceStream.pipeThrough(createTarDecoder({ strict: true }));
 		const reader = entryStream.getReader();
 
 		await expect(reader.read()).rejects.toThrow("Invalid tar header checksum");

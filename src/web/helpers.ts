@@ -154,7 +154,7 @@ export async function unpackTar(
 	const results: ParsedTarEntryWithData[] = [];
 
 	const entryStream = sourceStream
-		.pipeThrough(createTarDecoder())
+		.pipeThrough(createTarDecoder(options))
 		.pipeThrough(createTarOptionsTransformer(options));
 
 	const reader = entryStream.getReader();

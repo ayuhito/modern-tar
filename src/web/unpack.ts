@@ -1,6 +1,6 @@
 import { validateChecksum } from "./checksum";
 import { BLOCK_SIZE, FLAGTYPE, USTAR } from "./constants";
-import type { ParsedTarEntry, TarHeader } from "./types";
+import type { DecoderOptions, ParsedTarEntry, TarHeader } from "./types";
 import { decoder, readNumeric, readOctal, readString } from "./utils";
 
 interface InternalTarHeader extends TarHeader {
@@ -30,6 +30,7 @@ const metaEntryParsers: Record<string, (data: Uint8Array) => HeaderOverrides> =
 /**
  * Create a transform stream that parses tar bytes into entries.
  *
+ * @param options - Optional configuration for the decoder using {@link DecoderOptions}.
  * @returns `TransformStream` that converts tar archive bytes to {@link ParsedTarEntry} objects.
  * @example
  * ```typescript
@@ -43,10 +44,14 @@ const metaEntryParsers: Record<string, (data: Uint8Array) => HeaderOverrides> =
  *  // Process entry.body stream as needed
  * }
  */
-export function createTarDecoder(): TransformStream<
+export function createTarDecoder(
+	options: DecoderOptions = {},
+): TransformStream<
 	Uint8Array,
 	ParsedTarEntry
 > {
+	const strict = options.strict ?? false;
+
 	let buffer = new Uint8Array(0);
 	let currentEntry: {
 		header: TarHeader;
@@ -128,7 +133,7 @@ export function createTarDecoder(): TransformStream<
 				}
 
 				// First parse USTAR headers as a base. Extension headers will override this as needed.
-				const header = parseUstarHeader(headerBlock);
+				const header = parseUstarHeader(headerBlock, strict);
 
 				// Check if the entry is a meta-entry (PAX, GNU, etc.)
 				const metaParser =
@@ -230,8 +235,8 @@ export function createTarDecoder(): TransformStream<
 }
 
 // Parses a 512-byte block into a USTAR header object using USTAR constants.
-function parseUstarHeader(block: Uint8Array): InternalTarHeader {
-	if (!validateChecksum(block)) {
+function parseUstarHeader(block: Uint8Array, strict: boolean): InternalTarHeader {
+	if (strict && !validateChecksum(block)) {
 		throw new Error("Invalid tar header checksum.");
 	}
 
@@ -240,6 +245,12 @@ function parseUstarHeader(block: Uint8Array): InternalTarHeader {
 		USTAR.typeflag.offset,
 		USTAR.typeflag.size,
 	) as keyof typeof FLAGTYPE;
+
+	const magic = readString(block, USTAR.magic.offset, USTAR.magic.size);
+
+	if (strict && !magic.startsWith("ustar")) {
+		throw new Error(`Invalid USTAR magic: expected "ustar", got "${magic}"`);
+	}
 
 	return {
 		name: readString(block, USTAR.name.offset, USTAR.name.size),
@@ -253,7 +264,7 @@ function parseUstarHeader(block: Uint8Array): InternalTarHeader {
 		checksum: readOctal(block, USTAR.checksum.offset, USTAR.checksum.size),
 		type: FLAGTYPE[typeflag] || "file",
 		linkname: readString(block, USTAR.linkname.offset, USTAR.linkname.size),
-		magic: readString(block, USTAR.magic.offset, USTAR.magic.size),
+		magic,
 		uname: readString(block, USTAR.uname.offset, USTAR.uname.size),
 		gname: readString(block, USTAR.gname.offset, USTAR.gname.size),
 		prefix: readString(block, USTAR.prefix.offset, USTAR.prefix.size),
