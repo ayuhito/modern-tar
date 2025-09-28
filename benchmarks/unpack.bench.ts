@@ -17,6 +17,7 @@ const EXTRACT_DIR = path.join(TMP_DIR, "extract");
 
 const SMALL_FILES_DIR = path.resolve(__dirname, "data/small-files");
 const LARGE_FILES_DIR = path.resolve(__dirname, "data/large-files");
+const NESTED_FILES_DIR = path.resolve(__dirname, "data/nested-files");
 
 async function setup() {
 	await fsp.rm(TMP_DIR, { recursive: true, force: true });
@@ -25,6 +26,7 @@ async function setup() {
 	for (const testCase of [
 		{ name: "small-files", dir: SMALL_FILES_DIR },
 		{ name: "large-files", dir: LARGE_FILES_DIR },
+		{ name: "nested-files", dir: NESTED_FILES_DIR },
 	]) {
 		const tarballPath = path.join(TARBALLS_DIR, `${testCase.name}.tar`);
 		const writeStream = fs.createWriteStream(tarballPath);
@@ -41,8 +43,9 @@ export async function runUnpackingBenchmarks() {
 	console.log("\nUnpacking benchmarks...");
 
 	for (const testCase of [
-		{ name: "Many Small Files", file: "small-files.tar" },
-		{ name: "Few Large Files", file: "large-files.tar" },
+		{ name: "Many Small Files (2500 x 1KB)", file: "small-files.tar" },
+		{ name: "Many Small Nested Files (2500 x 1KB)", file: "nested-files.tar" },
+		{ name: "Few Large Files (5 x 20MB)", file: "large-files.tar" },
 	]) {
 		const tarballPath = path.join(TARBALLS_DIR, testCase.file);
 		const bench = new Bench({
