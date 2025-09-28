@@ -114,7 +114,7 @@ export function packTar(
 			const paddingSize =
 				(BLOCK_SIZE - (finalHeader.size % BLOCK_SIZE)) % BLOCK_SIZE;
 			if (paddingSize > 0) {
-				yield Buffer.alloc(paddingSize); // Using Buffer.alloc is idiomatic in Node.js
+				yield Buffer.alloc(paddingSize);
 			}
 		}
 
