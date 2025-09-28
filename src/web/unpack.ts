@@ -223,8 +223,9 @@ export function createTarDecoder(
 						return;
 					} else {
 						// The second block was not all zeroes, so it's not actually the end of the archive
-						// and we need to unconsume it.
+						// and we need to unconsume both blocks and continue processing.
 						unshift(nextBlock);
+						unshift(headerBlock);
 					}
 				}
 
