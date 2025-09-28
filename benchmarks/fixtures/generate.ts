@@ -165,5 +165,5 @@ export async function generateFixtures() {
 
 	await Promise.all(nestedFilePromises);
 
-	console.log("Fixtures generated successfully.")
+	console.log("Fixtures generated successfully.");
 }
