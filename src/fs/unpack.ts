@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createTarDecoder, createTarOptionsTransformer } from "../web/index";
+import { streamToBuffer } from "../web/utils";
 import type { UnpackOptionsFS } from "./types";
 
 /**
@@ -114,12 +115,21 @@ export function unpackTar(
 					}
 
 					case "file": {
-						await pipeline(
-							Readable.fromWeb(entry.body),
-							createWriteStream(outPath, {
+						// For < 32kb files, buffer the content and use writeFile to avoid overhead of creating a stream.
+						if (header.size <= 32 * 1024) {
+							const data = await streamToBuffer(entry.body);
+							await fs.writeFile(outPath, data, {
 								mode: options.fmode ?? header.mode,
-							}),
-						);
+							});
+						} else {
+							await pipeline(
+								Readable.fromWeb(entry.body),
+								createWriteStream(outPath, {
+									mode: options.fmode ?? header.mode,
+								}),
+							);
+						}
+
 						break;
 					}
 
