@@ -5,6 +5,8 @@
 	"type": "module",
 	"scripts": {
 		"bench": "node --experimental-strip-types run.bench.ts",
+		"bench:pack": "node --experimental-strip-types run.pack.ts",
+		"bench:unpack": "node --experimental-strip-types run.unpack.ts",
 		"fixtures": "node --experimental-strip-types fixtures/generate.ts"
 	},
 	"dependencies": {
