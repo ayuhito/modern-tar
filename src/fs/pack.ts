@@ -1,3 +1,4 @@
+import type { Dirent, Stats } from "node:fs";
 import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -41,14 +42,21 @@ export function packTar(
 	options: PackOptionsFS = {},
 ): Readable {
 	const seenInodes = new Map<number, string>();
+	const statCache = new Map<string, Stats>();
+	const readdirCache = new Map<string, Dirent[]>();
 
 	async function* walk(
 		currentPath: string, // The relative path inside the tar archive
 	): AsyncGenerator<Uint8Array | Buffer> {
 		const fullPath = path.join(directoryPath, currentPath);
-		const stat = await (options.dereference
-			? fs.stat(fullPath)
-			: fs.lstat(fullPath));
+
+		let stat = statCache.get(fullPath);
+		if (!stat) {
+			stat = await (options.dereference
+				? fs.stat(fullPath)
+				: fs.lstat(fullPath));
+			statCache.set(fullPath, stat);
+		}
 
 		if (options.filter?.(fullPath, stat) === false) {
 			return;
@@ -120,21 +128,34 @@ export function packTar(
 
 		// If it's a directory, recurse into its children
 		if (stat.isDirectory()) {
-			const dirents = await fs.readdir(fullPath);
+			let dirents = readdirCache.get(fullPath);
+			if (!dirents) {
+				dirents = await fs.readdir(fullPath, { withFileTypes: true });
+				readdirCache.set(fullPath, dirents);
+			}
+
 			for (const dirent of dirents) {
-				yield* walk(path.join(currentPath, dirent));
+				// dirent.name is just the file/folder name, not the full path
+				yield* walk(path.join(currentPath, dirent.name));
 			}
 		}
 	}
 
 	return Readable.from(
 		(async function* () {
-			const topLevelDirents = await fs.readdir(directoryPath);
-			for (const dirent of topLevelDirents) {
-				yield* walk(dirent);
+			let topLevelDirents = readdirCache.get(directoryPath);
+			if (!topLevelDirents) {
+				topLevelDirents = await fs.readdir(directoryPath, {
+					withFileTypes: true,
+				});
+				readdirCache.set(directoryPath, topLevelDirents);
 			}
 
-			// End with two zero-filled blocks
+			for (const dirent of topLevelDirents) {
+				yield* walk(dirent.name);
+			}
+
+			// End with two zero-filled blocks.
 			yield Buffer.alloc(BLOCK_SIZE * 2);
 		})(),
 	);
