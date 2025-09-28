@@ -1,0 +1,22 @@
+{
+	"name": "modern-tar-benchmarks",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"bench": "node --experimental-strip-types run.bench.ts",
+		"fixtures": "node --experimental-strip-types fixtures/generate.ts"
+	},
+	"dependencies": {
+		"modern-tar": "file:..",
+		"tar": "^7.5.1",
+		"tar-fs": "^3.1.1",
+		"tinybench": "^5.0.1"
+	},
+	"devDependencies": {
+		"@types/node": "^24.5.2",
+		"@types/tar": "^6.1.13",
+		"@types/tar-fs": "^2.0.4",
+		"typescript": "^5.9.2"
+	}
+}

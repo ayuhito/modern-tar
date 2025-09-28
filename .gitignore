@@ -6,3 +6,8 @@ dist
 *.tsbuildinfo
 coverage
 AGENT.md
+
+benchmarks/data
+benchmarks/*.js
+benchmarks/**/*.js
+tmp
