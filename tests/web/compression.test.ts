@@ -357,6 +357,70 @@ describe("decompression", () => {
 
 			expect(entryCount).toBe(1);
 		});
+
+		it("streams compressed archives with proper decompression", async () => {
+			const originalEntries: TarEntry[] = [
+				{
+					header: {
+						name: "stream-file1.txt",
+						size: 12,
+						type: "file",
+						mode: 0o644,
+						mtime: new Date(1387580181000),
+					},
+					body: "stream test1",
+				},
+				{
+					header: {
+						name: "stream-file2.txt",
+						size: 12,
+						type: "file",
+						mode: 0o644,
+						mtime: new Date(1387580181000),
+					},
+					body: "stream test2",
+				},
+			];
+
+			const tarBuffer = await packTar(originalEntries);
+			const compressedStream = new ReadableStream({
+				start(controller) {
+					controller.enqueue(new Uint8Array(tarBuffer));
+					controller.close();
+				},
+			}).pipeThrough(createGzipEncoder());
+
+			const compressedBuffer = await streamToBuffer(compressedStream);
+
+			// Stream the compressed archive through decoder
+			const responseBody = new ReadableStream({
+				start(controller) {
+					controller.enqueue(new Uint8Array(compressedBuffer));
+					controller.close();
+				},
+			});
+
+			const entries = responseBody
+				.pipeThrough(createGzipDecoder())
+				.pipeThrough(createTarDecoder());
+
+			let entryCount = 0;
+			for await (const entry of entries) {
+				entryCount++;
+
+				expect(entry.header.name).toBe(`stream-file${entryCount}.txt`);
+				expect(entry.header.type).toBe("file");
+				expect(entry.header.size).toBe(12);
+
+				const bodyReader = entry.body.getReader();
+				const { value: bodyChunk } = await bodyReader.read();
+				bodyReader.releaseLock();
+
+				expect(decoder.decode(bodyChunk)).toBe(`stream test${entryCount}`);
+			}
+
+			expect(entryCount).toBe(2);
+		});
 	});
 
 	describe("error handling", () => {
