@@ -1,7 +1,7 @@
 import { createWriteStream, type Stats } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { PassThrough, Readable, Writable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createTarDecoder, createTarOptionsTransformer } from "../web/index";
 import type { UnpackOptionsFS } from "./types";
@@ -41,41 +41,15 @@ export function unpackTar(
 	directoryPath: string,
 	options: UnpackOptionsFS = {},
 ): Writable {
-	const bridge = new PassThrough();
+	// Create a stream pair for proper backpressure handling.
+	const { readable, writable: webWritable } = new TransformStream<
+		Uint8Array,
+		Uint8Array
+	>();
 
-	const readable = new ReadableStream({
-		start(controller) {
-			bridge.on("data", (chunk) => controller.enqueue(chunk));
-			bridge.on("end", () => controller.close());
-			bridge.on("error", (err) => controller.error(err));
-		},
-
-		cancel(reason) {
-			bridge.destroy(
-				reason instanceof Error ? reason : new Error(String(reason)),
-			);
-		},
-	});
-
-	const writable = new Writable({
-		write(chunk, encoding, callback) {
-			if (!bridge.write(chunk, encoding)) {
-				bridge.once("drain", callback);
-				return;
-			}
-			callback();
-		},
-
-		final(callback) {
-			bridge.end();
-			processingPromise.then(() => callback()).catch(callback);
-		},
-
-		destroy(err, callback) {
-			bridge.destroy(err as Error | undefined);
-			callback(err);
-		},
-	});
+	const entryStream = readable
+		.pipeThrough(createTarDecoder(options))
+		.pipeThrough(createTarOptionsTransformer(options));
 
 	const processingPromise = (async () => {
 		const resolvedDestDir = normalizePath(path.resolve(directoryPath));
@@ -83,10 +57,6 @@ export function unpackTar(
 
 		// Ensure destination directory exists upfront
 		await fs.mkdir(resolvedDestDir, { recursive: true });
-
-		const entryStream = readable
-			.pipeThrough(createTarDecoder(options))
-			.pipeThrough(createTarOptionsTransformer(options));
 
 		const reader = entryStream.getReader();
 		try {
@@ -235,6 +205,56 @@ export function unpackTar(
 		}
 	})();
 
+	// Get the writer for the web writable stream
+	const webWriter = webWritable.getWriter();
+	let isWriterClosed = false;
+
+	// Create the Node Writable stream with proper backpressure
+	const writable = new Writable({
+		async write(chunk, _encoding, callback) {
+			try {
+				// This await is important for backpressure. It will not resolve
+				// until the web stream is ready for more data AND the processing
+				// pipeline can handle it.
+				await webWriter.write(chunk);
+				callback();
+			} catch (err) {
+				callback(err as Error);
+			}
+		},
+
+		async final(callback) {
+			try {
+				if (!isWriterClosed) {
+					try {
+						await webWriter.close();
+						isWriterClosed = true;
+					} catch {
+						// If close fails, the stream might already be closed
+						isWriterClosed = true;
+					}
+				}
+
+				// Wait for all processing to complete
+				await processingPromise;
+				callback();
+			} catch (err) {
+				callback(err as Error);
+			}
+		},
+
+		destroy(err, callback) {
+			// If the stream is destroyed, abort everything gracefully
+			if (!isWriterClosed) {
+				isWriterClosed = true;
+				webWriter.abort(err).finally(() => callback(err));
+			} else {
+				callback(err);
+			}
+		},
+	});
+
+	// Forward processing errors to the writable stream
 	processingPromise.catch((err) => {
 		writable.destroy(err);
 	});
