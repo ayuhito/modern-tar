@@ -3,7 +3,7 @@ import { runPackingBenchmarks } from "./pack.bench.ts";
 import { runUnpackingBenchmarks } from "./unpack.bench.ts";
 
 async function main() {
-	console.log("Starting benchmark run...");
+	console.log("Starting benchmark run...\n");
 
 	await generateFixtures();
 	await runPackingBenchmarks();

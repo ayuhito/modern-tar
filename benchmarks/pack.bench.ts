@@ -21,12 +21,14 @@ function createNullStream() {
 
 const SMALL_FILES_DIR = path.resolve(__dirname, "data/small-files");
 const LARGE_FILES_DIR = path.resolve(__dirname, "data/large-files");
+const NESTED_FILES_DIR = path.resolve(__dirname, "data/nested-files");
 
 export async function runPackingBenchmarks() {
 	console.log("\nPacking benchmarks...");
 
 	for (const testCase of [
-		{ name: "Many Small Files (5000 x 1KB)", dir: SMALL_FILES_DIR },
+		{ name: "Many Small Files (2500 x 1KB)", dir: SMALL_FILES_DIR },
+		{ name: "Many Small Nested Files (2500 x 1KB)", dir: NESTED_FILES_DIR },
 		{ name: "Few Large Files (5 x 20MB)", dir: LARGE_FILES_DIR },
 	]) {
 		const bench = new Bench({

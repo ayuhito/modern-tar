@@ -1,10 +1,11 @@
-import { createWriteStream, type Stats } from "node:fs";
+import { createWriteStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createTarDecoder, createTarOptionsTransformer } from "../web/index";
 import { streamToBuffer } from "../web/utils";
+import { normalizeUnicode, validateBounds, validatePath } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
 /**
@@ -53,7 +54,7 @@ export function unpackTar(
 		.pipeThrough(createTarOptionsTransformer(options));
 
 	const processingPromise = (async () => {
-		const resolvedDestDir = normalizePath(path.resolve(directoryPath));
+		const resolvedDestDir = normalizeUnicode(path.resolve(directoryPath));
 		const validatedDirs = new Set<string>([resolvedDestDir]);
 
 		// Ensure destination directory exists upfront
@@ -69,7 +70,7 @@ export function unpackTar(
 				if (done) break;
 
 				const { header } = entry;
-				const normalizedName = normalizePath(header.name);
+				const normalizedName = normalizeUnicode(header.name);
 
 				// Check path depth to prevent DoS attacks
 				if (maxDepth !== Infinity) {
@@ -164,7 +165,7 @@ export function unpackTar(
 					case "link": {
 						if (!header.linkname) break;
 
-						const normalizedLinkname = normalizePath(header.linkname);
+						const normalizedLinkname = normalizeUnicode(header.linkname);
 
 						// Check for absolute paths in hardlink target
 						if (path.isAbsolute(normalizedLinkname)) {
@@ -270,101 +271,4 @@ export function unpackTar(
 	});
 
 	return writable;
-}
-
-/**
- * Recursively validates that each item of the given path exists and is a directory or
- * a safe symlink.
- *
- * We need to call this for each path component to ensure that no symlinks escape the
- * target directory.
- */
-async function validatePath(
-	currentPath: string,
-	root: string,
-	cache: Set<string>,
-) {
-	const normalizedPath = normalizePath(currentPath);
-
-	// If the path is the root or is already in our cache, we're done.
-	if (normalizedPath === root || cache.has(normalizedPath)) {
-		return;
-	}
-
-	let stat: Stats;
-	try {
-		stat = await fs.lstat(normalizedPath);
-	} catch (err) {
-		if (
-			err instanceof Error &&
-			"code" in err &&
-			(err.code === "ENOENT" || err.code === "EPERM")
-		) {
-			// Path component doesn't exist, so we must validate its parent.
-			await validatePath(path.dirname(normalizedPath), root, cache);
-			cache.add(normalizedPath);
-
-			return;
-		}
-
-		throw err;
-	}
-
-	// If a component is a directory, validate its parent and then cache it.
-	if (stat.isDirectory()) {
-		await validatePath(path.dirname(normalizedPath), root, cache);
-		cache.add(normalizedPath);
-
-		return;
-	}
-
-	// If we encounter a symlink, we need to check where it points.
-	if (stat.isSymbolicLink()) {
-		const realPath = await fs.realpath(normalizedPath);
-
-		// Check if the symlink target is within our root directory.
-		validateBounds(
-			realPath,
-			root,
-			`Path traversal attempt detected: symlink "${currentPath}" points outside the extraction directory.`,
-		);
-
-		// Validate the parent and cache this symlink as safe
-		await validatePath(path.dirname(normalizedPath), root, cache);
-		cache.add(normalizedPath);
-
-		return;
-	}
-
-	// Any other file type is an invalid component for a directory path.
-	throw new Error(
-		`Path traversal attempt detected: "${currentPath}" is not a valid directory component.`,
-	);
-}
-
-/* Validates that the given target path is within the destination directory and does not escape. */
-function validateBounds(
-	targetPath: string,
-	destDir: string,
-	errorMessage: string,
-): void {
-	const normalizedTarget = normalizePath(targetPath);
-	if (
-		!(
-			normalizedTarget === destDir ||
-			normalizedTarget.startsWith(destDir + path.sep)
-		)
-	) {
-		throw new Error(errorMessage);
-	}
-}
-
-/**
- * Normalizes a file path to prevent Unicode-based security vulnerabilities.
- *
- * This prevents cache poisoning attacks where different Unicode representations
- * of the same visual path (e.g., "café" vs "cafe´") could bypass validation.
- */
-function normalizePath(pathStr: string): string {
-	return pathStr.normalize("NFKD");
 }
