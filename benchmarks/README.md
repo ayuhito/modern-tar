@@ -11,10 +11,12 @@ These are informal benchmarks comparing the performance of `modern-tar` against 
 ## Benchmark Scenarios
 
 ### Packing (Creating Archives)
+
 - **Many Small Files**: 5,000 files × 1KB each (~5MB total)
 - **Few Large Files**: 5 files × 20MB each (~100MB total)
 
 ### Unpacking (Extracting Archives)
+
 - **Many Small Files**: Extract 5,000 × 1KB files
 - **Few Large Files**: Extract 5 × 20MB files
 
