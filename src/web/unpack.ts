@@ -49,7 +49,12 @@ export function createTarDecoder(
 ): TransformStream<Uint8Array, ParsedTarEntry> {
 	const strict = options.strict ?? false;
 
-	let buffer = new Uint8Array(0);
+	// Chunk queue
+	const chunks: Uint8Array[] = [];
+	let totalLength = 0;
+	let offset = 0; // Read offset within the first chunk only
+
+	// State for entries
 	let currentEntry: {
 		header: TarHeader;
 		bytesLeft: number;
@@ -58,29 +63,121 @@ export function createTarDecoder(
 	let paxGlobals: HeaderOverrides = {};
 	let nextEntryOverrides: HeaderOverrides = {};
 
+	/**
+	 * Reads and consumes a specific number of bytes from the chunk queue.
+	 * Returns a single Uint8Array with the data, or null if not enough data is available.
+	 */
+	function consume(size: number): Uint8Array | null {
+		if (totalLength < size || chunks.length === 0) {
+			return null;
+		}
+
+		totalLength -= size;
+
+		const firstChunk = chunks[0];
+
+		// Fast path: The entire data block is within the first chunk.
+		if (firstChunk.length - offset >= size) {
+			const data = firstChunk.slice(offset, offset + size);
+			offset += size;
+
+			// If we've consumed the entire chunk, remove it and reset offset.
+			if (offset === firstChunk.length) {
+				chunks.shift();
+				offset = 0;
+			}
+
+			return data;
+		}
+
+		// Slow path: The data spans multiple chunks, so we need to stitch them together to reach the needed size.
+		const data = new Uint8Array(size);
+		let bytesCopied = 0;
+
+		while (bytesCopied < size) {
+			const chunk = chunks[0];
+			// Compare with remaining bytes needed and remaining bytes in chunk.
+			const bytesToCopy = Math.min(size - bytesCopied, chunk.length - offset);
+
+			// Copy the data from the current chunk to the result buffer.
+			data.set(chunk.subarray(offset, offset + bytesToCopy), bytesCopied);
+			bytesCopied += bytesToCopy;
+			offset += bytesToCopy;
+
+			if (offset === chunk.length) {
+				chunks.shift();
+				offset = 0;
+			}
+		}
+
+		return data;
+	}
+
+	/**
+	 * Forwards a specific number of bytes from the chunk queue directly to a stream controller.
+	 * This avoids creating a new intermediate buffer for the entire file body.
+	 * Returns the number of bytes actually forwarded.
+	 */
+	function forward(
+		size: number,
+		targetController: ReadableStreamDefaultController<Uint8Array>,
+	): number {
+		const bytesToForward = Math.min(size, totalLength);
+		let forwarded = 0;
+
+		while (forwarded < bytesToForward && chunks.length > 0) {
+			const firstChunk = chunks[0];
+			const availableInChunk = firstChunk.length - offset;
+			const bytesToSend = Math.min(
+				bytesToForward - forwarded,
+				availableInChunk,
+			);
+
+			targetController.enqueue(
+				firstChunk.subarray(offset, offset + bytesToSend),
+			);
+			forwarded += bytesToSend;
+			offset += bytesToSend;
+
+			// If we've consumed the entire chunk, remove it and reset offset
+			if (offset === firstChunk.length) {
+				chunks.shift();
+				offset = 0;
+			}
+		}
+
+		totalLength -= forwarded;
+		return forwarded;
+	}
+
+	/**
+	 * Un-consume data by putting it back at the front of the chunk queue.
+	 * Used for lookahead operations that need to "peek" at data.
+	 */
+	function unshift(data: Uint8Array): void {
+		if (offset > 0) {
+			// If we were in the middle of a chunk, we need to put the remainder back as a full chunk
+			chunks[0] = chunks[0].subarray(offset);
+			offset = 0;
+		}
+		chunks.unshift(data);
+		totalLength += data.length;
+	}
+
 	return new TransformStream({
 		transform(chunk, controller) {
-			// Combine buffer and new chunk.
-			const combined = new Uint8Array(buffer.length + chunk.length);
-			combined.set(buffer);
-			combined.set(chunk, buffer.length);
-			buffer = combined;
-
-			let offset = 0;
+			// Just add the new chunk to the queue. No copying!
+			chunks.push(chunk);
+			totalLength += chunk.length;
 
 			while (true) {
 				// Read an entry's body.
 				if (currentEntry) {
-					const toWrite = buffer.subarray(
-						offset,
-						offset + Math.min(buffer.length - offset, currentEntry.bytesLeft),
+					const forwarded = forward(
+						currentEntry.bytesLeft,
+						currentEntry.controller,
 					);
-
-					currentEntry.controller.enqueue(toWrite);
-
-					// Update state after writing.
-					currentEntry.bytesLeft -= toWrite.length;
-					offset += toWrite.length;
+					currentEntry.bytesLeft -= forwarded;
 
 					// If entry is complete, close its body stream and skip padding.
 					if (currentEntry.bytesLeft === 0) {
@@ -88,17 +185,17 @@ export function createTarDecoder(
 							(BLOCK_SIZE - (currentEntry.header.size % BLOCK_SIZE)) %
 							BLOCK_SIZE;
 
-						if (buffer.length - offset < padding) {
+						// consume() and discard the result to skip padding
+						if (consume(padding) === null) {
+							// Not enough data for padding, break and wait for more.
 							break;
 						}
 
 						try {
-							currentEntry?.controller.close();
+							currentEntry.controller.close();
 						} catch {
 							// Suppress errors if stream is already closed.
 						}
-
-						offset += padding;
 						currentEntry = null;
 					} else {
 						// Body is not fully read, and we've run out of data in this chunk.
@@ -107,25 +204,28 @@ export function createTarDecoder(
 				}
 
 				// Read the next header block.
-				if (buffer.length - offset < BLOCK_SIZE) {
-					break; // Not enough data for a header
+				const headerBlock = consume(BLOCK_SIZE);
+				if (headerBlock === null) {
+					break; // Not enough data for a header.
 				}
 
 				// Check for two consecutive zero blocks indicating end of archive.
-				const headerBlock = buffer.subarray(offset, offset + BLOCK_SIZE);
 				if (headerBlock.every((b) => b === 0)) {
-					// Check if there's enough data to read before validating.
-					if (buffer.length - offset < BLOCK_SIZE * 2) break;
-
-					// If the next block is also zero, then it's the end of the archive and we can stop.
-					const nextBlock = buffer.subarray(
-						offset + BLOCK_SIZE,
-						offset + BLOCK_SIZE * 2,
-					);
+					const nextBlock = consume(BLOCK_SIZE);
+					if (nextBlock === null) {
+						// Not enough data for the second block, put the first block back and wait
+						unshift(headerBlock);
+						break;
+					}
 
 					if (nextBlock.every((b) => b === 0)) {
 						controller.terminate();
 						return;
+					} else {
+						// The second block was not all zeroes, so it's not actually the end of the archive
+						// and we need to unconsume both blocks and continue processing.
+						unshift(nextBlock);
+						unshift(headerBlock);
 					}
 				}
 
@@ -140,14 +240,31 @@ export function createTarDecoder(
 					const dataSize = header.size;
 					const dataBlocksSize = Math.ceil(dataSize / BLOCK_SIZE) * BLOCK_SIZE; // Padded to block size.
 
-					if (buffer.length - offset - BLOCK_SIZE < dataBlocksSize) {
-						break; // Not enough data for the meta content
+					if (totalLength < dataBlocksSize) {
+						// Not enough data for the meta content, put header back.
+						unshift(headerBlock);
+						break;
 					}
 
-					const data = buffer.subarray(
-						offset + BLOCK_SIZE,
-						offset + BLOCK_SIZE + dataSize,
-					);
+					const data = consume(dataSize);
+					if (data === null) {
+						// Not enough data for the meta content, put header back.
+						unshift(headerBlock);
+						break;
+					}
+
+					// Skip padding after data
+					const padding = dataBlocksSize - dataSize;
+					if (padding > 0) {
+						const paddingData = consume(padding);
+						if (paddingData === null) {
+							// Not enough data for padding, put everything back.
+							unshift(data);
+							unshift(headerBlock);
+							break;
+						}
+					}
+
 					const overrides = metaParser(data);
 
 					if (header.type === "pax-global-header") {
@@ -157,8 +274,7 @@ export function createTarDecoder(
 						nextEntryOverrides = { ...nextEntryOverrides, ...overrides };
 					}
 
-					offset += BLOCK_SIZE + dataBlocksSize;
-					continue; // Move to the next header
+					continue; // Move to the next header.
 				}
 
 				// If we reach here, it is a regular entry.
@@ -167,7 +283,7 @@ export function createTarDecoder(
 				applyOverrides(finalHeader, paxGlobals);
 				applyOverrides(finalHeader, nextEntryOverrides);
 
-				// Only apply if name wasn't already overridden by PAX/GNU
+				// Only apply if name wasn't already overridden by PAX/GNU.
 				if (
 					header.prefix &&
 					header.magic === "ustar" &&
@@ -190,8 +306,6 @@ export function createTarDecoder(
 					body,
 				});
 
-				offset += BLOCK_SIZE;
-
 				if (finalHeader.size > 0) {
 					currentEntry = {
 						header: finalHeader,
@@ -208,10 +322,7 @@ export function createTarDecoder(
 				}
 			}
 
-			// Save any remaining bytes for the next chunk. The GC can then reclaim the old buffer.
-			if (offset > 0) {
-				buffer = buffer.slice(offset);
-			}
+			// Continue to the next chunk.
 		},
 
 		flush(controller) {
@@ -233,9 +344,23 @@ export function createTarDecoder(
 				}
 			}
 
-			// Any leftover data in the buffer must be zeroes (padding).
-			if (strict && buffer.some((b) => b !== 0)) {
-				controller.error(new Error("Unexpected data at end of archive."));
+			// Any leftover data in the chunks must be zeroes (padding).
+			if (strict) {
+				// Check the remaining part of the first chunk (if any)
+				if (chunks.length > 0 && offset < chunks[0].length) {
+					if (chunks[0].subarray(offset).some((b) => b !== 0)) {
+						controller.error(new Error("Unexpected data at end of archive."));
+						return;
+					}
+				}
+
+				// Check all subsequent chunks
+				for (let i = 1; i < chunks.length; i++) {
+					if (chunks[i].some((b) => b !== 0)) {
+						controller.error(new Error("Unexpected data at end of archive."));
+						return;
+					}
+				}
 			}
 		},
 	});
