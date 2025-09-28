@@ -140,4 +140,64 @@ describe("pack", () => {
 		const files = await fs.readdir(destDir);
 		expect(files.includes(".gitignore")).toBe(false);
 	});
+
+	it("handles empty files", async () => {
+		const sourceDir = path.join(tmpDir, "source");
+		await fs.mkdir(sourceDir, { recursive: true });
+
+		// Create an empty file
+		const emptyFilePath = path.join(sourceDir, "empty.txt");
+		await fs.writeFile(emptyFilePath, "");
+
+		const destDir = path.join(tmpDir, "extracted");
+		const packStream = packTar(sourceDir);
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
+
+		// Verify the extracted file
+		const extractedPath = path.join(destDir, "empty.txt");
+		const extractedContent = await fs.readFile(extractedPath);
+		expect(extractedContent).toEqual(Buffer.alloc(0));
+
+		const stats = await fs.stat(extractedPath);
+		expect(stats.size).toBe(0);
+	});
+
+	it("handles various file sizes correctly", async () => {
+		const sourceDir = path.join(tmpDir, "source");
+		await fs.mkdir(sourceDir, { recursive: true });
+
+		// Create files of different sizes to test both small and large file handling
+		const files = [
+			{ name: "tiny.txt", size: 512 }, // Small
+			{ name: "small.txt", size: 16 * 1024 }, // Small (16KB)
+			{ name: "threshold.txt", size: 32 * 1024 }, // At 32KB threshold
+			{ name: "large.bin", size: 128 * 1024 }, // Large (128KB)
+		];
+
+		// Create all test files
+		for (const file of files) {
+			const content = Buffer.alloc(file.size, file.name[0]);
+			await fs.writeFile(path.join(sourceDir, file.name), content);
+		}
+
+		const destDir = path.join(tmpDir, "extracted");
+		const packStream = packTar(sourceDir);
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
+
+		// Verify all files were extracted correctly
+		for (const file of files) {
+			const extractedPath = path.join(destDir, file.name);
+			const extractedContent = await fs.readFile(extractedPath);
+			const expectedContent = Buffer.alloc(file.size, file.name[0]);
+
+			expect(extractedContent).toEqual(expectedContent);
+
+			const stats = await fs.stat(extractedPath);
+			expect(stats.size).toBe(file.size);
+		}
+	});
 });
