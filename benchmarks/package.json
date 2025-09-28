@@ -7,6 +7,7 @@
 		"bench": "node --experimental-strip-types run.bench.ts",
 		"bench:pack": "node --experimental-strip-types run.pack.ts",
 		"bench:unpack": "node --experimental-strip-types run.unpack.ts",
+		"deopt": "dexnode run.unpack.ts -- --experimental-strip-types ",
 		"fixtures": "node --experimental-strip-types fixtures/generate.ts"
 	},
 	"dependencies": {

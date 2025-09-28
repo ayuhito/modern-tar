@@ -92,4 +92,4 @@ These benchmarks were run on an Apple M3 Pro and can include a lot of noise. Res
 └─────────┴─────────────────────────────────────────────────┴─────────────────────┴──────────────────────┴────────────────────────┴────────────────────────┴─────────┘
 ```
 
-`modern-tar` is expected to be slower than alternatives due to its focus on zero dependencies, but there is still plenty of room to improve performance.
+`modern-tar` is expected to be slower than alternatives due to its focus on zero dependencies, but there is still plenty of room to improve performance and is generally comparable for many usecases due to work being very I/O bound.

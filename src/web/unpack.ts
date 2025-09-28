@@ -14,19 +14,6 @@ type HeaderOverrides = Omit<Partial<TarHeader>, "mtime"> & {
 	mtime?: number;
 };
 
-// A map of meta-header types to their respective data parsers.
-const metaEntryParsers: Record<string, (data: Uint8Array) => HeaderOverrides> =
-	{
-		"pax-global-header": parsePax,
-		"pax-header": parsePax,
-		"gnu-long-name": (data) => ({
-			name: readString(data, 0, data.length),
-		}),
-		"gnu-long-link-name": (data) => ({
-			linkname: readString(data, 0, data.length),
-		}),
-	};
-
 /**
  * Create a transform stream that parses tar bytes into entries.
  *
@@ -233,9 +220,7 @@ export function createTarDecoder(
 				const header = parseUstarHeader(headerBlock, strict);
 
 				// Check if the entry is a meta-entry (PAX, GNU, etc.)
-				const metaParser =
-					metaEntryParsers[header.type as keyof typeof metaEntryParsers];
-
+				const metaParser = getMetaParser(header.type);
 				if (metaParser) {
 					const dataSize = header.size;
 					const dataBlocksSize = Math.ceil(dataSize / BLOCK_SIZE) * BLOCK_SIZE; // Padded to block size.
@@ -266,12 +251,15 @@ export function createTarDecoder(
 					}
 
 					const overrides = metaParser(data);
-
 					if (header.type === "pax-global-header") {
-						paxGlobals = { ...paxGlobals, ...overrides };
+						paxGlobals = Object.assign({}, paxGlobals, overrides);
 					} else {
 						// gnu-long-name, gnu-long-link-name, and pax-header all apply to the next entry
-						nextEntryOverrides = { ...nextEntryOverrides, ...overrides };
+						nextEntryOverrides = Object.assign(
+							{},
+							nextEntryOverrides,
+							overrides,
+						);
 					}
 
 					continue; // Move to the next header.
@@ -480,5 +468,27 @@ function applyOverrides(header: TarHeader, overrides: HeaderOverrides) {
 	if (overrides.gid !== undefined) header.gid = overrides.gid;
 	if (overrides.uname !== undefined) header.uname = overrides.uname;
 	if (overrides.gname !== undefined) header.gname = overrides.gname;
-	if (overrides.pax) header.pax = { ...(header.pax ?? {}), ...overrides.pax };
+	if (overrides.pax)
+		header.pax = Object.assign({}, header.pax ?? {}, overrides.pax);
+}
+
+// A map of meta-header types to their respective data parsers.
+function getMetaParser(
+	type: string | undefined,
+): ((data: Uint8Array) => HeaderOverrides) | undefined {
+	switch (type) {
+		case "pax-global-header":
+		case "pax-header":
+			return parsePax;
+		case "gnu-long-name":
+			return (data) => ({
+				name: readString(data, 0, data.length),
+			});
+		case "gnu-long-link-name":
+			return (data) => ({
+				linkname: readString(data, 0, data.length),
+			});
+		default:
+			return undefined;
+	}
 }
