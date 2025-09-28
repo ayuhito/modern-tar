@@ -102,7 +102,7 @@ export function packTar(
 			const paxPadding =
 				(BLOCK_SIZE - (paxData.paxBody.length % BLOCK_SIZE)) % BLOCK_SIZE;
 			if (paxPadding > 0) {
-				yield Buffer.allocUnsafe(paxPadding);
+				yield Buffer.alloc(paxPadding);
 			}
 		}
 
@@ -114,7 +114,7 @@ export function packTar(
 			const paddingSize =
 				(BLOCK_SIZE - (finalHeader.size % BLOCK_SIZE)) % BLOCK_SIZE;
 			if (paddingSize > 0) {
-				yield Buffer.allocUnsafe(paddingSize);
+				yield Buffer.alloc(paddingSize); // Using Buffer.alloc is idiomatic in Node.js
 			}
 		}
 
