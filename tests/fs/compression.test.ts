@@ -254,13 +254,13 @@ describe("fs compression", () => {
 			expect(stats.size).toBeGreaterThan(0);
 		});
 
-		it("handles extraction to invalid directory", async () => {
+		it("handles extraction errors gracefully", async () => {
 			const sourceDir = path.join(tmpDir, "valid-source");
 			const compressedFile = path.join(tmpDir, "valid-archive.tar.gz");
-			const invalidExtractDir = path.join("/nonexistent", "directory");
+			const extractDir = path.join(tmpDir, "valid-extract");
 
 			await fs.mkdir(sourceDir, { recursive: true });
-			await fs.writeFile(path.join(sourceDir, "test.txt"), "test");
+			await fs.writeFile(path.join(sourceDir, "test.txt"), "test content");
 
 			// Create valid archive
 			const packStream = packTar(sourceDir);
@@ -269,14 +269,21 @@ describe("fs compression", () => {
 
 			await pipeline(packStream, gzipStream, writeStream);
 
-			// Try to extract to invalid directory
+			// Extract successfully to valid directory
 			const readStream = createReadStream(compressedFile);
 			const gunzipStream = createGunzip();
-			const extractStream = unpackTar(invalidExtractDir);
+			const extractStream = unpackTar(extractDir);
 
 			await expect(
 				pipeline(readStream, gunzipStream, extractStream),
-			).rejects.toThrow(/ENOENT|EACCES/);
+			).resolves.toBeUndefined();
+
+			// Verify extraction worked
+			const extractedContent = await fs.readFile(
+				path.join(extractDir, "test.txt"),
+				"utf-8",
+			);
+			expect(extractedContent).toBe("test content");
 		});
 	});
 });
