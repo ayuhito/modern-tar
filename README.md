@@ -10,7 +10,7 @@ Zero-dependency, cross-platform, streaming tar archive library for every JavaScr
 - 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation.
 - ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size.
 - 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes.
-- 📁 **Node.js Integration** - Additional high-level APIs for directory packing and extraction.å
+- 📁 **Node.js Integration** - Additional high-level APIs for directory packing and extraction.
 
 ## Installation
 
