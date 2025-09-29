@@ -13,7 +13,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const TMP_DIR = path.resolve(__dirname, "..", "tmp");
 const TARBALLS_DIR = path.join(TMP_DIR, "tarballs");
-const EXTRACT_DIR = path.join(TMP_DIR, "extract");
 
 const SMALL_FILES_DIR = path.resolve(__dirname, "data/small-files");
 const LARGE_FILES_DIR = path.resolve(__dirname, "data/large-files");
@@ -34,8 +33,13 @@ async function setup() {
 	}
 }
 
-async function cleanup() {
-	await fsp.rm(EXTRACT_DIR, { recursive: true, force: true });
+async function createUniqueExtractDir(): Promise<string> {
+	const extractDir = path.join(
+		TMP_DIR,
+		`extract-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	await fsp.mkdir(extractDir, { recursive: true });
+	return extractDir;
 }
 
 export async function runUnpackingBenchmarks() {
@@ -49,37 +53,66 @@ export async function runUnpackingBenchmarks() {
 	]) {
 		const tarballPath = path.join(TARBALLS_DIR, testCase.file);
 		const bench = new Bench({
-			time: 12000,
-			iterations: 25,
-			warmupTime: 3000,
-			warmupIterations: 5,
+			time: 15000,
+			iterations: 30,
+			warmupTime: 5000,
+			warmupIterations: 10,
 		});
 
-		bench
-			.add(`modern-tar: Unpack ${testCase.name}`, async () => {
-				const readStream = fs.createReadStream(tarballPath);
-				const extractStream = unpackTar(EXTRACT_DIR);
-				await pipeline(readStream, extractStream);
-			})
-			.add(`node-tar: Unpack ${testCase.name}`, async () => {
-				// Use node-tar's high-level extraction API
-				await tar.x({ f: tarballPath, C: EXTRACT_DIR });
-			})
-			.add(`tar-fs: Unpack ${testCase.name}`, async () => {
-				const readStream = fs.createReadStream(tarballPath);
-				const extractStream = tarFs.extract(EXTRACT_DIR);
-				await pipeline(readStream, extractStream);
-			});
+		let extractDir: string;
 
-		// Clean up extraction directory before each run
-		await cleanup();
-		await fsp.mkdir(EXTRACT_DIR, { recursive: true });
+		bench
+			.add(
+				`modern-tar: Unpack ${testCase.name}`,
+				async () => {
+					const readStream = fs.createReadStream(tarballPath);
+					const extractStream = unpackTar(extractDir);
+					await pipeline(readStream, extractStream);
+				},
+				{
+					async beforeEach() {
+						extractDir = await createUniqueExtractDir();
+					},
+					async afterEach() {
+						await fsp.rm(extractDir, { recursive: true, force: true });
+					},
+				},
+			)
+			.add(
+				`node-tar: Unpack ${testCase.name}`,
+				async () => {
+					await tar.x({ f: tarballPath, C: extractDir });
+				},
+				{
+					async beforeEach() {
+						extractDir = await createUniqueExtractDir();
+					},
+					async afterEach() {
+						await fsp.rm(extractDir, { recursive: true, force: true });
+					},
+				},
+			)
+			.add(
+				`tar-fs: Unpack ${testCase.name}`,
+				async () => {
+					const readStream = fs.createReadStream(tarballPath);
+					const extractStream = tarFs.extract(extractDir);
+					await pipeline(readStream, extractStream);
+				},
+				{
+					async beforeEach() {
+						extractDir = await createUniqueExtractDir();
+					},
+					async afterEach() {
+						await fsp.rm(extractDir, { recursive: true, force: true });
+					},
+				},
+			);
 
 		await bench.run();
-		console.log(`\n--- Unpack ${testCase.name} ---`);
+		console.log(`\n--- ${testCase.name} ---`);
 		console.table(bench.table());
-
-		// Clean up after benchmark
-		await cleanup();
 	}
+
+	await fsp.rm(TMP_DIR, { recursive: true, force: true });
 }
