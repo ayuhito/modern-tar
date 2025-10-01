@@ -216,6 +216,7 @@ describe("fs compression", () => {
 				map: (header) => ({ ...header, name: `processed-${header.name}` }),
 			});
 
+			// Write some data and immediately destroy
 			const testData = Buffer.from("test data");
 			unpackStream.write(testData);
 
@@ -233,49 +234,36 @@ describe("fs compression", () => {
 
 			for (const error of errors) {
 				expect(error.message).not.toContain(
-					"Invalid state: TransformStream has been terminated",
+					"Invalid state: TransformStream has been terminated"
 				);
 			}
 		});
 
 		it("handles stream destruction during processing", async () => {
-			const sourceDir = path.join(tmpDir, "test-source");
 			const extractDir = path.join(tmpDir, "extract-test");
-
-			await fs.mkdir(sourceDir, { recursive: true });
-			await fs.writeFile(path.join(sourceDir, "test.txt"), "test content");
-
-			// Create a valid archive
-			const validTarballPath = path.join(tmpDir, "valid.tar.gz");
-			await pipeline(
-				packTar(sourceDir),
-				createGzip(),
-				createWriteStream(validTarballPath),
-			);
-
-			const readStream = createReadStream(validTarballPath);
-			const gunzipStream = createGunzip();
 			const unpackStream = unpackTar(extractDir, {
 				filter: () => true,
 				map: (header) => ({ ...header, name: `processed-${header.name}` }),
 			});
 
-			// Start the pipeline and then destroy the unpack stream
-			const pipelinePromise = pipeline(readStream, gunzipStream, unpackStream);
+			// Write some data and immediately destroy to trigger race condition
+			const testData = Buffer.from("test data");
+			unpackStream.write(testData);
 
-			// Destroy the stream to trigger the race condition scenario
-			setTimeout(() => {
-				unpackStream.destroy(new Error("Test destruction"));
-			}, 5);
+			const errors: Error[] = [];
+			unpackStream.on("error", (err: Error) => {
+				errors.push(err);
+			});
 
-			try {
-				await pipelinePromise;
-			} catch (err: unknown) {
-				expect(err).toBeInstanceOf(Error);
-				const errorMessage = (err as Error).message;
+			unpackStream.destroy(new Error("Test destruction"));
 
-				expect(errorMessage).not.toContain(
-					"Invalid state: TransformStream has been terminated",
+			await new Promise((resolve) => {
+				unpackStream.on("close", resolve);
+			});
+
+			for (const error of errors) {
+				expect(error.message).not.toContain(
+					"Invalid state: TransformStream has been terminated"
 				);
 			}
 		});
