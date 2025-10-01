@@ -30,7 +30,6 @@ export function validateChecksum(block: Uint8Array): boolean {
 
 /**
  * Calculates and writes the checksum directly to the block.
- * This version uses bitwise operations for performance and avoids allocations.
  */
 export function writeChecksum(block: Uint8Array): void {
 	// Fill with spaces for the calculation.
