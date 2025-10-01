@@ -222,6 +222,8 @@ export function unpackTar(
 	// Create the Node Writable stream with proper backpressure
 	const writable = new Writable({
 		async write(chunk, _encoding, callback) {
+			if (isWriterClosed) return callback();
+
 			try {
 				// This await is important for backpressure. It will not resolve
 				// until the web stream is ready for more data AND the processing
@@ -234,15 +236,15 @@ export function unpackTar(
 		},
 
 		async final(callback) {
+			if (isWriterClosed) return callback();
+
 			try {
-				if (!isWriterClosed) {
-					try {
-						await webWriter.close();
-						isWriterClosed = true;
-					} catch {
-						// If close fails, the stream might already be closed
-						isWriterClosed = true;
-					}
+				try {
+					await webWriter.close();
+					isWriterClosed = true;
+				} catch {
+					// If close fails, the stream might already be closed
+					isWriterClosed = true;
 				}
 
 				// Wait for all processing to complete
@@ -254,13 +256,17 @@ export function unpackTar(
 		},
 
 		destroy(err, callback) {
-			// If the stream is destroyed, abort everything gracefully
-			if (!isWriterClosed) {
-				isWriterClosed = true;
-				webWriter.abort(err).finally(() => callback(err));
-			} else {
+			if (isWriterClosed) return callback(err);
+			isWriterClosed = true;
+
+			// Abort the web writer and ensure the processing promise is also terminated.
+			webWriter.abort(err).catch(() => {});
+			entryStream.cancel(err).catch(() => {});
+
+			// Wait for the promise to settle to ensure resources are released
+			processingPromise.finally(() => {
 				callback(err);
-			}
+			});
 		},
 	});
 

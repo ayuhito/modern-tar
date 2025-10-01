@@ -443,5 +443,33 @@ describe("extract", () => {
 				unpackStream.on("close", resolve);
 			});
 		});
+
+		it("handles immediate stream destruction gracefully", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+			const unpackStream = unpackTar(destDir);
+
+			// Write some data and immediately destroy
+			const testData = Buffer.from("test data");
+			unpackStream.write(testData);
+
+			const errors: Error[] = [];
+			unpackStream.on("error", (err: Error) => {
+				errors.push(err);
+			});
+
+			unpackStream.destroy(new Error("Immediate destruction test"));
+
+			// Wait for destruction to complete
+			await new Promise<void>((resolve) => {
+				unpackStream.on("close", resolve);
+			});
+
+			// Should not throw TransformStream termination error
+			for (const error of errors) {
+				expect(error.message).not.toContain(
+					"Invalid state: TransformStream has been terminated",
+				);
+			}
+		});
 	});
 });
