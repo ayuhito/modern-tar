@@ -1,5 +1,5 @@
 import { validateChecksum } from "./checksum";
-import { BLOCK_SIZE, FLAGTYPE, USTAR } from "./constants";
+import { BLOCK_SIZE, BLOCK_SIZE_MASK, FLAGTYPE, USTAR } from "./constants";
 import type { DecoderOptions, ParsedTarEntry, TarHeader } from "./types";
 import { decoder, readNumeric, readOctal, readString } from "./utils";
 
@@ -168,9 +168,7 @@ export function createTarDecoder(
 
 					// If entry is complete, close its body stream and skip padding.
 					if (currentEntry.bytesLeft === 0) {
-						const padding =
-							(BLOCK_SIZE - (currentEntry.header.size % BLOCK_SIZE)) %
-							BLOCK_SIZE;
+						const padding = -currentEntry.header.size & BLOCK_SIZE_MASK;
 
 						// consume() and discard the result to skip padding
 						if (consume(padding) === null) {
@@ -223,7 +221,7 @@ export function createTarDecoder(
 				const metaParser = getMetaParser(header.type);
 				if (metaParser) {
 					const dataSize = header.size;
-					const dataBlocksSize = Math.ceil(dataSize / BLOCK_SIZE) * BLOCK_SIZE; // Padded to block size.
+					const dataBlocksSize = (dataSize + BLOCK_SIZE_MASK) & -BLOCK_SIZE; // Padded to block size.
 
 					if (totalLength < dataBlocksSize) {
 						// Not enough data for the meta content, put header back.
