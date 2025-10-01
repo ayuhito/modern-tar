@@ -210,15 +210,12 @@ describe("fs compression", () => {
 
 	describe("error handling", () => {
 		it("handles stream destruction without TransformStream errors", async () => {
-			// Test that our fix prevents TransformStream termination errors
-			// by using a controlled error scenario instead of corrupt gzip data
 			const extractDir = path.join(tmpDir, "extract-test");
 			const unpackStream = unpackTar(extractDir, {
 				filter: () => true,
 				map: (header) => ({ ...header, name: `processed-${header.name}` }),
 			});
 
-			// Write some data and then destroy the stream to simulate error conditions
 			const testData = Buffer.from("test data");
 			unpackStream.write(testData);
 
@@ -227,15 +224,13 @@ describe("fs compression", () => {
 				errors.push(err);
 			});
 
-			// Destroy with a specific error to trigger our race condition fix
 			unpackStream.destroy(new Error("Simulated processing error"));
 
 			// Wait for stream to close
-			await new Promise<void>((resolve) => {
+			await new Promise((resolve) => {
 				unpackStream.on("close", resolve);
 			});
 
-			// Verify we don't get TransformStream termination errors
 			for (const error of errors) {
 				expect(error.message).not.toContain(
 					"Invalid state: TransformStream has been terminated",
@@ -271,7 +266,7 @@ describe("fs compression", () => {
 			// Destroy the stream to trigger the race condition scenario
 			setTimeout(() => {
 				unpackStream.destroy(new Error("Test destruction"));
-			}, 10);
+			}, 5);
 
 			try {
 				await pipelinePromise;
@@ -279,7 +274,6 @@ describe("fs compression", () => {
 				expect(err).toBeInstanceOf(Error);
 				const errorMessage = (err as Error).message;
 
-				// Should NOT get TransformStream termination error
 				expect(errorMessage).not.toContain(
 					"Invalid state: TransformStream has been terminated",
 				);
