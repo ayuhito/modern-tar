@@ -1,59 +1,63 @@
 import { USTAR } from "./constants";
-import { encoder, readOctal } from "./utils";
+import { readOctal } from "./utils";
 
 // ASCII code for a space character.
-const CHECKSUM_SPACE = 32;
+const CHECKSUM_SPACE = 32; // ' '
+// ASCII code for the '0' character.
+const ASCII_ZERO = 48; // '0'
 
 /**
  * Validates the checksum of a tar header block.
  */
 export function validateChecksum(block: Uint8Array): boolean {
-	const storedChecksum = readOctal(
+	const stored = readOctal(
 		block,
 		USTAR.checksum.offset,
 		USTAR.checksum.size,
 	);
 
-	let unsignedSum = 0;
-
-	// Sum the bytes BEFORE the checksum field.
-	for (let i = 0; i < USTAR.checksum.offset; i++) {
-		unsignedSum += block[i];
+	let sum = 0;
+	for (let i = 0; i < block.length; i++) {
+		// If the byte is part of the checksum field, treat it as a space.
+		if (
+			i >= USTAR.checksum.offset &&
+			i < USTAR.checksum.offset + USTAR.checksum.size
+		) {
+			sum += CHECKSUM_SPACE;
+		} else {
+			sum += block[i];
+		}
 	}
 
-	// Add the placeholder value for the checksum field itself.
-	unsignedSum += CHECKSUM_SPACE * USTAR.checksum.size;
-
-	// Sum the bytes AFTER the checksum field.
-	for (
-		let i = USTAR.checksum.offset + USTAR.checksum.size;
-		i < block.length;
-		i++
-	) {
-		unsignedSum += block[i];
-	}
-
-	return storedChecksum === unsignedSum;
+	return stored === sum;
 }
 
 /**
- * Calculates and writes the checksum to a tar header block.
+ * Calculates and writes the checksum directly to the block.
+ * This version uses bitwise operations for performance and avoids allocations.
  */
 export function writeChecksum(block: Uint8Array): void {
-	// Fill the checksum field with spaces.
-	const checksumEnd = USTAR.checksum.offset + USTAR.checksum.size;
-	block.fill(CHECKSUM_SPACE, USTAR.checksum.offset, checksumEnd);
+	// Fill with spaces for the calculation.
+	block.fill(
+		CHECKSUM_SPACE,
+		USTAR.checksum.offset,
+		USTAR.checksum.offset + USTAR.checksum.size,
+	);
 
-	// Sum the bytes to get the checksum.
+	// Sum the entire block to get the checksum value.
 	let checksum = 0;
 	for (const byte of block) {
 		checksum += byte;
 	}
 
-	// Format as a 6-digit octal string, NUL-terminated, and space-padded.
-	const checksumString = `${checksum.toString(8).padStart(6, "0")}\0 `;
-	const checksumBytes = encoder.encode(checksumString);
+	// Write checksum as a 6-digit octal string directly into the block.
+	// We work backwards from the last digit's position.
+	for (let i = USTAR.checksum.offset + 6 - 1; i >= USTAR.checksum.offset; i--) {
+		block[i] = (checksum & 7) + ASCII_ZERO; // (checksum % 8)
+		checksum >>= 3; // Math.floor(checksum / 8)
+	}
 
-	// Write the checksum bytes into the block.
-	block.set(checksumBytes, USTAR.checksum.offset);
+	// Add the required NUL and space terminators.
+	block[USTAR.checksum.offset + 6] = 0;
+	block[USTAR.checksum.offset + 7] = CHECKSUM_SPACE;
 }
