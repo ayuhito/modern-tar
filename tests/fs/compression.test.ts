@@ -3,7 +3,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -239,7 +238,7 @@ describe("fs compression", () => {
 			// Verify we don't get TransformStream termination errors
 			for (const error of errors) {
 				expect(error.message).not.toContain(
-					"Invalid state: TransformStream has been terminated"
+					"Invalid state: TransformStream has been terminated",
 				);
 			}
 		});
@@ -253,7 +252,11 @@ describe("fs compression", () => {
 
 			// Create a valid archive
 			const validTarballPath = path.join(tmpDir, "valid.tar.gz");
-			await pipeline(packTar(sourceDir), createGzip(), createWriteStream(validTarballPath));
+			await pipeline(
+				packTar(sourceDir),
+				createGzip(),
+				createWriteStream(validTarballPath),
+			);
 
 			const readStream = createReadStream(validTarballPath);
 			const gunzipStream = createGunzip();
@@ -278,7 +281,7 @@ describe("fs compression", () => {
 
 				// Should NOT get TransformStream termination error
 				expect(errorMessage).not.toContain(
-					"Invalid state: TransformStream has been terminated"
+					"Invalid state: TransformStream has been terminated",
 				);
 			}
 		});
