@@ -1,6 +1,9 @@
 /** Size of a TAR block in bytes. */
 export const BLOCK_SIZE = 512;
 
+/** Bitwise mask for calculating remainders when dividing by BLOCK_SIZE. Equal to BLOCK_SIZE - 1. */
+export const BLOCK_SIZE_MASK = 511;
+
 /** Default permissions for regular files (rw-r--r--). */
 export const DEFAULT_FILE_MODE = 0o644;
 

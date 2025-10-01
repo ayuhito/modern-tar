@@ -1,6 +1,7 @@
 import { writeChecksum } from "./checksum";
 import {
 	BLOCK_SIZE,
+	BLOCK_SIZE_MASK,
 	DEFAULT_DIR_MODE,
 	DEFAULT_FILE_MODE,
 	TYPEFLAG,
@@ -144,8 +145,7 @@ export function createTarPacker(): {
 				// @ts-expect-error - TypeScript is overly strict here, but Uint8Array is compatible here.
 				streamController.enqueue(paxData.paxBody);
 
-				const paxPadding =
-					(BLOCK_SIZE - (paxData.paxBody.length % BLOCK_SIZE)) % BLOCK_SIZE;
+				const paxPadding = -paxData.paxBody.length & BLOCK_SIZE_MASK;
 
 				if (paxPadding > 0) {
 					streamController.enqueue(new Uint8Array(paxPadding));
@@ -182,7 +182,7 @@ export function createTarPacker(): {
 					}
 
 					// Pad the entry data to fill a complete 512-byte block.
-					const paddingSize = (BLOCK_SIZE - (size % BLOCK_SIZE)) % BLOCK_SIZE;
+					const paddingSize = -size & BLOCK_SIZE_MASK;
 					if (paddingSize > 0) {
 						streamController.enqueue(new Uint8Array(paddingSize));
 					}

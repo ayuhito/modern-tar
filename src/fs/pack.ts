@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
-import { BLOCK_SIZE } from "../web/constants";
+import { BLOCK_SIZE, BLOCK_SIZE_MASK } from "../web/constants";
 import { createTarHeader } from "../web/pack";
 import { generatePax } from "../web/pack-pax";
 import type { TarHeader } from "../web/types";
@@ -99,8 +99,7 @@ export function packTar(
 			yield paxData.paxHeader;
 			yield paxData.paxBody;
 
-			const paxPadding =
-				(BLOCK_SIZE - (paxData.paxBody.length % BLOCK_SIZE)) % BLOCK_SIZE;
+			const paxPadding = -paxData.paxBody.length & BLOCK_SIZE_MASK;
 			if (paxPadding > 0) {
 				yield Buffer.alloc(paxPadding);
 			}
@@ -111,8 +110,7 @@ export function packTar(
 		// Yield file content and padding
 		if (finalHeader.type === "file" && finalHeader.size > 0) {
 			yield* createReadStream(fullPath);
-			const paddingSize =
-				(BLOCK_SIZE - (finalHeader.size % BLOCK_SIZE)) % BLOCK_SIZE;
+			const paddingSize = -finalHeader.size & BLOCK_SIZE_MASK;
 			if (paddingSize > 0) {
 				yield Buffer.alloc(paddingSize);
 			}
