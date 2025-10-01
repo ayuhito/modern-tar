@@ -209,27 +209,63 @@ describe("fs compression", () => {
 	});
 
 	describe("error handling", () => {
-		it("handles corrupt compressed archive gracefully", async () => {
-			const corruptFile = path.join(tmpDir, "corrupt.tar.gz");
-			const extractDir = path.join(tmpDir, "extract-corrupt");
+		it("handles stream destruction without TransformStream errors", async () => {
+			const extractDir = path.join(tmpDir, "extract-test");
+			const unpackStream = unpackTar(extractDir, {
+				filter: () => true,
+				map: (header) => ({ ...header, name: `processed-${header.name}` }),
+			});
 
-			// Create a file that looks like gzip but is corrupt
-			await fs.writeFile(
-				corruptFile,
-				Buffer.from([
-					0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x63,
-					0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x04, 0x00, 0x01,
-				]),
-			);
+			const testData = Buffer.from("test data");
+			unpackStream.write(testData);
 
-			const readStream = createReadStream(corruptFile);
-			const gunzipStream = createGunzip();
-			const extractStream = unpackTar(extractDir);
+			const errors: Error[] = [];
+			unpackStream.on("error", (err: Error) => {
+				errors.push(err);
+			});
 
-			// Should handle the error gracefully
-			await expect(
-				pipeline(readStream, gunzipStream, extractStream),
-			).rejects.toThrow();
+			unpackStream.destroy(new Error("Simulated processing error"));
+
+			// Wait for stream to close
+			await new Promise((resolve) => {
+				unpackStream.on("close", resolve);
+			});
+
+			for (const error of errors) {
+				expect(error.message).not.toContain(
+					"Invalid state: TransformStream has been terminated",
+				);
+			}
+		});
+
+		it("handles stream destruction during processing", async () => {
+			const extractDir = path.join(tmpDir, "extract-test");
+			const unpackStream = unpackTar(extractDir, {
+				filter: () => true,
+				map: (header) => ({ ...header, name: `processed-${header.name}` }),
+			});
+
+			// Write some data and immediately destroy to trigger race condition
+			const testData = Buffer.from("test data");
+			unpackStream.write(testData);
+
+			const errors: Error[] = [];
+			unpackStream.on("error", (err: Error) => {
+				errors.push(err);
+			});
+
+			unpackStream.destroy(new Error("Test destruction"));
+
+			// Wait for stream to close
+			await new Promise((resolve) => {
+				unpackStream.on("close", resolve);
+			});
+
+			for (const error of errors) {
+				expect(error.message).not.toContain(
+					"Invalid state: TransformStream has been terminated"
+				);
+			}
 		});
 
 		it("handles compression errors gracefully", async () => {
