@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
 import { writeChecksum } from "../../src/web/checksum";
-import { BLOCK_SIZE, TYPEFLAG, USTAR } from "../../src/web/constants";
+import { BLOCK_SIZE, TYPEFLAG, USTAR_NAME_OFFSET, USTAR_MODE_OFFSET, USTAR_SIZE_OFFSET, USTAR_CHECKSUM_OFFSET, USTAR_TYPEFLAG_OFFSET } from "../../src/web/constants";
 import type { ParsedTarEntry } from "../../src/web/types";
 import { decoder, encoder } from "../../src/web/utils";
 import {
@@ -235,15 +235,15 @@ describe("extract", () => {
 
 		// Fill in some basic header fields but leave checksum invalid
 		const nameBytes = encoder.encode("test.txt");
-		invalidHeader.set(nameBytes, USTAR.name.offset);
+		invalidHeader.set(nameBytes, USTAR_NAME_OFFSET);
 
 		// Set some other fields to make it look like a valid header
 		const modeBytes = encoder.encode("0000644 ");
-		invalidHeader.set(modeBytes, USTAR.mode.offset);
+		invalidHeader.set(modeBytes, USTAR_MODE_OFFSET);
 
 		// Invalid checksum
 		const checksumBytes = encoder.encode("000000 ");
-		invalidHeader.set(checksumBytes, USTAR.checksum.offset);
+		invalidHeader.set(checksumBytes, USTAR_CHECKSUM_OFFSET);
 
 		// @ts-expect-error ReadableStream.from is supported in tests.
 		const sourceStream = ReadableStream.from([invalidHeader]);
@@ -266,18 +266,18 @@ describe("extract", () => {
 		// Create PAX header
 		const paxHeader = new Uint8Array(BLOCK_SIZE);
 		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
-		paxHeader.set(nameBytes, USTAR.name.offset);
+		paxHeader.set(nameBytes, USTAR_NAME_OFFSET);
 
 		const modeBytes = encoder.encode("0000644 ");
-		paxHeader.set(modeBytes, USTAR.mode.offset);
+		paxHeader.set(modeBytes, USTAR_MODE_OFFSET);
 
 		const sizeBytes = encoder.encode(
 			`${paxData.length.toString(8).padStart(11, "0")} `,
 		);
-		paxHeader.set(sizeBytes, USTAR.size.offset);
+		paxHeader.set(sizeBytes, USTAR_SIZE_OFFSET);
 
 		// Set type flag for PAX header
-		paxHeader[USTAR.typeflag.offset] = encoder.encode(
+		paxHeader[USTAR_TYPEFLAG_OFFSET] = encoder.encode(
 			TYPEFLAG["pax-header"],
 		)[0];
 
@@ -490,17 +490,17 @@ describe("extract", () => {
 		// Create PAX header similar to previous test
 		const paxHeader = new Uint8Array(BLOCK_SIZE);
 		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
-		paxHeader.set(nameBytes, USTAR.name.offset);
+		paxHeader.set(nameBytes, USTAR_NAME_OFFSET);
 
 		const modeBytes = encoder.encode("0000644 ");
-		paxHeader.set(modeBytes, USTAR.mode.offset);
+		paxHeader.set(modeBytes, USTAR_MODE_OFFSET);
 
 		const sizeBytes = encoder.encode(
 			`${paxData.length.toString(8).padStart(11, "0")} `,
 		);
-		paxHeader.set(sizeBytes, USTAR.size.offset);
+		paxHeader.set(sizeBytes, USTAR_SIZE_OFFSET);
 
-		paxHeader[USTAR.typeflag.offset] = encoder.encode(
+		paxHeader[USTAR_TYPEFLAG_OFFSET] = encoder.encode(
 			TYPEFLAG["pax-header"],
 		)[0];
 
@@ -532,17 +532,17 @@ describe("extract", () => {
 		// Create PAX header
 		const paxHeader = new Uint8Array(BLOCK_SIZE);
 		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
-		paxHeader.set(nameBytes, USTAR.name.offset);
+		paxHeader.set(nameBytes, USTAR_NAME_OFFSET);
 
 		const modeBytes = encoder.encode("0000644 ");
-		paxHeader.set(modeBytes, USTAR.mode.offset);
+		paxHeader.set(modeBytes, USTAR_MODE_OFFSET);
 
 		const sizeBytes = encoder.encode(
 			`${paxData.length.toString(8).padStart(11, "0")} `,
 		);
-		paxHeader.set(sizeBytes, USTAR.size.offset);
+		paxHeader.set(sizeBytes, USTAR_SIZE_OFFSET);
 
-		paxHeader[USTAR.typeflag.offset] = encoder.encode(
+		paxHeader[USTAR_TYPEFLAG_OFFSET] = encoder.encode(
 			TYPEFLAG["pax-header"],
 		)[0];
 
