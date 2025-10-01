@@ -269,13 +269,12 @@ export function unpackTar(
 			try {
 				try {
 					console.warn(`[unpack:${streamId}] Closing web writer`);
-					await webWriter.close();
 					isWriterClosed = true;
+					await webWriter.close();
 					console.warn(`[unpack:${streamId}] Web writer closed successfully`);
 				} catch (closeErr) {
 					// If close fails, the stream might already be closed
 					console.warn(`[unpack:${streamId}] Web writer close failed (already closed):`, (closeErr as Error).message);
-					isWriterClosed = true;
 				}
 
 				// Wait for all processing to complete
