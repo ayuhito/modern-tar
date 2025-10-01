@@ -10,11 +10,7 @@ const ASCII_ZERO = 48; // '0'
  * Validates the checksum of a tar header block.
  */
 export function validateChecksum(block: Uint8Array): boolean {
-	const stored = readOctal(
-		block,
-		USTAR.checksum.offset,
-		USTAR.checksum.size,
-	);
+	const stored = readOctal(block, USTAR.checksum.offset, USTAR.checksum.size);
 
 	let sum = 0;
 	for (let i = 0; i < block.length; i++) {

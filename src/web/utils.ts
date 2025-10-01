@@ -79,13 +79,32 @@ export function readNumeric(
 	offset: number,
 	size: number,
 ): number {
+	// According to the POSIX tar specification, if the most significant bit of the
+	// first byte is set (i.e., the byte is >= 128), then the number is stored in a
+	// big-endian, base-256 format.
+	//
+	// The `& 0x80` operation is a bitmask to check if the highest bit is set.
+	// (0x80 = 10000000)
 	if (view[offset] & 0x80) {
 		let result = 0;
 		for (let i = 0; i < size; i++) {
+			// (result << 8) is equivalent to (result * 256) but faster.
+			// | view[offset + i] is equivalent to + view[offset + i] for positive numbers.
 			result = (result << 8) | view[offset + i];
 		}
+
+		// Clear the base-256 indicator bit.
+		//
+		// - (size - 1) * 8: Calculates the bit position of the MSB of the entire number.
+		// - 0x80 << ...: Creates a bitmask `10000000` to MSB position.
+		// - ~: NOT operator inverts this mask (e.g., `0x7FFFFFFF`).
+		// - result & ...: A bitwise AND with the inverted mask forces the MSB to zero.
+		//
+		// This prevents the number from being interpreted as negative that could lead to a
+		// an overflow and thus a vulnerability.
 		return result & ~(0x80 << ((size - 1) * 8));
 	}
+
 	return readOctal(view, offset, size);
 }
 
