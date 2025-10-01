@@ -270,10 +270,5 @@ export function unpackTar(
 		},
 	});
 
-	// Forward processing errors to the writable stream
-	processingPromise.catch((err) => {
-		writable.destroy(err);
-	});
-
 	return writable;
 }
