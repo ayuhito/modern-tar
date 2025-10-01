@@ -85,12 +85,10 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
 		.then(() => controller.finalize())
 		.catch((err) => controller.error(err));
 
-	const buffer = await streamToBuffer(readable);
-
 	// Await the packing promise to ensure any background errors are thrown.
 	await packingPromise;
 
-	return new Uint8Array(buffer);
+	return new Uint8Array(await streamToBuffer(readable));
 }
 
 /**
@@ -144,9 +142,9 @@ export async function unpackTar(
 			? archive
 			: new ReadableStream<Uint8Array>({
 					start(controller) {
-						const data =
-							archive instanceof Uint8Array ? archive : new Uint8Array(archive);
-						controller.enqueue(data);
+						controller.enqueue(
+							archive instanceof Uint8Array ? archive : new Uint8Array(archive),
+						);
 						controller.close();
 					},
 				});
@@ -163,8 +161,10 @@ export async function unpackTar(
 			const { done, value: entry } = await reader.read();
 			if (done) break;
 
-			const data = await streamToBuffer(entry.body);
-			results.push({ header: entry.header, data });
+			results.push({
+				header: entry.header,
+				data: await streamToBuffer(entry.body),
+			});
 		}
 	} finally {
 		reader.releaseLock();

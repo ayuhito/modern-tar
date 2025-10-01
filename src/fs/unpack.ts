@@ -118,8 +118,7 @@ export function unpackTar(
 					case "file": {
 						// For < 32kb files, buffer the content and use writeFile to avoid overhead of creating a stream.
 						if (header.size <= 32 * 1024) {
-							const data = await streamToBuffer(entry.body);
-							await fs.writeFile(outPath, data, {
+							await fs.writeFile(outPath, await streamToBuffer(entry.body), {
 								mode: options.fmode ?? header.mode,
 							});
 						} else {
