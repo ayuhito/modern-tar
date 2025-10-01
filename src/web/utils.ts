@@ -30,7 +30,7 @@ export function writeOctal(
 	// Format to an octal string, pad with leading zeros to size - 1.
 	// The final byte is left as 0 (NUL terminator), assuming a zero-filled view.
 	const octalString = value.toString(8).padStart(size - 1, "0");
-	writeString(view, offset, size - 1, octalString);
+	encoder.encodeInto(octalString, view.subarray(offset, offset + size - 1));
 }
 
 /**
@@ -41,14 +41,12 @@ export function readString(
 	offset: number,
 	size: number,
 ): string {
-	const slice = view.subarray(offset, offset + size);
-	const nullIndex = slice.indexOf(0);
+	// Find the first NUL byte within the specified size.
+	const end = view.indexOf(0, offset);
 
-	// Decode up to the first NUL char, or the full slice if no NUL is found.
-	const effectiveSlice =
-		nullIndex === -1 ? slice : slice.subarray(0, nullIndex);
-
-	return decoder.decode(effectiveSlice);
+	// If no NUL found, read the entire size.
+	const sliceEnd = end === -1 || end > offset + size ? offset + size : end;
+	return decoder.decode(view.subarray(offset, sliceEnd));
 }
 
 /**
@@ -59,10 +57,17 @@ export function readOctal(
 	offset: number,
 	size: number,
 ): number {
-	const octalString = readString(view, offset, size).trim();
+	let value = 0;
+	const end = offset + size;
 
-	// An empty or invalid octal string is treated as zero.
-	return octalString ? parseInt(octalString, 8) : 0;
+	for (let i = offset; i < end; i++) {
+		const charCode = view[i];
+		if (charCode === 0) break; // Stop at NUL terminator
+		if (charCode === 32) continue; // Ignore whitespace
+		value = (value << 3) + (charCode - 48); // 48 is ASCII '0'
+	}
+
+	return value;
 }
 
 /**
@@ -74,22 +79,32 @@ export function readNumeric(
 	offset: number,
 	size: number,
 ): number {
-	// POSIX base-256 encoding uses the high bit of the first byte to indicate
-	// that the field is in base-256.
+	// According to the POSIX tar specification, if the most significant bit of the
+	// first byte is set (i.e., the byte is >= 128), then the number is stored in a
+	// big-endian, base-256 format.
+	//
+	// The `& 0x80` operation is a bitmask to check if the highest bit is set.
+	// (0x80 = 10000000)
 	if (view[offset] & 0x80) {
-		let result = view[offset] & 0x7f; // Handle the first byte separately, clearing the high bit.
-
-		// Start loop from the second byte.
-		for (let i = 1; i < size; i++) {
+		let result = 0;
+		for (let i = 0; i < size; i++) {
 			// (result << 8) is equivalent to (result * 256) but faster.
 			// | view[offset + i] is equivalent to + view[offset + i] for positive numbers.
 			result = (result << 8) | view[offset + i];
 		}
 
-		return result;
+		// Clear the base-256 indicator bit.
+		//
+		// - (size - 1) * 8: Calculates the bit position of the MSB of the entire number.
+		// - 0x80 << ...: Creates a bitmask `10000000` to MSB position.
+		// - ~: NOT operator inverts this mask (e.g., `0x7FFFFFFF`).
+		// - result & ...: A bitwise AND with the inverted mask forces the MSB to zero.
+		//
+		// This prevents the number from being interpreted as negative that could lead to a
+		// an overflow and thus a vulnerability.
+		return result & ~(0x80 << ((size - 1) * 8));
 	}
 
-	// Fallback to standard octal parsing.
 	return readOctal(view, offset, size);
 }
 

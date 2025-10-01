@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTarPacker, packTar, unpackTar } from "../../src/web";
-import { USTAR } from "../../src/web/constants";
+import { USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE, USTAR_NAME_OFFSET, USTAR_SIZE_OFFSET } from "../../src/web/constants";
 import { decoder, encoder, streamToBuffer } from "../../src/web/utils";
 
 describe("checksum validation", () => {
@@ -13,7 +13,7 @@ describe("checksum validation", () => {
 		]);
 
 		// Corrupt the checksum by changing the first byte
-		buffer[USTAR.checksum.offset] = buffer[USTAR.checksum.offset] + 1;
+		buffer[USTAR_CHECKSUM_OFFSET] = buffer[USTAR_CHECKSUM_OFFSET] + 1;
 
 		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
@@ -29,8 +29,8 @@ describe("checksum validation", () => {
 		]);
 
 		// Zero out the checksum field
-		for (let i = 0; i < USTAR.checksum.size; i++) {
-			buffer[USTAR.checksum.offset + i] = 0;
+		for (let i = 0; i < USTAR_CHECKSUM_SIZE; i++) {
+			buffer[USTAR_CHECKSUM_OFFSET + i] = 0;
 		}
 
 		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
@@ -47,7 +47,7 @@ describe("checksum validation", () => {
 		]);
 
 		// Change the first character of the filename
-		buffer[USTAR.name.offset] = buffer[USTAR.name.offset] + 1;
+		buffer[USTAR_NAME_OFFSET] = buffer[USTAR_NAME_OFFSET] + 1;
 
 		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
@@ -63,7 +63,7 @@ describe("checksum validation", () => {
 		]);
 
 		// Corrupt one byte in the size field
-		buffer[USTAR.size.offset] = buffer[USTAR.size.offset] + 1;
+		buffer[USTAR_SIZE_OFFSET] = buffer[USTAR_SIZE_OFFSET] + 1;
 
 		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
@@ -105,7 +105,7 @@ describe("checksum validation", () => {
 		const secondHeaderOffset = 512 + firstEntrySize + firstEntryPadding;
 
 		// Corrupt the checksum of the second entry
-		const secondChecksumOffset = secondHeaderOffset + USTAR.checksum.offset;
+		const secondChecksumOffset = secondHeaderOffset + USTAR_CHECKSUM_OFFSET;
 		buffer[secondChecksumOffset] = buffer[secondChecksumOffset] + 1;
 
 		// The entire extraction should fail when encountering the corrupted second entry
@@ -122,7 +122,7 @@ describe("checksum validation", () => {
 		]);
 
 		// Corrupt the checksum
-		buffer[USTAR.checksum.offset] = buffer[USTAR.checksum.offset] + 1;
+		buffer[USTAR_CHECKSUM_OFFSET] = buffer[USTAR_CHECKSUM_OFFSET] + 1;
 
 		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",

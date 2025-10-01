@@ -216,6 +216,7 @@ describe("fs compression", () => {
 				map: (header) => ({ ...header, name: `processed-${header.name}` }),
 			});
 
+			// Write some data and immediately destroy
 			const testData = Buffer.from("test data");
 			unpackStream.write(testData);
 
@@ -233,7 +234,7 @@ describe("fs compression", () => {
 
 			for (const error of errors) {
 				expect(error.message).not.toContain(
-					"Invalid state: TransformStream has been terminated",
+					"Invalid state: TransformStream has been terminated"
 				);
 			}
 		});
@@ -256,7 +257,6 @@ describe("fs compression", () => {
 
 			unpackStream.destroy(new Error("Test destruction"));
 
-			// Wait for stream to close
 			await new Promise((resolve) => {
 				unpackStream.on("close", resolve);
 			});
