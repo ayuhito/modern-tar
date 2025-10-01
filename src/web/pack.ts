@@ -5,7 +5,32 @@ import {
 	DEFAULT_DIR_MODE,
 	DEFAULT_FILE_MODE,
 	TYPEFLAG,
-	USTAR,
+	USTAR_NAME_OFFSET,
+	USTAR_NAME_SIZE,
+	USTAR_MODE_OFFSET,
+	USTAR_MODE_SIZE,
+	USTAR_UID_OFFSET,
+	USTAR_UID_SIZE,
+	USTAR_GID_OFFSET,
+	USTAR_GID_SIZE,
+	USTAR_SIZE_OFFSET,
+	USTAR_SIZE_SIZE,
+	USTAR_MTIME_OFFSET,
+	USTAR_MTIME_SIZE,
+	USTAR_TYPEFLAG_OFFSET,
+	USTAR_TYPEFLAG_SIZE,
+	USTAR_LINKNAME_OFFSET,
+	USTAR_LINKNAME_SIZE,
+	USTAR_MAGIC_OFFSET,
+	USTAR_MAGIC_SIZE,
+	USTAR_VERSION_OFFSET,
+	USTAR_VERSION_SIZE,
+	USTAR_UNAME_OFFSET,
+	USTAR_UNAME_SIZE,
+	USTAR_GNAME_OFFSET,
+	USTAR_GNAME_SIZE,
+	USTAR_PREFIX_OFFSET,
+	USTAR_PREFIX_SIZE,
 	USTAR_VERSION,
 } from "./constants";
 import { findUstarSplit, generatePax } from "./pack-pax";
@@ -233,41 +258,41 @@ export function createTarHeader(header: TarHeader): Uint8Array {
 		}
 	}
 
-	writeString(view, USTAR.name.offset, USTAR.name.size, name);
+	writeString(view, USTAR_NAME_OFFSET, USTAR_NAME_SIZE, name);
 	writeOctal(
 		view,
-		USTAR.mode.offset,
-		USTAR.mode.size,
+		USTAR_MODE_OFFSET,
+		USTAR_MODE_SIZE,
 		header.mode ??
 			(header.type === "directory" ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE),
 	);
-	writeOctal(view, USTAR.uid.offset, USTAR.uid.size, header.uid ?? 0);
-	writeOctal(view, USTAR.gid.offset, USTAR.gid.size, header.gid ?? 0);
-	writeOctal(view, USTAR.size.offset, USTAR.size.size, size);
+	writeOctal(view, USTAR_UID_OFFSET, USTAR_UID_SIZE, header.uid ?? 0);
+	writeOctal(view, USTAR_GID_OFFSET, USTAR_GID_SIZE, header.gid ?? 0);
+	writeOctal(view, USTAR_SIZE_OFFSET, USTAR_SIZE_SIZE, size);
 	writeOctal(
 		view,
-		USTAR.mtime.offset,
-		USTAR.mtime.size,
+		USTAR_MTIME_OFFSET,
+		USTAR_MTIME_SIZE,
 		Math.floor((header.mtime?.getTime() ?? Date.now()) / 1000),
 	);
 	writeString(
 		view,
-		USTAR.typeflag.offset,
-		USTAR.typeflag.size,
+		USTAR_TYPEFLAG_OFFSET,
+		USTAR_TYPEFLAG_SIZE,
 		TYPEFLAG[header.type ?? "file"],
 	);
 	writeString(
 		view,
-		USTAR.linkname.offset,
-		USTAR.linkname.size,
+		USTAR_LINKNAME_OFFSET,
+		USTAR_LINKNAME_SIZE,
 		header.linkname,
 	);
 
-	writeString(view, USTAR.magic.offset, USTAR.magic.size, "ustar\0");
-	writeString(view, USTAR.version.offset, USTAR.version.size, USTAR_VERSION);
-	writeString(view, USTAR.uname.offset, USTAR.uname.size, header.uname);
-	writeString(view, USTAR.gname.offset, USTAR.gname.size, header.gname);
-	writeString(view, USTAR.prefix.offset, USTAR.prefix.size, prefix);
+	writeString(view, USTAR_MAGIC_OFFSET, USTAR_MAGIC_SIZE, "ustar\0");
+	writeString(view, USTAR_VERSION_OFFSET, USTAR_VERSION_SIZE, USTAR_VERSION);
+	writeString(view, USTAR_UNAME_OFFSET, USTAR_UNAME_SIZE, header.uname);
+	writeString(view, USTAR_GNAME_OFFSET, USTAR_GNAME_SIZE, header.gname);
+	writeString(view, USTAR_PREFIX_OFFSET, USTAR_PREFIX_SIZE, prefix);
 
 	// Calculate and write the checksum.
 	writeChecksum(view);

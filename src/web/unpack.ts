@@ -1,5 +1,35 @@
 import { validateChecksum } from "./checksum";
-import { BLOCK_SIZE, BLOCK_SIZE_MASK, FLAGTYPE, USTAR } from "./constants";
+import {
+	BLOCK_SIZE,
+	BLOCK_SIZE_MASK,
+	FLAGTYPE,
+	USTAR_NAME_OFFSET,
+	USTAR_NAME_SIZE,
+	USTAR_MODE_OFFSET,
+	USTAR_MODE_SIZE,
+	USTAR_UID_OFFSET,
+	USTAR_UID_SIZE,
+	USTAR_GID_OFFSET,
+	USTAR_GID_SIZE,
+	USTAR_SIZE_OFFSET,
+	USTAR_SIZE_SIZE,
+	USTAR_MTIME_OFFSET,
+	USTAR_MTIME_SIZE,
+	USTAR_CHECKSUM_OFFSET,
+	USTAR_CHECKSUM_SIZE,
+	USTAR_TYPEFLAG_OFFSET,
+	USTAR_TYPEFLAG_SIZE,
+	USTAR_LINKNAME_OFFSET,
+	USTAR_LINKNAME_SIZE,
+	USTAR_MAGIC_OFFSET,
+	USTAR_MAGIC_SIZE,
+	USTAR_UNAME_OFFSET,
+	USTAR_UNAME_SIZE,
+	USTAR_GNAME_OFFSET,
+	USTAR_GNAME_SIZE,
+	USTAR_PREFIX_OFFSET,
+	USTAR_PREFIX_SIZE
+} from "./constants";
 import type { DecoderOptions, ParsedTarEntry, TarHeader } from "./types";
 import { decoder, readNumeric, readOctal, readString } from "./utils";
 
@@ -363,31 +393,31 @@ function parseUstarHeader(
 
 	const typeflag = readString(
 		block,
-		USTAR.typeflag.offset,
-		USTAR.typeflag.size,
+		USTAR_TYPEFLAG_OFFSET,
+		USTAR_TYPEFLAG_SIZE,
 	) as keyof typeof FLAGTYPE;
 
-	const magic = readString(block, USTAR.magic.offset, USTAR.magic.size);
+	const magic = readString(block, USTAR_MAGIC_OFFSET, USTAR_MAGIC_SIZE);
 	if (strict && magic !== "ustar") {
 		throw new Error(`Invalid USTAR magic: expected "ustar", got "${magic}"`);
 	}
 
 	return {
-		name: readString(block, USTAR.name.offset, USTAR.name.size),
-		mode: readOctal(block, USTAR.mode.offset, USTAR.mode.size),
-		uid: readNumeric(block, USTAR.uid.offset, USTAR.uid.size),
-		gid: readNumeric(block, USTAR.gid.offset, USTAR.gid.size),
-		size: readNumeric(block, USTAR.size.offset, USTAR.size.size),
+		name: readString(block, USTAR_NAME_OFFSET, USTAR_NAME_SIZE),
+		mode: readOctal(block, USTAR_MODE_OFFSET, USTAR_MODE_SIZE),
+		uid: readNumeric(block, USTAR_UID_OFFSET, USTAR_UID_SIZE),
+		gid: readNumeric(block, USTAR_GID_OFFSET, USTAR_GID_SIZE),
+		size: readNumeric(block, USTAR_SIZE_OFFSET, USTAR_SIZE_SIZE),
 		mtime: new Date(
-			readNumeric(block, USTAR.mtime.offset, USTAR.mtime.size) * 1000,
+			readNumeric(block, USTAR_MTIME_OFFSET, USTAR_MTIME_SIZE) * 1000,
 		),
-		checksum: readOctal(block, USTAR.checksum.offset, USTAR.checksum.size),
+		checksum: readOctal(block, USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE),
 		type: FLAGTYPE[typeflag] || "file",
-		linkname: readString(block, USTAR.linkname.offset, USTAR.linkname.size),
+		linkname: readString(block, USTAR_LINKNAME_OFFSET, USTAR_LINKNAME_SIZE),
 		magic,
-		uname: readString(block, USTAR.uname.offset, USTAR.uname.size),
-		gname: readString(block, USTAR.gname.offset, USTAR.gname.size),
-		prefix: readString(block, USTAR.prefix.offset, USTAR.prefix.size),
+		uname: readString(block, USTAR_UNAME_OFFSET, USTAR_UNAME_SIZE),
+		gname: readString(block, USTAR_GNAME_OFFSET, USTAR_GNAME_SIZE),
+		prefix: readString(block, USTAR_PREFIX_OFFSET, USTAR_PREFIX_SIZE),
 	};
 }
 

@@ -14,22 +14,62 @@ export const DEFAULT_DIR_MODE = 0o755;
  *
  * @see https://www.gnu.org/software/tar/manual/html_node/Standard.html
  */
-export const USTAR = {
-	name: { offset: 0, size: 100 },
-	mode: { offset: 100, size: 8 },
-	uid: { offset: 108, size: 8 },
-	gid: { offset: 116, size: 8 },
-	size: { offset: 124, size: 12 },
-	mtime: { offset: 136, size: 12 },
-	checksum: { offset: 148, size: 8 },
-	typeflag: { offset: 156, size: 1 },
-	linkname: { offset: 157, size: 100 },
-	magic: { offset: 257, size: 6 },
-	version: { offset: 263, size: 2 },
-	uname: { offset: 265, size: 32 },
-	gname: { offset: 297, size: 32 },
-	prefix: { offset: 345, size: 155 },
-} as const;
+
+// Name field
+export const USTAR_NAME_OFFSET = 0;
+export const USTAR_NAME_SIZE = 100;
+
+// Mode field
+export const USTAR_MODE_OFFSET = 100;
+export const USTAR_MODE_SIZE = 8;
+
+// UID field
+export const USTAR_UID_OFFSET = 108;
+export const USTAR_UID_SIZE = 8;
+
+// GID field
+export const USTAR_GID_OFFSET = 116;
+export const USTAR_GID_SIZE = 8;
+
+// Size field
+export const USTAR_SIZE_OFFSET = 124;
+export const USTAR_SIZE_SIZE = 12;
+
+// Mtime field
+export const USTAR_MTIME_OFFSET = 136;
+export const USTAR_MTIME_SIZE = 12;
+
+// Checksum field
+export const USTAR_CHECKSUM_OFFSET = 148;
+export const USTAR_CHECKSUM_SIZE = 8;
+
+// Typeflag field
+export const USTAR_TYPEFLAG_OFFSET = 156;
+export const USTAR_TYPEFLAG_SIZE = 1;
+
+// Linkname field
+export const USTAR_LINKNAME_OFFSET = 157;
+export const USTAR_LINKNAME_SIZE = 100;
+
+// Magic field
+export const USTAR_MAGIC_OFFSET = 257;
+export const USTAR_MAGIC_SIZE = 6;
+
+// Version field
+export const USTAR_VERSION_OFFSET = 263;
+export const USTAR_VERSION_SIZE = 2;
+
+// Uname field
+export const USTAR_UNAME_OFFSET = 265;
+export const USTAR_UNAME_SIZE = 32;
+
+// Gname field
+export const USTAR_GNAME_OFFSET = 297;
+export const USTAR_GNAME_SIZE = 32;
+
+// Prefix field
+export const USTAR_PREFIX_OFFSET = 345;
+export const USTAR_PREFIX_SIZE = 155;
 
 /** USTAR version ("00"). */
 export const USTAR_VERSION = "00";

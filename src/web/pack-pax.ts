@@ -1,4 +1,4 @@
-import { USTAR, USTAR_MAX_SIZE, USTAR_MAX_UID_GID } from "./constants";
+import { USTAR_NAME_SIZE, USTAR_UNAME_SIZE, USTAR_GNAME_SIZE, USTAR_PREFIX_SIZE, USTAR_MAX_SIZE, USTAR_MAX_UID_GID } from "./constants";
 import { createTarHeader } from "./pack";
 import type { TarHeader } from "./types";
 import { decoder, encoder } from "./utils";
@@ -11,7 +11,7 @@ export function generatePax(header: TarHeader): {
 	const paxRecords: Record<string, string> = {};
 
 	// Check max filename length.
-	if (header.name.length > USTAR.name.size) {
+	if (header.name.length > USTAR_NAME_SIZE) {
 		const split = findUstarSplit(header.name);
 
 		// If a valid USTAR split is not possible, we must use a PAX record.
@@ -21,16 +21,16 @@ export function generatePax(header: TarHeader): {
 	}
 
 	// Check max linkname length.
-	if (header.linkname && header.linkname.length > USTAR.name.size) {
+	if (header.linkname && header.linkname.length > USTAR_NAME_SIZE) {
 		paxRecords.linkpath = header.linkname;
 	}
 
 	// Check user/group names.
-	if (header.uname && header.uname.length > USTAR.uname.size) {
+	if (header.uname && header.uname.length > USTAR_UNAME_SIZE) {
 		paxRecords.uname = header.uname;
 	}
 
-	if (header.gname && header.gname.length > USTAR.gname.size) {
+	if (header.gname && header.gname.length > USTAR_GNAME_SIZE) {
 		paxRecords.gname = header.gname;
 	}
 
@@ -103,15 +103,15 @@ export function findUstarSplit(
 	path: string,
 ): { name: string; prefix: string } | null {
 	// No split needed if the path already fits in the name field.
-	if (path.length <= USTAR.name.size) {
+	if (path.length <= USTAR_NAME_SIZE) {
 		return null;
 	}
 
 	// For the name part to fit, the slash must be at or after this index.
-	const minSlashIndex = path.length - USTAR.name.size - 1;
+	const minSlashIndex = path.length - USTAR_NAME_SIZE - 1;
 
 	// Find the rightmost slash that respects the prefix length limit (155).
-	const slashIndex = path.lastIndexOf("/", USTAR.prefix.size);
+	const slashIndex = path.lastIndexOf("/", USTAR_PREFIX_SIZE);
 
 	// A valid split exists if we found a slash and it allows both parts to fit.
 	if (slashIndex > 0 && slashIndex >= minSlashIndex) {
