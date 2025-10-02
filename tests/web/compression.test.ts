@@ -455,7 +455,7 @@ describe("decompression", () => {
 			await writer.write(encoder.encode("partial")); // Only 7 bytes
 
 			// This should throw due to size mismatch
-			await expect(writer.close()).rejects.toThrow(/Size mismatch/);
+			await expect(writer.close()).rejects.toThrow(/Size mismatch for entry 'incomplete\.txt': expected 100 bytes but received 7\./);
 
 			// Verify the compressed stream also fails
 			await expect(streamToBuffer(compressedStream)).rejects.toThrow();

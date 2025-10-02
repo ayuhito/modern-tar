@@ -234,7 +234,7 @@ describe("fs compression", () => {
 
 			for (const error of errors) {
 				expect(error.message).not.toContain(
-					"Invalid state: TransformStream has been terminated"
+					"Invalid state: TransformStream has been terminated",
 				);
 			}
 		});
@@ -263,7 +263,7 @@ describe("fs compression", () => {
 
 			for (const error of errors) {
 				expect(error.message).not.toContain(
-					"Invalid state: TransformStream has been terminated"
+					"Invalid state: TransformStream has been terminated",
 				);
 			}
 		});

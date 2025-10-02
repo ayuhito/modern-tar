@@ -2,7 +2,15 @@ import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
 import { writeChecksum } from "../../src/web/checksum";
-import { BLOCK_SIZE, TYPEFLAG, USTAR_NAME_OFFSET, USTAR_MODE_OFFSET, USTAR_SIZE_OFFSET, USTAR_CHECKSUM_OFFSET, USTAR_TYPEFLAG_OFFSET } from "../../src/web/constants";
+import {
+	BLOCK_SIZE,
+	TYPEFLAG,
+	USTAR_CHECKSUM_OFFSET,
+	USTAR_MODE_OFFSET,
+	USTAR_NAME_OFFSET,
+	USTAR_SIZE_OFFSET,
+	USTAR_TYPEFLAG_OFFSET,
+} from "../../src/web/constants";
 import type { ParsedTarEntry } from "../../src/web/types";
 import { decoder, encoder } from "../../src/web/utils";
 import {

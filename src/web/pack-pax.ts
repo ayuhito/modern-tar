@@ -1,4 +1,11 @@
-import { USTAR_NAME_SIZE, USTAR_UNAME_SIZE, USTAR_GNAME_SIZE, USTAR_PREFIX_SIZE, USTAR_MAX_SIZE, USTAR_MAX_UID_GID } from "./constants";
+import {
+	USTAR_GNAME_SIZE,
+	USTAR_MAX_SIZE,
+	USTAR_MAX_UID_GID,
+	USTAR_NAME_SIZE,
+	USTAR_PREFIX_SIZE,
+	USTAR_UNAME_SIZE,
+} from "./constants";
 import { createTarHeader } from "./pack";
 import type { TarHeader } from "./types";
 import { decoder, encoder } from "./utils";

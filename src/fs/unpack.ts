@@ -53,6 +53,10 @@ export function unpackTar(
 		.pipeThrough(createTarDecoder(options))
 		.pipeThrough(createTarOptionsTransformer(options));
 
+	const webWriter = webWritable.getWriter();
+	let isWriterClosed = false;
+	let isProcessingComplete = false;
+
 	const processingPromise = (async () => {
 		const resolvedDestDir = normalizeUnicode(path.resolve(directoryPath));
 		const validatedDirs = new Set<string>([resolvedDestDir]);
@@ -67,7 +71,9 @@ export function unpackTar(
 
 			while (true) {
 				const { done, value: entry } = await reader.read();
-				if (done) break;
+				if (done) {
+					break;
+				}
 
 				const { header } = entry;
 				const normalizedName = normalizeUnicode(header.name);
@@ -211,26 +217,36 @@ export function unpackTar(
 				}
 			}
 		} finally {
+			isProcessingComplete = true;
 			reader.releaseLock();
 		}
-	})();
+	})().catch((err) => {
+		isProcessingComplete = true;
+		throw err;
+	});
 
-	// Get the writer for the web writable stream
-	const webWriter = webWritable.getWriter();
-	let isWriterClosed = false;
-
-	// Create the Node Writable stream with proper backpressure
 	const writable = new Writable({
 		async write(chunk, _encoding, callback) {
-			if (isWriterClosed) return callback();
+			// Prevent writes after processing completes to avoid race condition.
+			if (
+				isWriterClosed ||
+				isProcessingComplete ||
+				webWriter.desiredSize === null
+			) {
+				return callback();
+			}
 
 			try {
-				// This await is important for backpressure. It will not resolve
-				// until the web stream is ready for more data AND the processing
-				// pipeline can handle it.
 				await webWriter.write(chunk);
 				callback();
 			} catch (err) {
+				if (
+					err instanceof TypeError &&
+					err.stack?.includes("TransformStream") &&
+					webWriter.desiredSize === null
+				) {
+					return callback(); // EOF archive markers might cause stream to close early on slow I/O.
+				}
 				callback(err as Error);
 			}
 		},
@@ -239,15 +255,13 @@ export function unpackTar(
 			if (isWriterClosed) return callback();
 
 			try {
+				isWriterClosed = true;
 				try {
 					await webWriter.close();
-					isWriterClosed = true;
 				} catch {
-					// If close fails, the stream might already be closed
-					isWriterClosed = true;
+					// Writer may already be closed, ignore this error
 				}
 
-				// Wait for all processing to complete
 				await processingPromise;
 				callback();
 			} catch (err) {
@@ -257,7 +271,9 @@ export function unpackTar(
 
 		destroy(err, callback) {
 			if (isWriterClosed) return callback(err);
+
 			isWriterClosed = true;
+			isProcessingComplete = true;
 
 			// Abort the web writer and ensure the processing promise is also terminated.
 			webWriter.abort(err).catch(() => {});
@@ -268,11 +284,6 @@ export function unpackTar(
 				callback(err);
 			});
 		},
-	});
-
-	// Forward processing errors to the writable stream
-	processingPromise.catch((err) => {
-		writable.destroy(err);
 	});
 
 	return writable;
