@@ -318,20 +318,20 @@ describe("stream coordination cases", () => {
 				if (i % 4 === 1) {
 					try {
 						unpackStream.destroy();
-					} catch (err) {
+					} catch {
 						// Suppress destruction errors
 					}
 				} else if (i % 4 === 2) {
 					// Skip gunzip destruction to avoid premature close errors
 					try {
 						unpackStream.destroy();
-					} catch (err) {
+					} catch {
 						// Suppress destruction errors
 					}
 				} else if (i % 4 === 3) {
 					try {
 						unpackStream.destroy();
-					} catch (err) {
+					} catch {
 						// Suppress destruction errors
 					}
 				}

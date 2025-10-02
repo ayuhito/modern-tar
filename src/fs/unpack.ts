@@ -227,14 +227,10 @@ export function unpackTar(
 
 	const writable = new Writable({
 		async write(chunk, _encoding, callback) {
-			if (isWriterClosed) {
-				return callback();
-			}
+			if (isWriterClosed) return callback();
 
 			// Prevent writes after processing completes to avoid race condition.
-			if (isProcessingComplete) {
-				return callback();
-			}
+			if (isProcessingComplete) return callback();
 
 			if (webWriter.desiredSize === null) {
 				return callback(); // Stream is closed, ignore write
@@ -258,7 +254,6 @@ export function unpackTar(
 		async final(callback) {
 			if (isWriterClosed) return callback();
 
-
 			try {
 				isWriterClosed = true;
 				try {
@@ -277,13 +272,12 @@ export function unpackTar(
 		destroy(err, callback) {
 			if (isWriterClosed) return callback(err);
 
-
 			isWriterClosed = true;
 			isProcessingComplete = true;
 
 			// Abort the web writer and ensure the processing promise is also terminated.
-			webWriter.abort(err).catch(() => {	});
-			entryStream.cancel(err).catch(() => {	});
+			webWriter.abort(err).catch(() => {});
+			entryStream.cancel(err).catch(() => {});
 
 			// Wait for the promise to settle to ensure resources are released
 			processingPromise.finally(() => {
