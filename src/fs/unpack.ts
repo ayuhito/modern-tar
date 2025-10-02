@@ -43,10 +43,6 @@ export function unpackTar(
 	directoryPath: string,
 	options: UnpackOptionsFS = {},
 ): Writable {
-	// Generate unique ID for this stream instance
-	const streamId = Math.random().toString(36).substring(2, 8);
-	console.warn(`[unpack:${streamId}] Creating unpack stream for: ${directoryPath}`);
-
 	// Create a stream pair for proper backpressure handling.
 	const { readable, writable: webWritable } = new TransformStream<
 		Uint8Array,
@@ -57,8 +53,11 @@ export function unpackTar(
 		.pipeThrough(createTarDecoder(options))
 		.pipeThrough(createTarOptionsTransformer(options));
 
+	const webWriter = webWritable.getWriter();
+	let isWriterClosed = false;
+	let isProcessingComplete = false;
+
 	const processingPromise = (async () => {
-		console.warn(`[unpack:${streamId}] Starting processing promise`);
 		const resolvedDestDir = normalizeUnicode(path.resolve(directoryPath));
 		const validatedDirs = new Set<string>([resolvedDestDir]);
 
@@ -66,23 +65,14 @@ export function unpackTar(
 		await fs.mkdir(resolvedDestDir, { recursive: true });
 
 		const reader = entryStream.getReader();
-		console.warn(`[unpack:${streamId}] Got entry stream reader`);
 		try {
 			// Prevent DoS attacks with deeply nested paths
 			const maxDepth = options.maxDepth ?? 1024;
-			let entryCount = 0;
 
 			while (true) {
 				const { done, value: entry } = await reader.read();
 				if (done) {
-					console.warn(`[unpack:${streamId}] Processing complete, processed ${entryCount} entries`);
 					break;
-				}
-				entryCount++;
-				if (entryCount <= 5) {
-					console.warn(`[unpack:${streamId}] Processing entry ${entryCount}: ${entry.header.name}`);
-				} else if (entryCount % 10 === 0) {
-					console.warn(`[unpack:${streamId}] Processed ${entryCount} entries...`);
 				}
 
 				const { header } = entry;
@@ -227,89 +217,76 @@ export function unpackTar(
 				}
 			}
 		} finally {
-			console.warn(`[unpack:${streamId}] Releasing reader lock`);
+			isProcessingComplete = true;
 			reader.releaseLock();
 		}
 	})().catch((err) => {
-		console.warn(`[unpack:${streamId}] Processing promise error:`, err.message);
+		isProcessingComplete = true;
 		throw err;
 	});
 
-	// Get the writer for the web writable stream
-	const webWriter = webWritable.getWriter();
-	let isWriterClosed = false;
-
-	// Create the Node Writable stream with proper backpressure
 	const writable = new Writable({
 		async write(chunk, _encoding, callback) {
 			if (isWriterClosed) {
-				console.warn(`[unpack:${streamId}] Write called on closed writer, ignoring`);
 				return callback();
 			}
 
+			// Prevent writes after processing completes to avoid race condition.
+			if (isProcessingComplete) {
+				return callback();
+			}
+
+			if (webWriter.desiredSize === null) {
+				return callback(); // Stream is closed, ignore write
+			}
+
 			try {
-				// This await is important for backpressure. It will not resolve
-				// until the web stream is ready for more data AND the processing
-				// pipeline can handle it.
 				await webWriter.write(chunk);
 				callback();
 			} catch (err) {
-				console.warn(`[unpack:${streamId}] Write error:`, (err as Error).message);
+				if (
+					err instanceof TypeError &&
+					err.stack?.includes("TransformStream") &&
+					webWriter.desiredSize === null
+				) {
+					return callback(); // EOF archive markers might cause stream to close early on slow I/O.
+				}
 				callback(err as Error);
 			}
 		},
 
 		async final(callback) {
-			if (isWriterClosed) {
-				console.warn(`[unpack:${streamId}] Final called on closed writer, ignoring`);
-				return callback();
-			}
-			console.warn(`[unpack:${streamId}] Finalizing stream`);
+			if (isWriterClosed) return callback();
+
 
 			try {
+				isWriterClosed = true;
 				try {
-					console.warn(`[unpack:${streamId}] Closing web writer`);
-					isWriterClosed = true;
 					await webWriter.close();
-					console.warn(`[unpack:${streamId}] Web writer closed successfully`);
-				} catch (closeErr) {
-					// If close fails, the stream might already be closed
-					console.warn(`[unpack:${streamId}] Web writer close failed (already closed):`, (closeErr as Error).message);
+				} catch {
+					// Writer may already be closed, ignore this error
 				}
 
-				// Wait for all processing to complete
-				console.warn(`[unpack:${streamId}] Waiting for processing promise to complete`);
 				await processingPromise;
-				console.warn(`[unpack:${streamId}] Processing promise completed successfully`);
 				callback();
 			} catch (err) {
-				console.warn(`[unpack:${streamId}] Final error:`, (err as Error).message);
 				callback(err as Error);
 			}
 		},
 
 		destroy(err, callback) {
-			console.warn(`[unpack:${streamId}] Destroy called with error:`, err?.message || 'no error');
-			if (isWriterClosed) {
-				console.warn(`[unpack:${streamId}] Already closed, calling callback immediately`);
-				return callback(err);
-			}
+			if (isWriterClosed) return callback(err);
+
+
 			isWriterClosed = true;
-			console.warn(`[unpack:${streamId}] Marked writer as closed`);
+			isProcessingComplete = true;
 
 			// Abort the web writer and ensure the processing promise is also terminated.
-			console.warn(`[unpack:${streamId}] Aborting web writer and canceling entry stream`);
-			webWriter.abort(err).catch((abortErr) => {
-				console.warn(`[unpack:${streamId}] Web writer abort error (non-critical):`, abortErr.message);
-			});
-			entryStream.cancel(err).catch((cancelErr) => {
-				console.warn(`[unpack:${streamId}] Entry stream cancel error (non-critical):`, cancelErr.message);
-			});
+			webWriter.abort(err).catch(() => {	});
+			entryStream.cancel(err).catch(() => {	});
 
 			// Wait for the promise to settle to ensure resources are released
-			console.warn(`[unpack:${streamId}] Waiting for processing promise to settle`);
 			processingPromise.finally(() => {
-				console.warn(`[unpack:${streamId}] Processing promise settled, calling destroy callback`);
 				callback(err);
 			});
 		},

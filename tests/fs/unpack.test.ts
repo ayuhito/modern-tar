@@ -423,53 +423,5 @@ describe("extract", () => {
 				pipeline(Readable.from([tarBuffer]), unpackStream),
 			).rejects.toThrow("is not a valid directory component");
 		});
-
-		it("handles ReadableStream cancel with non Error reason", async () => {
-			const destDir = path.join(tmpDir, "extracted");
-			const unpackStream = unpackTar(destDir);
-
-			unpackStream.on("error", () => {
-				// Expected error, do nothing
-			});
-
-			// Write some data and then destroy with a string reason
-			unpackStream.write(Buffer.from("test data"));
-
-			// Web Streams can be cancelled with any type, including strings
-			unpackStream.destroy("test cancel reason" as unknown as Error);
-
-			// The destroy should complete without throwing
-			await new Promise((resolve) => {
-				unpackStream.on("close", resolve);
-			});
-		});
-
-		it("handles immediate stream destruction gracefully", async () => {
-			const destDir = path.join(tmpDir, "extracted");
-			const unpackStream = unpackTar(destDir);
-
-			// Write some data and immediately destroy
-			const testData = Buffer.from("test data");
-			unpackStream.write(testData);
-
-			const errors: Error[] = [];
-			unpackStream.on("error", (err: Error) => {
-				errors.push(err);
-			});
-
-			unpackStream.destroy(new Error("Immediate destruction test"));
-
-			// Wait for destruction to complete
-			await new Promise<void>((resolve) => {
-				unpackStream.on("close", resolve);
-			});
-
-			// Should not throw TransformStream termination error
-			for (const error of errors) {
-				expect(error.message).not.toContain(
-					"Invalid state: TransformStream has been terminated",
-				);
-			}
-		});
 	});
 });

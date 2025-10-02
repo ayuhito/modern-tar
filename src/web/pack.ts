@@ -5,33 +5,33 @@ import {
 	DEFAULT_DIR_MODE,
 	DEFAULT_FILE_MODE,
 	TYPEFLAG,
-	USTAR_NAME_OFFSET,
-	USTAR_NAME_SIZE,
-	USTAR_MODE_OFFSET,
-	USTAR_MODE_SIZE,
-	USTAR_UID_OFFSET,
-	USTAR_UID_SIZE,
 	USTAR_GID_OFFSET,
 	USTAR_GID_SIZE,
-	USTAR_SIZE_OFFSET,
-	USTAR_SIZE_SIZE,
-	USTAR_MTIME_OFFSET,
-	USTAR_MTIME_SIZE,
-	USTAR_TYPEFLAG_OFFSET,
-	USTAR_TYPEFLAG_SIZE,
+	USTAR_GNAME_OFFSET,
+	USTAR_GNAME_SIZE,
 	USTAR_LINKNAME_OFFSET,
 	USTAR_LINKNAME_SIZE,
 	USTAR_MAGIC_OFFSET,
 	USTAR_MAGIC_SIZE,
-	USTAR_VERSION_OFFSET,
-	USTAR_VERSION_SIZE,
-	USTAR_UNAME_OFFSET,
-	USTAR_UNAME_SIZE,
-	USTAR_GNAME_OFFSET,
-	USTAR_GNAME_SIZE,
+	USTAR_MODE_OFFSET,
+	USTAR_MODE_SIZE,
+	USTAR_MTIME_OFFSET,
+	USTAR_MTIME_SIZE,
+	USTAR_NAME_OFFSET,
+	USTAR_NAME_SIZE,
 	USTAR_PREFIX_OFFSET,
 	USTAR_PREFIX_SIZE,
+	USTAR_SIZE_OFFSET,
+	USTAR_SIZE_SIZE,
+	USTAR_TYPEFLAG_OFFSET,
+	USTAR_TYPEFLAG_SIZE,
+	USTAR_UID_OFFSET,
+	USTAR_UID_SIZE,
+	USTAR_UNAME_OFFSET,
+	USTAR_UNAME_SIZE,
 	USTAR_VERSION,
+	USTAR_VERSION_OFFSET,
+	USTAR_VERSION_SIZE,
 } from "./constants";
 import { findUstarSplit, generatePax } from "./pack-pax";
 import type { TarHeader } from "./types";
@@ -165,26 +165,65 @@ export function createTarPacker(): {
 			// Automatically generate and enqueue a PAX header if needed.
 			const paxData = generatePax(header);
 			if (paxData) {
-				// @ts-expect-error - TypeScript is overly strict here, but Uint8Array is compatible here.
-				streamController.enqueue(paxData.paxHeader);
-				// @ts-expect-error - TypeScript is overly strict here, but Uint8Array is compatible here.
-				streamController.enqueue(paxData.paxBody);
-
-				const paxPadding = -paxData.paxBody.length & BLOCK_SIZE_MASK;
-
-				if (paxPadding > 0) {
-					streamController.enqueue(new Uint8Array(paxPadding));
+				// Proactive stream state checking before enqueuing PAX data
+				if (streamController.desiredSize === null) {
+					return new WritableStream(); // Return empty stream if controller is closed
 				}
+
+				try {
+					// @ts-expect-error - TypeScript is overly strict here, but Uint8Array is compatible here.
+					streamController.enqueue(paxData.paxHeader);
+					// @ts-expect-error - TypeScript is overly strict here, but Uint8Array is compatible here.
+					streamController.enqueue(paxData.paxBody);
+
+					const paxPadding = -paxData.paxBody.length & BLOCK_SIZE_MASK;
+
+					if (paxPadding > 0) {
+						streamController.enqueue(new Uint8Array(paxPadding));
+					}
+				} catch (err) {
+					// Better error detection for stream termination
+					if (
+						err instanceof TypeError &&
+						err.stack?.includes("ReadableStream") &&
+						streamController.desiredSize === null
+					) {
+						return new WritableStream(); // Return empty stream if terminated
+					}
+					throw err;
+				}
+			}
+
+			// Proactive stream state checking before enqueuing header
+			if (streamController.desiredSize === null) {
+				return new WritableStream(); // Return empty stream if controller is closed
 			}
 
 			// Create and enqueue the main USTAR header for the file entry.
 			const headerBlock = createTarHeader({ ...header, size });
-			streamController.enqueue(headerBlock as Uint8Array<ArrayBuffer>);
+			try {
+				streamController.enqueue(headerBlock as Uint8Array<ArrayBuffer>);
+			} catch (err) {
+				// Better error detection for stream termination
+				if (
+					err instanceof TypeError &&
+					err.stack?.includes("ReadableStream") &&
+					streamController.desiredSize === null
+				) {
+					return new WritableStream(); // Return empty stream if terminated
+				}
+				throw err;
+			}
 
 			let totalWritten = 0;
 
 			return new WritableStream<Uint8Array>({
 				write(chunk) {
+					// Proactive stream state checking - check if stream is closed before writing
+					if (streamController.desiredSize === null) {
+						return; // Stream is closed, ignore write
+					}
+
 					totalWritten += chunk.length;
 					if (totalWritten > size) {
 						const err = new Error(
@@ -194,22 +233,52 @@ export function createTarPacker(): {
 						throw err; // Abort the write.
 					}
 
-					streamController.enqueue(chunk as Uint8Array<ArrayBuffer>);
+					try {
+						streamController.enqueue(chunk as Uint8Array<ArrayBuffer>);
+					} catch (err) {
+						// Better error detection using type checking and stream state
+						// instead of string matching for more robust error handling
+						if (
+							err instanceof TypeError &&
+							err.stack?.includes("ReadableStream") &&
+							streamController.desiredSize === null
+						) {
+							return; // Gracefully ignore stream termination errors
+						}
+						throw err;
+					}
 				},
 
 				close() {
 					if (totalWritten !== size) {
 						const err = new Error(
-							`Size mismatch for entry '${header.name}': expected ${size} bytes but received ${totalWritten}.`,
+							`Entry '${header.name}' was not fully written. Expected ${size} bytes but received ${totalWritten} bytes.`,
 						);
 						streamController.error(err);
 						throw err;
 					}
 
-					// Pad the entry data to fill a complete 512-byte block.
-					const paddingSize = -size & BLOCK_SIZE_MASK;
+					// Proactive stream state checking before adding padding
+					if (streamController.desiredSize === null) {
+						return; // Stream is closed, skip padding
+					}
+
+					// Add padding to align to 512-byte boundary
+					const paddingSize = -totalWritten & BLOCK_SIZE_MASK;
 					if (paddingSize > 0) {
-						streamController.enqueue(new Uint8Array(paddingSize));
+						try {
+							streamController.enqueue(new Uint8Array(paddingSize));
+						} catch (err) {
+							// Better error detection for stream termination
+							if (
+								err instanceof TypeError &&
+								err.stack?.includes("ReadableStream") &&
+								streamController.desiredSize === null
+							) {
+								return; // Gracefully ignore stream termination errors
+							}
+							throw err;
+						}
 					}
 				},
 				abort(reason) {
@@ -219,9 +288,26 @@ export function createTarPacker(): {
 		},
 
 		finalize() {
-			// A valid tar archive ends with two 512-byte empty blocks.
-			streamController.enqueue(new Uint8Array(BLOCK_SIZE * 2));
-			streamController.close();
+			// Proactive stream state checking before finalizing
+			if (streamController.desiredSize === null) {
+				return; // Stream is already closed
+			}
+
+			try {
+				// A valid tar archive ends with two 512-byte empty blocks.
+				streamController.enqueue(new Uint8Array(BLOCK_SIZE * 2));
+				streamController.close();
+			} catch (err) {
+				// Better error detection for stream termination
+				if (
+					err instanceof TypeError &&
+					err.stack?.includes("ReadableStream") &&
+					streamController.desiredSize === null
+				) {
+					return; // Gracefully ignore stream termination errors
+				}
+				throw err;
+			}
 		},
 
 		error(err: unknown) {
