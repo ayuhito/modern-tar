@@ -227,13 +227,13 @@ export function unpackTar(
 
 	const writable = new Writable({
 		async write(chunk, _encoding, callback) {
-			if (isWriterClosed) return callback();
-
 			// Prevent writes after processing completes to avoid race condition.
-			if (isProcessingComplete) return callback();
-
-			if (webWriter.desiredSize === null) {
-				return callback(); // Stream is closed, ignore write
+			if (
+				isWriterClosed ||
+				isProcessingComplete ||
+				webWriter.desiredSize === null
+			) {
+				return callback();
 			}
 
 			try {
