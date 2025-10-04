@@ -217,7 +217,7 @@ describe("extract", () => {
 
 		await expect(
 			pipeline(Readable.from([tarBuffer]), unpackStream),
-		).rejects.toThrow(/Path depth.*exceeds the maximum allowed depth/);
+		).rejects.toThrow("Tar exceeds max specified depth.");
 	});
 
 	it("handles absolute paths in entries", async () => {
@@ -240,7 +240,7 @@ describe("extract", () => {
 
 		await expect(
 			pipeline(Readable.from([tarBuffer]), unpackStream),
-		).rejects.toThrow("Path traversal attempt detected");
+		).rejects.toThrow('Absolute path found in "/absolute/path.txt".');
 	});
 
 	it("handles symlink validation disabled", async () => {
@@ -266,7 +266,7 @@ describe("extract", () => {
 		const linkPath = path.join(destDir, "safe-link");
 		const linkTarget = await fs.readlink(linkPath);
 		// On Windows, symlinks may use backslashes instead of forward slashes
-		const normalizedTarget = linkTarget.replace(/\\/g, "/");
+		const normalizedTarget = linkTarget.replaceAll("\\", "/");
 		expect(normalizedTarget).toBe("../outside");
 	});
 
@@ -289,7 +289,9 @@ describe("extract", () => {
 
 		await expect(
 			pipeline(Readable.from([tarBuffer]), unpackStream),
-		).rejects.toThrow("Hardlink target");
+		).rejects.toThrow(
+			'Hardlink "/absolute/target" points outside the extraction directory.',
+		);
 	});
 
 	it("handles timestamps on symlinks", async () => {
@@ -392,7 +394,9 @@ describe("extract", () => {
 		// This should trigger the processingPromise.catch block due to path validation
 		await expect(
 			pipeline(Readable.from([tarBuffer]), unpackStream),
-		).rejects.toThrow("Symlink target");
+		).rejects.toThrow(
+			'Symlink "../../../escape-attempt" points outside the extraction directory.',
+		);
 	});
 
 	describe("edge cases", () => {

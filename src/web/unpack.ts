@@ -345,9 +345,7 @@ export function createTarDecoder(
 			// If we were in the middle of reading an entry, that's an error.
 			if (currentEntry) {
 				if (strict) {
-					const error = new Error(
-						`Tar archive is truncated. Expected ${currentEntry.header.size} bytes but received ${currentEntry.header.size - currentEntry.bytesLeft}.`,
-					);
+					const error = new Error("Tar archive is truncated.");
 					currentEntry.controller.error(error);
 					controller.error(error);
 				} else {
@@ -365,7 +363,7 @@ export function createTarDecoder(
 				// Check the remaining part of the first chunk (if any)
 				if (chunks.length > 0 && offset < chunks[0].length) {
 					if (chunks[0].subarray(offset).some((b) => b !== 0)) {
-						controller.error(new Error("Unexpected data at end of archive."));
+						controller.error(new Error("Invalid EOF."));
 						return;
 					}
 				}
@@ -373,7 +371,7 @@ export function createTarDecoder(
 				// Check all subsequent chunks
 				for (let i = 1; i < chunks.length; i++) {
 					if (chunks[i].some((b) => b !== 0)) {
-						controller.error(new Error("Unexpected data at end of archive."));
+						controller.error(new Error("Invalid EOF."));
 						return;
 					}
 				}
@@ -399,7 +397,7 @@ function parseUstarHeader(
 
 	const magic = readString(block, USTAR_MAGIC_OFFSET, USTAR_MAGIC_SIZE);
 	if (strict && magic !== "ustar") {
-		throw new Error(`Invalid USTAR magic: expected "ustar", got "${magic}"`);
+		throw new Error(`Invalid USTAR magic literal. Got "${magic}".`);
 	}
 
 	return {

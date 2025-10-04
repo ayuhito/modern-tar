@@ -36,7 +36,7 @@ export function packTarSources(sources: TarSource[]): Readable {
 	(async () => {
 		// TODO: Optimize with concurrency with a limit.
 		for (const source of sources) {
-			const targetPath = source.target.replace(/\\/g, "/");
+			const targetPath = source.target.replaceAll("\\", "/");
 
 			switch (source.type) {
 				case "file":
@@ -100,7 +100,7 @@ export function packTarSources(sources: TarSource[]): Readable {
 						data = encoder.encode(content);
 					} else {
 						throw new TypeError(
-							`Unsupported content type for entry "${targetPath}". Expected string, Uint8Array, ArrayBuffer, Blob, ReadableStream, or undefined.`,
+							`Unsupported content type for entry "${targetPath}".`,
 						);
 					}
 
@@ -167,7 +167,7 @@ async function addDirectoryToPacker(
 		const archiveEntryPath = path
 			.join(targetPathInArchive, dirent.name)
 			// Normalize to forward slashes for tar format.
-			.replace(/\\/g, "/");
+			.replaceAll("\\", "/");
 
 		if (dirent.isDirectory()) {
 			await addDirectoryToPacker(controller, fullSourcePath, archiveEntryPath);

@@ -83,17 +83,13 @@ export function unpackTar(
 					const depth = normalizedName.split("/").length;
 
 					if (depth > maxDepth) {
-						throw new Error(
-							`Path depth of entry "${header.name}" (${depth}) exceeds the maximum allowed depth of ${maxDepth}.`,
-						);
+						throw new Error("Tar exceeds max specified depth.");
 					}
 				}
 
 				// Check for absolute paths in the entry name
 				if (path.isAbsolute(normalizedName)) {
-					throw new Error(
-						`Path traversal attempt detected for entry "${header.name}".`,
-					);
+					throw new Error(`Absolute path found in "${header.name}".`);
 				}
 
 				const outPath = path.join(resolvedDestDir, normalizedName);
@@ -101,7 +97,7 @@ export function unpackTar(
 				validateBounds(
 					outPath,
 					resolvedDestDir,
-					`Path traversal attempt detected for entry "${header.name}".`,
+					`Entry "${header.name}" points outside the extraction directory.`,
 				);
 
 				const parentDir = path.dirname(outPath);
@@ -148,7 +144,7 @@ export function unpackTar(
 							validateBounds(
 								resolvedTarget,
 								resolvedDestDir,
-								`Symlink target "${header.linkname}" points outside the extraction directory.`,
+								`Symlink "${header.linkname}" points outside the extraction directory.`,
 							);
 						}
 						await fs.symlink(header.linkname, outPath);
@@ -175,7 +171,7 @@ export function unpackTar(
 						// Check for absolute paths in hardlink target
 						if (path.isAbsolute(normalizedLinkname)) {
 							throw new Error(
-								`Hardlink target "${header.linkname}" points outside the extraction directory.`,
+								`Hardlink "${header.linkname}" points outside the extraction directory.`,
 							);
 						}
 

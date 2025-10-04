@@ -170,7 +170,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Path traversal attempt detected for entry "../../malicious.txt".',
+					'Entry "../../malicious.txt" points outside the extraction directory.',
 				);
 			});
 
@@ -183,7 +183,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Path traversal attempt detected for entry "/tmp/malicious.txt".',
+					'Absolute path found in "/tmp/malicious.txt".',
 				);
 			});
 
@@ -197,7 +197,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Path traversal attempt detected for entry "./safe/../../../malicious.txt".',
+					'Entry "./safe/../../../malicious.txt" points outside the extraction directory.',
 				);
 			});
 
@@ -242,7 +242,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Path traversal attempt detected for entry "../../malicious/".',
+					'Entry "../../malicious/" points outside the extraction directory.',
 				);
 			});
 
@@ -255,7 +255,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Path traversal attempt detected for entry "/tmp/malicious/".',
+					'Absolute path found in "/tmp/malicious/".',
 				);
 			});
 
@@ -301,7 +301,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Hardlink target "/tmp/target.txt" points outside the extraction directory.',
+					'Hardlink "/tmp/target.txt" points outside the extraction directory.',
 				);
 			});
 
@@ -340,7 +340,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Symlink target "../../etc/passwd" points outside the extraction directory.',
+					'Symlink "../../etc/passwd" points outside the extraction directory.',
 				);
 			},
 		);
@@ -355,7 +355,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Symlink target "/etc/passwd" points outside the extraction directory.',
+					'Symlink "/etc/passwd" points outside the extraction directory.',
 				);
 			},
 		);
@@ -545,7 +545,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Symlink target "../../etc/passwd" points outside the extraction directory.',
+					'Symlink "../../etc/passwd" points outside the extraction directory.',
 				);
 			},
 		);
@@ -563,7 +563,7 @@ describe("security", () => {
 
 				// This fixture contains a symlink 'foo' -> '../' which is a traversal attempt.
 				await expect(pipeline(readStream, unpackStream)).rejects.toThrow(
-					'Symlink target "../" points outside the extraction directory.',
+					'Symlink "../" points outside the extraction directory.',
 				);
 			},
 		);
@@ -617,7 +617,7 @@ describe("security", () => {
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				"Path traversal attempt detected",
+				'Entry "../../malicious-file.txt" points outside the extraction directory.',
 			);
 		});
 
@@ -680,7 +680,7 @@ describe("security", () => {
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				"Path traversal attempt detected",
+				'Entry "../../../malicious.txt" points outside the extraction directory.',
 			);
 
 			// Verify that safe files were created before the error
@@ -787,7 +787,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Symlink target "../extract-evil/malicious-file.txt" points outside the extraction directory.',
+					'Symlink "../extract-evil/malicious-file.txt" points outside the extraction directory.',
 				);
 
 				// Verify that the malicious file was NOT created
@@ -1131,7 +1131,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir, { validateSymlinks: false });
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					/Path traversal attempt detected/,
+					/Symlink .* points outside the extraction directory./,
 				);
 
 				// Verify that the malicious file was NOT created outside
@@ -1193,7 +1193,7 @@ describe("security", () => {
 
 				// Should be blocked by path validation
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					/Path traversal attempt detected/,
+					/Symlink .* points outside the extraction directory./,
 				);
 
 				// Verify no file created in target directory
@@ -1375,9 +1375,7 @@ describe("security", () => {
 
 		// Should be blocked due to excessive path depth
 		await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-			new RegExp(
-				`Path depth of entry .* \\(${expectedDepth}\\) exceeds the maximum allowed depth of 30`,
-			),
+			"Tar exceeds max specified depth.",
 		);
 
 		// Verify that no deeply nested directories were created
@@ -1441,7 +1439,7 @@ describe("security", () => {
 
 		// Should be blocked due to custom maxDepth of 4
 		await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-			/Path depth of entry .* \(6\) exceeds the maximum allowed depth of 4/,
+			"Tar exceeds max specified depth.",
 		);
 
 		// Verify that no directories were created
@@ -1502,9 +1500,9 @@ describe("security", () => {
 		const maliciousTar = Readable.from([tarBuffer]);
 		const unpackStream = unpackTar(extractDir, { maxDepth: 15 }); // Limit to 15 levels
 
-		// Should be blocked due to excessive path depth
+		// Should be blocked due to exceeding maxDepth
 		await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-			/Path depth of entry .* \(21\) exceeds the maximum allowed depth of 15/,
+			"Tar exceeds max specified depth.",
 		);
 
 		// Verify that no deeply nested directories were created

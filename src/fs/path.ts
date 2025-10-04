@@ -93,16 +93,14 @@ export async function validatePath(
 			validateBounds(
 				realPath,
 				root,
-				`Path traversal attempt detected: symlink "${current}" points outside the extraction directory.`,
+				`Symlink "${current}" points outside the extraction directory.`,
 			);
 
 			cache.add(current);
 			continue;
 		}
 
-		throw new Error(
-			`Path traversal attempt detected: "${current}" is not a valid directory component.`,
-		);
+		throw new Error(`"${current}" is not a valid directory component.`);
 	}
 }
 
