@@ -514,29 +514,7 @@ describe("security", () => {
 		);
 
 		it.skipIf(process.platform === "win32")(
-			"allows bypassing symlink validation when disabled",
-			async () => {
-				const extractDir = path.join(tmpDir, "extract");
-				await fs.mkdir(extractDir, { recursive: true });
-
-				const maliciousTar = await createTarWithSymlink("../outside-file.txt");
-				const unpackStream = unpackTar(extractDir, { validateSymlinks: false });
-
-				await expect(
-					pipeline(maliciousTar, unpackStream),
-				).resolves.toBeUndefined();
-
-				const symlinkPath = path.join(extractDir, "malicious-symlink");
-				const linkStat = await fs.lstat(symlinkPath);
-				expect(linkStat.isSymbolicLink()).toBe(true);
-
-				const linkTarget = await fs.readlink(symlinkPath);
-				expect(linkTarget).toBe("../outside-file.txt");
-			},
-		);
-
-		it.skipIf(process.platform === "win32")(
-			"validates symlinks by default (validateSymlinks: true is the default)",
+			"validates symlinks and prevents traversal attacks",
 			async () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1128,7 +1106,7 @@ describe("security", () => {
 
 				const tarBuffer = await packTar(entries);
 				const maliciousTar = Readable.from([tarBuffer]);
-				const unpackStream = unpackTar(extractDir, { validateSymlinks: false });
+				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
 					/Symlink .* points outside the extraction directory./,
@@ -1189,7 +1167,7 @@ describe("security", () => {
 
 				const tarBuffer = await packTar(entries);
 				const maliciousTar = Readable.from([tarBuffer]);
-				const unpackStream = unpackTar(extractDir, { validateSymlinks: false });
+				const unpackStream = unpackTar(extractDir);
 
 				// Should be blocked by path validation
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -1254,7 +1232,7 @@ describe("security", () => {
 
 				const tarBuffer = await packTar(entries);
 				const maliciousTar = Readable.from([tarBuffer]);
-				const unpackStream = unpackTar(extractDir, { validateSymlinks: false });
+				const unpackStream = unpackTar(extractDir);
 
 				// The fixed code should properly normalize paths and prevent cache poisoning
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow();

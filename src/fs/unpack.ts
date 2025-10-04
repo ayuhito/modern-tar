@@ -138,15 +138,13 @@ export function unpackTar(
 					case "symlink": {
 						if (!header.linkname) break;
 
-						if (options.validateSymlinks ?? true) {
-							const symlinkDir = path.dirname(outPath);
-							const resolvedTarget = path.resolve(symlinkDir, header.linkname);
-							validateBounds(
-								resolvedTarget,
-								resolvedDestDir,
-								`Symlink "${header.linkname}" points outside the extraction directory.`,
-							);
-						}
+						const symlinkDir = path.dirname(outPath);
+						const resolvedTarget = path.resolve(symlinkDir, header.linkname);
+						validateBounds(
+							resolvedTarget,
+							resolvedDestDir,
+							`Symlink "${header.linkname}" points outside the extraction directory.`,
+						);
 						await fs.symlink(header.linkname, outPath);
 
 						// This prevents cache poisoning attacks where a directory is replaced by a symlink.
