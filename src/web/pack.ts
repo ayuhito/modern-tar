@@ -37,6 +37,9 @@ import { findUstarSplit, generatePax } from "./pack-pax";
 import type { TarHeader } from "./types";
 import { writeOctal, writeString } from "./utils";
 
+const ZERO_BUFFER = new Uint8Array(BLOCK_SIZE);
+const EOF_BUFFER = new Uint8Array(BLOCK_SIZE * 2);
+
 /**
  * Controls a streaming tar packing process.
  *
@@ -173,7 +176,7 @@ export function createTarPacker(): {
 				const paxPadding = -paxData.paxBody.length & BLOCK_SIZE_MASK;
 
 				if (paxPadding > 0) {
-					streamController.enqueue(new Uint8Array(paxPadding));
+					streamController.enqueue(ZERO_BUFFER.subarray(0, paxPadding));
 				}
 			}
 
@@ -207,7 +210,7 @@ export function createTarPacker(): {
 					// Pad the entry data to fill a complete 512-byte block.
 					const paddingSize = -size & BLOCK_SIZE_MASK;
 					if (paddingSize > 0)
-						streamController.enqueue(new Uint8Array(paddingSize));
+						streamController.enqueue(ZERO_BUFFER.subarray(0, paddingSize));
 				},
 				abort(reason) {
 					streamController.error(reason);
@@ -217,7 +220,7 @@ export function createTarPacker(): {
 
 		finalize() {
 			// A valid tar archive ends with two 512-byte empty blocks.
-			streamController.enqueue(new Uint8Array(BLOCK_SIZE * 2));
+			streamController.enqueue(EOF_BUFFER);
 			streamController.close();
 		},
 

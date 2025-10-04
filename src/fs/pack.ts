@@ -1,12 +1,15 @@
 import { createReadStream } from "node:fs";
-import { lstat, readdir, readlink, stat } from "node:fs/promises";
-import { join } from "node:path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { Readable } from "node:stream";
 import { BLOCK_SIZE, BLOCK_SIZE_MASK } from "../web/constants";
 import { createTarHeader } from "../web/pack";
 import { generatePax } from "../web/pack-pax";
 import type { TarHeader } from "../web/types";
 import type { PackOptionsFS } from "./types";
+
+const ZERO_BUFFER = Buffer.alloc(BLOCK_SIZE);
+const EOF_BUFFER = Buffer.alloc(BLOCK_SIZE * 2);
 
 /**
  * Pack a directory into a Node.js [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable) stream containing tar archive bytes.
@@ -42,12 +45,12 @@ export function packTar(
 ): Readable {
 	const { dereference, filter, map } = options;
 	const seenInodes = new Map<number, string>();
-	const getStat = dereference ? stat : lstat;
+	const getStat = dereference ? fs.stat : fs.lstat;
 
 	async function* walk(
 		currentPath: string, // The relative path inside the tar archive
 	): AsyncGenerator<Uint8Array | Buffer> {
-		const fullPath = join(directoryPath, currentPath);
+		const fullPath = path.join(directoryPath, currentPath);
 		const stat = await getStat(fullPath);
 
 		if (filter?.(fullPath, stat) === false) return;
@@ -81,7 +84,7 @@ export function packTar(
 			if (!header.name.endsWith("/")) header.name += "/";
 		} else if (stat.isSymbolicLink()) {
 			header.type = "symlink";
-			header.linkname = await readlink(fullPath);
+			header.linkname = await fs.readlink(fullPath);
 		}
 
 		header = map?.(header) ?? header;
@@ -92,7 +95,7 @@ export function packTar(
 			yield pax.paxHeader;
 			yield pax.paxBody;
 			const padding = -pax.paxBody.length & BLOCK_SIZE_MASK;
-			if (padding > 0) yield Buffer.alloc(padding);
+			if (padding > 0) yield ZERO_BUFFER.subarray(0, padding);
 		}
 
 		yield createTarHeader(header);
@@ -101,26 +104,26 @@ export function packTar(
 		if (header.type === "file" && header.size > 0) {
 			yield* createReadStream(fullPath);
 			const padding = -header.size & BLOCK_SIZE_MASK;
-			if (padding > 0) yield Buffer.alloc(padding);
+			if (padding > 0) yield ZERO_BUFFER.subarray(0, padding);
 		}
 
 		if (stat.isDirectory()) {
-			const dirents = await readdir(fullPath, { withFileTypes: true });
+			const dirents = await fs.readdir(fullPath, { withFileTypes: true });
 			for (const dirent of dirents) {
-				yield* walk(join(currentPath, dirent.name));
+				yield* walk(path.join(currentPath, dirent.name));
 			}
 		}
 	}
 
 	return Readable.from(
 		(async function* () {
-			const topLevelDirents = await readdir(directoryPath);
+			const topLevelDirents = await fs.readdir(directoryPath);
 			for (const dirent of topLevelDirents) {
 				yield* walk(dirent);
 			}
 
 			// End with two zero-filled blocks
-			yield Buffer.alloc(BLOCK_SIZE * 2);
+			yield EOF_BUFFER;
 		})(),
 	);
 }
