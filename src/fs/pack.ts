@@ -53,7 +53,7 @@ export function packTar(
 		if (filter?.(fullPath, stat) === false) return;
 
 		let header: TarHeader = {
-			name: currentPath.replace(/\\/g, "/"),
+			name: currentPath.replaceAll("\\", "/"),
 			mode: stat.mode,
 			mtime: stat.mtime,
 			uid: stat.uid,

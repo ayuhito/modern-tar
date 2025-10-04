@@ -455,9 +455,7 @@ describe("extract", () => {
 		controller!.close();
 
 		// The flush method should detect non-zero buffer and error in strict mode
-		await expect(readPromise).rejects.toThrow(
-			"Unexpected data at end of archive",
-		);
+		await expect(readPromise).rejects.toThrow("Invalid EOF.");
 	});
 
 	it("handles unexpected data at end of archive gracefully in non-strict mode", async () => {

@@ -72,7 +72,7 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
 					chunk = encoder.encode(body);
 				} else {
 					throw new TypeError(
-						`Unsupported content type for entry "${entry.header.name}". Expected string, Uint8Array, ArrayBuffer, Blob, ReadableStream, or undefined.`,
+						`Unsupported content type for entry "${entry.header.name}".`,
 					);
 				}
 

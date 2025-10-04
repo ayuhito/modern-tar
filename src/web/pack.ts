@@ -188,7 +188,7 @@ export function createTarPacker(): {
 					totalWritten += chunk.length;
 					if (totalWritten > size) {
 						const err = new Error(
-							`Entry '${header.name}' is larger than its specified size of ${size} bytes.`,
+							`"${header.name}" exceeds given size of ${size} bytes.`,
 						);
 						streamController.error(err);
 						throw err; // Abort the write.
@@ -199,18 +199,15 @@ export function createTarPacker(): {
 
 				close() {
 					if (totalWritten !== size) {
-						const err = new Error(
-							`Size mismatch for entry '${header.name}': expected ${size} bytes but received ${totalWritten}.`,
-						);
+						const err = new Error(`Size mismatch for "${header.name}".`);
 						streamController.error(err);
 						throw err;
 					}
 
 					// Pad the entry data to fill a complete 512-byte block.
 					const paddingSize = -size & BLOCK_SIZE_MASK;
-					if (paddingSize > 0) {
+					if (paddingSize > 0)
 						streamController.enqueue(new Uint8Array(paddingSize));
-					}
 				},
 				abort(reason) {
 					streamController.error(reason);
