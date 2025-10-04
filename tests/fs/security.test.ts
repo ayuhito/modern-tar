@@ -1486,4 +1486,180 @@ describe("security", () => {
 		const firstEntry = path.join(extractDir, "dir0");
 		await expect(fs.access(firstEntry)).rejects.toThrow();
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"prevents symlink to parent followed by file creation attack",
+		async () => {
+			const extractDir = path.join(tmpDir, "extract");
+			const parentDir = path.dirname(extractDir);
+			await fs.mkdir(extractDir, { recursive: true });
+
+			// This test replicates a common attack pattern:
+			// 1. Create a symlink 'escape-dir' pointing to '../'
+			// 2. Create a file 'escape-dir/malicious-file.txt' which escapes to parent
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: "escape-dir",
+						size: 0,
+						type: "symlink",
+						mode: 0o777,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+						linkname: "../",
+					},
+				},
+				{
+					header: {
+						name: "escape-dir/malicious-file.txt",
+						size: 15,
+						type: "file",
+						mode: 0o644,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+					},
+					body: "escaped content",
+				},
+			];
+
+			const tarBuffer = await packTar(entries);
+			const maliciousTar = Readable.from([tarBuffer]);
+			const unpackStream = unpackTar(extractDir);
+
+			// Should fail due to symlink pointing outside extraction directory
+			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+				/points outside the extraction directory/,
+			);
+
+			// Verify that malicious-file.txt was NOT created in parent directory
+			const maliciousPath = path.join(parentDir, "malicious-file.txt");
+			await expect(fs.access(maliciousPath)).rejects.toThrow();
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"prevents nested symlink chain traversal attack",
+		async () => {
+			const extractDir = path.join(tmpDir, "extract");
+			const parentDir = path.dirname(extractDir);
+			await fs.mkdir(extractDir, { recursive: true });
+
+			// This test creates a chain of symlinks to bypass naive validation:
+			// level1 -> level2 -> level3 -> ../../
+			// Then tries to write level1/malicious.txt
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: "level1",
+						size: 0,
+						type: "symlink",
+						mode: 0o777,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+						linkname: "level2",
+					},
+				},
+				{
+					header: {
+						name: "level2",
+						size: 0,
+						type: "symlink",
+						mode: 0o777,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+						linkname: "level3",
+					},
+				},
+				{
+					header: {
+						name: "level3",
+						size: 0,
+						type: "symlink",
+						mode: 0o777,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+						linkname: "../../",
+					},
+				},
+				{
+					header: {
+						name: "level1/malicious.txt",
+						size: 18,
+						type: "file",
+						mode: 0o644,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+					},
+					body: "chained traversal!",
+				},
+			];
+
+			const tarBuffer = await packTar(entries);
+			const maliciousTar = Readable.from([tarBuffer]);
+			const unpackStream = unpackTar(extractDir);
+
+			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+				/points outside the extraction directory/,
+			);
+
+			const maliciousPath = path.join(parentDir, "malicious.txt");
+			await expect(fs.access(maliciousPath)).rejects.toThrow();
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"prevents type confusion attack (directory vs file)",
+		async () => {
+			const extractDir = path.join(tmpDir, "extract");
+			await fs.mkdir(extractDir, { recursive: true });
+
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: "my-config/",
+						size: 0,
+						type: "directory",
+						mode: 0o755,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+					},
+				},
+				{
+					header: {
+						name: "my-config", // Same name but without trailing slash (file)
+						size: 12,
+						type: "file",
+						mode: 0o644,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+					},
+					body: "config data!",
+				},
+			];
+
+			const tarBuffer = await packTar(entries);
+			const maliciousTar = Readable.from([tarBuffer]);
+			const unpackStream = unpackTar(extractDir);
+
+			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow();
+
+			// Verify the directory still exists and wasn't corrupted
+			const configDirPath = path.join(extractDir, "my-config");
+			const stats = await fs.stat(configDirPath);
+			expect(stats.isDirectory()).toBe(true);
+
+			// Verify no file was created with the same name
+			const configFilePath = path.join(extractDir, "my-config");
+			const configStats = await fs.stat(configFilePath);
+			expect(configStats.isFile()).toBe(false);
+		},
+	);
 });

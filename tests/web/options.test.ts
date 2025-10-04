@@ -938,4 +938,116 @@ describe("unpack options", () => {
 			expect(entries[0].header.name).toBe("README");
 		});
 	});
+
+	describe("transform stream edge cases", () => {
+		it("handles filter functions that return false for all entries", async () => {
+			const archive = await createTestArchive();
+
+			// Filter that rejects everything
+			const entries = await unpackTar(archive, {
+				filter: () => false,
+			});
+
+			expect(entries).toHaveLength(0);
+		});
+
+		it("handles map functions that modify headers", async () => {
+			const archive = await createTestArchive();
+
+			// Map function that modifies headers
+			const entries = await unpackTar(archive, {
+				map: (header) => {
+					if (header.name.includes("file1")) {
+						return {
+							...header,
+							name: header.name.replace("file1", "renamed1"),
+						};
+					}
+					return header;
+				},
+			});
+
+			// Should include renamed file1.txt
+			expect(entries.some((e) => e.header.name.includes("renamed1"))).toBe(
+				true,
+			);
+			expect(entries.some((e) => e.header.name.includes("file2"))).toBe(true);
+		});
+
+		it("handles map functions that throw errors", async () => {
+			const archive = await createTestArchive();
+
+			await expect(
+				unpackTar(archive, {
+					map: (header) => {
+						if (header.name.includes("file1")) {
+							throw new Error("Map function error");
+						}
+						return header;
+					},
+				}),
+			).rejects.toThrow("Map function error");
+		});
+
+		it("handles filter functions that throw errors", async () => {
+			const archive = await createTestArchive();
+
+			await expect(
+				unpackTar(archive, {
+					filter: (header) => {
+						if (header.name.includes("file1")) {
+							throw new Error("Filter function error");
+						}
+						return true;
+					},
+				}),
+			).rejects.toThrow("Filter function error");
+		});
+
+		it("handles boundary conditions with empty archives", async () => {
+			// Create an empty tar archive (just EOF blocks)
+			const eofBlock1 = new Uint8Array(512);
+			const eofBlock2 = new Uint8Array(512);
+			const emptyArchive = new Uint8Array(1024);
+			emptyArchive.set(eofBlock1, 0);
+			emptyArchive.set(eofBlock2, 512);
+
+			const entries = await unpackTar(emptyArchive, {
+				filter: () => true,
+				map: (header) => header,
+			});
+
+			expect(entries).toHaveLength(0);
+		});
+
+		it("handles complex chained transformations", async () => {
+			const archive = await createTestArchive();
+
+			const entries = await unpackTar(archive, {
+				filter: (header) => {
+					// Only .txt and .js files
+					return header.name.endsWith(".txt") || header.name.endsWith(".js");
+				},
+				map: (header) => {
+					// Rename all files to add a prefix
+					return {
+						...header,
+						name: `processed-${header.name}`,
+					};
+				},
+			});
+
+			// Should have 2 files (file1.txt and file2.js)
+			expect(entries).toHaveLength(2);
+			expect(entries.every((e) => e.header.name.startsWith("processed-"))).toBe(
+				true,
+			);
+			expect(entries.some((e) => e.header.name.includes("file1.txt"))).toBe(
+				true,
+			);
+			expect(entries.some((e) => e.header.name.includes("file2.js"))).toBe(
+				true,
+			);
+		});
+	});
 });

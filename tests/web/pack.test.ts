@@ -336,4 +336,163 @@ describe("pack", () => {
 		expect(extracted[3].header.type).toBe("fifo");
 		expect(extracted[3].header.size).toBe(0);
 	});
+
+	describe("body type handling and stream errors", () => {
+		it("handles null and undefined body values", async () => {
+			const entries: TarEntry[] = [
+				{
+					header: { name: "null-body.txt", size: 0, type: "file" },
+					body: null,
+				},
+				{
+					header: { name: "undefined-body.txt", size: 0, type: "file" },
+					body: undefined,
+				},
+			];
+
+			const packedBuffer = await packTar(entries);
+			const extracted = await unpackTar(packedBuffer);
+
+			expect(extracted).toHaveLength(2);
+			expect(extracted[0].header.name).toBe("null-body.txt");
+			expect(extracted[0].data).toEqual(new Uint8Array(0));
+			expect(extracted[1].header.name).toBe("undefined-body.txt");
+			expect(extracted[1].data).toEqual(new Uint8Array(0));
+		});
+
+		it("handles Blob body type", async () => {
+			const blobContent = "blob content";
+			const blob = new Blob([blobContent], { type: "text/plain" });
+
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: "blob-file.txt",
+						size: blobContent.length,
+						type: "file",
+					},
+					body: blob,
+				},
+			];
+
+			const packedBuffer = await packTar(entries);
+			const extracted = await unpackTar(packedBuffer);
+
+			expect(extracted).toHaveLength(1);
+			expect(extracted[0].header.name).toBe("blob-file.txt");
+			expect(decoder.decode(extracted[0].data)).toBe(blobContent);
+		});
+
+		it("handles ArrayBuffer body type", async () => {
+			const content = "arraybuffer content";
+			const arrayBuffer = new TextEncoder().encode(content).buffer;
+
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: "arraybuffer-file.txt",
+						size: arrayBuffer.byteLength,
+						type: "file",
+					},
+					body: arrayBuffer,
+				},
+			];
+
+			const packedBuffer = await packTar(entries);
+			const extracted = await unpackTar(packedBuffer);
+
+			expect(extracted).toHaveLength(1);
+			expect(extracted[0].header.name).toBe("arraybuffer-file.txt");
+			expect(decoder.decode(extracted[0].data)).toBe(content);
+		});
+
+		it("handles ReadableStream body type", async () => {
+			const content = "stream content";
+			const stream = new ReadableStream({
+				start(controller) {
+					controller.enqueue(new TextEncoder().encode(content));
+					controller.close();
+				},
+			});
+
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: "stream-file.txt",
+						size: content.length,
+						type: "file",
+					},
+					body: stream,
+				},
+			];
+
+			const packedBuffer = await packTar(entries);
+			const extracted = await unpackTar(packedBuffer);
+
+			expect(extracted).toHaveLength(1);
+			expect(extracted[0].header.name).toBe("stream-file.txt");
+			expect(decoder.decode(extracted[0].data)).toBe(content);
+		});
+
+		it("handles stream errors during packing", async () => {
+			const errorStream = new ReadableStream({
+				start(controller) {
+					controller.error(new Error("Stream processing failed"));
+				},
+			});
+
+			const entries: TarEntry[] = [
+				{
+					header: { name: "error-stream.txt", size: 10, type: "file" },
+					body: errorStream,
+				},
+			];
+
+			await expect(packTar(entries)).rejects.toThrow(
+				"Stream processing failed",
+			);
+		});
+
+		it("errors for symbol body type", async () => {
+			const entries: TarEntry[] = [
+				{
+					header: { name: "symbol.txt", size: 0, type: "file" },
+					// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+					body: Symbol("test") as any,
+				},
+			];
+
+			await expect(packTar(entries)).rejects.toThrow(
+				/Unsupported content type/,
+			);
+		});
+
+		it("errors for function body type", async () => {
+			const entries: TarEntry[] = [
+				{
+					header: { name: "function.txt", size: 0, type: "file" },
+					// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+					body: (() => {}) as any,
+				},
+			];
+
+			await expect(packTar(entries)).rejects.toThrow(
+				/Unsupported content type/,
+			);
+		});
+
+		it("errors for Date body type", async () => {
+			const entries: TarEntry[] = [
+				{
+					header: { name: "date.txt", size: 0, type: "file" },
+					// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+					body: new Date() as any,
+				},
+			];
+
+			await expect(packTar(entries)).rejects.toThrow(
+				/Unsupported content type/,
+			);
+		});
+	});
 });
