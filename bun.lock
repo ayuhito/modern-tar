@@ -4,12 +4,12 @@
     "": {
       "name": "modern-tar",
       "devDependencies": {
-        "@biomejs/biome": "latest",
-        "@types/node": "latest",
-        "@vitest/coverage-v8": "latest",
-        "tsdown": "latest",
-        "typescript": "latest",
-        "vitest": "latest",
+        "@biomejs/biome": "2.2.5",
+        "@types/node": "^24.6.2",
+        "@vitest/coverage-v8": "^3.2.4",
+        "tsdown": "^0.15.6",
+        "typescript": "^5.9.3",
+        "vitest": "^3.2.4",
       },
     },
   },
