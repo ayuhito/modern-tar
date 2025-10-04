@@ -1356,7 +1356,6 @@ describe("security", () => {
 			dirs.push(alphabet[i % 26]);
 		}
 		const deepPath = `${dirs.join("/")}/file.txt`;
-		const expectedDepth = dirs.length + 1; // +1 for file.txt
 
 		const entries: TarEntry[] = [
 			{
