@@ -138,8 +138,10 @@ export function unpackTar(
 					case "symlink": {
 						if (!header.linkname) break;
 
-						const symlinkDir = path.dirname(outPath);
-						const resolvedTarget = path.resolve(symlinkDir, header.linkname);
+						const resolvedTarget = path.resolve(
+							path.dirname(outPath),
+							header.linkname,
+						);
 						validateBounds(
 							resolvedTarget,
 							resolvedDestDir,
