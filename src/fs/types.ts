@@ -29,11 +29,6 @@ export interface UnpackOptionsFS extends UnpackOptions {
 	/** Default mode for created files (e.g., 0o644). If not specified, uses mode from tar header or system default */
 	fmode?: number;
 	/**
-	 * Prevent symlinks from pointing outside the extraction directory.
-	 * @default true
-	 */
-	validateSymlinks?: boolean;
-	/**
 	 * The maximum depth of paths to extract. Prevents Denial of Service (DoS) attacks
 	 * from malicious archives with deeply nested directories.
 	 *

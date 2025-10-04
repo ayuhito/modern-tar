@@ -243,33 +243,6 @@ describe("extract", () => {
 		).rejects.toThrow('Absolute path found in "/absolute/path.txt".');
 	});
 
-	it("handles symlink validation disabled", async () => {
-		const destDir = path.join(tmpDir, "extracted");
-
-		const entries = [
-			{
-				header: {
-					name: "safe-link",
-					size: 0,
-					type: "symlink" as const,
-					linkname: "../outside",
-				},
-			},
-		];
-
-		const tarBuffer = await packTarWeb(entries);
-		const unpackStream = unpackTar(destDir, { validateSymlinks: false });
-
-		// Should not throw when validation is disabled
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
-
-		const linkPath = path.join(destDir, "safe-link");
-		const linkTarget = await fs.readlink(linkPath);
-		// On Windows, symlinks may use backslashes instead of forward slashes
-		const normalizedTarget = linkTarget.replaceAll("\\", "/");
-		expect(normalizedTarget).toBe("../outside");
-	});
-
 	it("handles hardlink with absolute target", async () => {
 		const destDir = path.join(tmpDir, "extracted");
 
