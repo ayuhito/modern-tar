@@ -1,10 +1,10 @@
+import type { TarEntryData } from "./types";
+
 export const encoder = new TextEncoder();
 export const decoder = new TextDecoder();
 
-/**
- * Writes a string to the view, truncating if necessary.
- * Assumes the view is zero-filled, so any remaining space is null-padded.
- */
+// Writes a string to the view, truncating if necessary.
+// Assumes the view is zero-filled, so any remaining space is null-padded.
 export function writeString(
 	view: Uint8Array,
 	offset: number,
@@ -16,9 +16,7 @@ export function writeString(
 	}
 }
 
-/**
- * Writes a number as a zero-padded octal string.
- */
+// Writes a number as a zero-padded octal string.
 export function writeOctal(
 	view: Uint8Array,
 	offset: number,
@@ -33,9 +31,7 @@ export function writeOctal(
 	encoder.encodeInto(octalString, view.subarray(offset, offset + size - 1));
 }
 
-/**
- * Reads a NUL-terminated string from the view.
- */
+// Reads a NUL-terminated string from the view.
 export function readString(
 	view: Uint8Array,
 	offset: number,
@@ -49,9 +45,7 @@ export function readString(
 	return decoder.decode(view.subarray(offset, sliceEnd));
 }
 
-/**
- * Reads an octal number from the view.
- */
+// Reads an octal number from the view.
 export function readOctal(
 	view: Uint8Array,
 	offset: number,
@@ -70,10 +64,8 @@ export function readOctal(
 	return value;
 }
 
-/**
- * Reads a numeric field that can be octal or POSIX base-256.
- * This implementation handles positive integers, such as uid, gid, and size.
- */
+// Reads a numeric field that can be octal or POSIX base-256.
+// This implementation handles positive integers, such as uid, gid, and size.
 export function readNumeric(
 	view: Uint8Array,
 	offset: number,
@@ -108,12 +100,6 @@ export function readNumeric(
 	return readOctal(view, offset, size);
 }
 
-/**
- * Reads an entire ReadableStream of Uint8Arrays into a single, combined Uint8Array.
- *
- * The easy way to do this is `new Response(stream).arrayBuffer()`, but we can be more
- * performant by buffering the chunks directly.
- */
 export async function streamToBuffer(
 	stream: ReadableStream<Uint8Array>,
 ): Promise<Uint8Array> {
@@ -143,4 +129,15 @@ export async function streamToBuffer(
 	} finally {
 		reader.releaseLock();
 	}
+}
+
+export async function normalizeBody(body: TarEntryData): Promise<Uint8Array> {
+	if (body === null || body === undefined) return new Uint8Array(0);
+	if (body instanceof Uint8Array) return body;
+	if (typeof body === "string") return encoder.encode(body);
+	if (body instanceof ArrayBuffer) return new Uint8Array(body);
+	if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
+	if (body instanceof ReadableStream) return streamToBuffer(body);
+
+	throw new TypeError("Unsupported content type for entry body.");
 }

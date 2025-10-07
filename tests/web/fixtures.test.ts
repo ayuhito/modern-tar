@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { decoder } from "../../src/tar/utils";
 import { createGzipDecoder, unpackTar } from "../../src/web";
-import { decoder } from "../../src/web/utils";
 import {
 	BASE_256_SIZE,
 	BASE_256_UID_GID,
@@ -155,8 +155,43 @@ describe("tar format fixtures", () => {
 	});
 
 	describe("error handling", () => {
-		it("handles invalid compressed archives gracefully", async () => {
-			// Test with actual invalid tgz file
+		it("handles invalid gzip data gracefully", async () => {
+			// Create truly invalid gzip data (not just a misnamed valid archive)
+			const invalidGzipData = new Uint8Array([
+				0x1f,
+				0x8b, // Valid gzip magic
+				0x08,
+				0x00, // Valid compression method and flags
+				0x00,
+				0x00,
+				0x00,
+				0x00, // mtime
+				0x00,
+				0x03, // extra flags and OS
+				// Then some corrupted/truncated data
+				0xff,
+				0xff,
+				0xff,
+				0xff,
+				0x42,
+				0x43,
+				0x44,
+				0x45,
+			]);
+
+			const decompressedStream = new ReadableStream({
+				start(controller) {
+					controller.enqueue(invalidGzipData);
+					controller.close();
+				},
+			}).pipeThrough(createGzipDecoder());
+
+			// Should reject when trying to decompress invalid gzip data
+			await expect(unpackTar(decompressedStream)).rejects.toThrow();
+		});
+
+		it("handles complex valid compressed archives efficiently", async () => {
+			// Test that the previously problematic "invalid.tgz" now works correctly
 			const buffer = await fs.readFile(INVALID_TGZ);
 
 			const decompressedStream = new ReadableStream({
@@ -166,15 +201,49 @@ describe("tar format fixtures", () => {
 				},
 			}).pipeThrough(createGzipDecoder());
 
-			// May or may not throw depending on the specific corruption
-			try {
-				const entries = await unpackTar(decompressedStream);
-				// If it doesn't throw, just verify we get some result
-				expect(Array.isArray(entries)).toBe(true);
-			} catch (error) {
-				// If it throws, that's also acceptable for invalid data
-				expect(error).toBeInstanceOf(Error);
-			}
+			// This should now work efficiently (was previously causing hangs)
+			const entries = await unpackTar(decompressedStream);
+
+			expect(entries.length).toBeGreaterThan(0);
+			// Verify some expected entries from the bl package
+			const dirEntry = entries.find((e) => e.header.name === "bl/");
+			expect(dirEntry).toBeDefined();
+			expect(dirEntry?.header.type).toBe("directory");
+		});
+
+		it("processes the original problematic invalid.tgz fixture without regression", async () => {
+			// This specific fixture was causing performance issues in previous implementations
+			// Ensure it processes correctly and doesn't hang or timeout
+			const buffer = await fs.readFile(INVALID_TGZ);
+
+			const decompressedStream = new ReadableStream({
+				start(controller) {
+					controller.enqueue(buffer);
+					controller.close();
+				},
+			}).pipeThrough(createGzipDecoder());
+
+			// Should complete in reasonable time and extract all entries
+			const startTime = Date.now();
+			const entries = await unpackTar(decompressedStream);
+			const processingTime = Date.now() - startTime;
+
+			// Verify the archive processes completely
+			expect(entries.length).toBe(54);
+			expect(processingTime).toBeLessThan(5000); // Should complete within 5 seconds
+
+			// Verify specific entries that should be present
+			const blDir = entries.find((e) => e.header.name === "bl/");
+			expect(blDir?.header.type).toBe("directory");
+
+			const jshintrc = entries.find((e) => e.header.name === "bl/.jshintrc");
+			expect(jshintrc?.header.type).toBe("file");
+			expect(jshintrc?.header.size).toBe(1147);
+
+			const packageJson = entries.find(
+				(e) => e.header.name === "bl/package.json",
+			);
+			expect(packageJson?.header.type).toBe("file");
 		});
 	});
 });

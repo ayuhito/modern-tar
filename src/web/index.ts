@@ -1,10 +1,3 @@
-export { createGzipDecoder, createGzipEncoder } from "./compression";
-export { packTar, unpackTar } from "./helpers";
-export { createTarOptionsTransformer } from "./options";
-export {
-	createTarPacker,
-	type TarPackController,
-} from "./pack";
 export type {
 	DecoderOptions,
 	ParsedTarEntry,
@@ -13,5 +6,11 @@ export type {
 	TarEntryData,
 	TarHeader,
 	UnpackOptions,
-} from "./types";
+} from "../tar/types";
+export { createGzipDecoder, createGzipEncoder } from "./compression";
+export { packTar, unpackTar } from "./helpers";
+export {
+	createTarPacker,
+	type TarPackController,
+} from "./pack";
 export { createTarDecoder } from "./unpack";

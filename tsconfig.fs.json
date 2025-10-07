@@ -19,6 +19,6 @@
 		"lib": ["ES2023"],
 		"types": ["node"]
 	},
-	"include": ["src/fs/**/*.ts", "tests/fs/**/*.ts"],
+	"include": ["src/fs/**/*.ts", "src/tar/**/*.ts", "tests/fs/**/*.ts"],
 	"references": [{ "path": "./tsconfig.web.json" }]
 }

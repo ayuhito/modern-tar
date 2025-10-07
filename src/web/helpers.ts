@@ -1,8 +1,13 @@
-import { createTarOptionsTransformer } from "./options";
+import { transformHeader } from "../tar/options";
+import type {
+	ParsedTarEntryWithData,
+	TarEntry,
+	TarHeader,
+	UnpackOptions,
+} from "../tar/types";
+import { normalizeBody, streamToBuffer } from "../tar/utils";
 import { createTarPacker } from "./pack";
-import type { ParsedTarEntryWithData, TarEntry, UnpackOptions } from "./types";
 import { createTarDecoder } from "./unpack";
-import { encoder, streamToBuffer } from "./utils";
 
 /**
  * Packs an array of tar entries into a single `Uint8Array` buffer.
@@ -60,25 +65,16 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
 				await body.stream().pipeTo(entryStream);
 			} else {
 				// For all other types, normalize to a Uint8Array first.
-				let chunk: Uint8Array;
-
-				if (body === null || body === undefined) {
-					chunk = new Uint8Array(0);
-				} else if (body instanceof Uint8Array) {
-					chunk = body;
-				} else if (body instanceof ArrayBuffer) {
-					chunk = new Uint8Array(body);
-				} else if (typeof body === "string") {
-					chunk = encoder.encode(body);
-				} else {
+				try {
+					const chunk = await normalizeBody(body);
+					const writer = entryStream.getWriter();
+					await writer.write(chunk);
+					await writer.close();
+				} catch {
 					throw new TypeError(
 						`Unsupported content type for entry "${entry.header.name}".`,
 					);
 				}
-
-				const writer = entryStream.getWriter();
-				await writer.write(chunk);
-				await writer.close();
 			}
 		}
 	})()
@@ -101,7 +97,7 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
  * @returns A `Promise` that resolves to an array of entries with buffered data
  * @example
  * ```typescript
- * import { unpackTar } from '@modern-tar';
+ * import { unpackTar } from 'modern-tar';
  *
  * // From a file upload or fetch
  * const response = await fetch('/api/archive.tar');
@@ -137,6 +133,8 @@ export async function unpackTar(
 	archive: ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>,
 	options: UnpackOptions = {},
 ): Promise<ParsedTarEntryWithData[]> {
+	const { streamTimeout = 5000, ...restOptions } = options;
+
 	const sourceStream: ReadableStream<Uint8Array> =
 		archive instanceof ReadableStream
 			? archive
@@ -151,24 +149,74 @@ export async function unpackTar(
 
 	const results: ParsedTarEntryWithData[] = [];
 
-	const entryStream = sourceStream
-		.pipeThrough(createTarDecoder(options))
-		.pipeThrough(createTarOptionsTransformer(options));
+	const processingPromise = (async () => {
+		const entryStream = sourceStream.pipeThrough(createTarDecoder(restOptions));
+		const reader = entryStream.getReader();
 
-	const reader = entryStream.getReader();
-	try {
-		while (true) {
-			const { done, value: entry } = await reader.read();
-			if (done) break;
+		// Keep track of the last entry body stream to handle pipeline errors.
+		let lastBodyStream: ReadableStream<Uint8Array> | null = null;
 
-			results.push({
-				header: entry.header,
-				data: await streamToBuffer(entry.body),
-			});
+		try {
+			while (true) {
+				const { done, value: entry } = await reader.read();
+				if (done) break;
+
+				lastBodyStream = entry.body;
+
+				// Apply unpack options directly in the read loop.
+				let processedHeader: TarHeader | null;
+				try {
+					processedHeader = transformHeader(entry.header, restOptions);
+				} catch (error) {
+					// If filter/map functions throw, cancel the body stream.
+					await entry.body.cancel();
+					throw error;
+				}
+
+				// Entry is filtered out or stripped.
+				if (processedHeader === null) {
+					await entry.body.cancel();
+					continue;
+				}
+
+				// Fully buffer the entry body since this is a non streaming unpack.
+				results.push({
+					header: processedHeader,
+					data: await streamToBuffer(entry.body),
+				});
+				lastBodyStream = null;
+			}
+		} catch (error) {
+			// If the pipeline errors (e.g., decompression failure), the tar decoder flush might
+			// not get called. Cancel the last known body stream to prevent hanging.
+			if (lastBodyStream) {
+				try {
+					await lastBodyStream.cancel();
+				} catch {
+					// Stream might already be dead.
+				}
+			}
+			throw error;
+		} finally {
+			try {
+				reader.releaseLock();
+			} catch {}
 		}
-	} finally {
-		reader.releaseLock();
+		return results;
+	})();
+
+	// Race against timeout if specified to prevent hanging.
+	if (streamTimeout !== Infinity) {
+		const timeoutPromise = new Promise<never>((_, reject) => {
+			setTimeout(() => {
+				reject(
+					new Error(`Stream timed out after ${streamTimeout}ms of inactivity.`),
+				);
+			}, streamTimeout);
+		});
+
+		return Promise.race([processingPromise, timeoutPromise]);
 	}
 
-	return results;
+	return processingPromise;
 }

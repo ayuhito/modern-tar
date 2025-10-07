@@ -400,5 +400,87 @@ describe("extract", () => {
 				pipeline(Readable.from([tarBuffer]), unpackStream),
 			).rejects.toThrow("is not a valid directory component");
 		});
+
+		it("handles streamTimeout for stalled streams", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+
+			// Create a readable stream that stalls after sending some data
+			let sentData = false;
+			const stallingStream = new Readable({
+				read() {
+					// Send a partial tar header then stall
+					if (!sentData) {
+						sentData = true;
+						// Send partial tar data that will cause the unpacker to wait for more
+						this.push(Buffer.alloc(256, 0)); // Partial header
+					}
+					// Don't push anything else - this will cause the stream to stall
+				},
+			});
+
+			const unpackStream = unpackTar(destDir, { streamTimeout: 100 }); // Very short timeout
+
+			await expect(pipeline(stallingStream, unpackStream)).rejects.toThrow(
+				"Stream timed out after 100ms of inactivity.",
+			);
+		});
+
+		it("allows disabling streamTimeout with Infinity", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+
+			// Create a simple valid tar entry
+			const entries = [
+				{
+					header: {
+						name: "test.txt",
+						size: 5,
+						type: "file" as const,
+					},
+					body: "hello",
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+
+			// Create a slow stream that sends data in small chunks with delays
+			let started = false;
+			let offset = 0;
+
+			const slowStream = new Readable({
+				objectMode: false,
+				read() {
+					if (!started) {
+						started = true;
+						offset = 0;
+						sendNext();
+					}
+				},
+			});
+
+			function sendNext() {
+				if (offset >= tarBuffer.length) {
+					slowStream.push(null);
+					return;
+				}
+
+				// Send 64 bytes at a time with a small delay
+				const chunkSize = Math.min(64, tarBuffer.length - offset);
+				const chunk = tarBuffer.slice(offset, offset + chunkSize);
+				slowStream.push(chunk);
+				offset += chunkSize;
+
+				// Add a small delay between chunks (longer than default timeout but not too long)
+				setTimeout(() => sendNext(), 10);
+			}
+
+			const unpackStream = unpackTar(destDir, { streamTimeout: Infinity });
+
+			// This should not timeout even though chunks arrive slowly
+			await pipeline(slowStream, unpackStream);
+
+			// Verify the file was extracted correctly
+			const content = await fs.readFile(path.join(destDir, "test.txt"), "utf8");
+			expect(content).toBe("hello");
+		}, 10000);
 	});
 });

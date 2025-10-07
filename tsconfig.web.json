@@ -19,5 +19,5 @@
 		"lib": ["ES2023", "DOM", "DOM.AsyncIterable"],
 		"types": []
 	},
-	"include": ["src/web/**/*.ts", "tests/web/**/*.ts"]
+	"include": ["src/web/**/*.ts", "src/tar/**/*.ts", "tests/web/**/*.ts"]
 }

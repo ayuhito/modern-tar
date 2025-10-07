@@ -1,6 +1,5 @@
 import type { Stats } from "node:fs";
-import type { UnpackOptions } from "../web/index";
-import type { TarEntryData, TarHeader } from "../web/types";
+import type { TarEntryData, TarHeader, UnpackOptions } from "../tar/types";
 
 /**
  * Filesystem-specific configuration options for packing directories into tar archives.
@@ -15,6 +14,8 @@ export interface PackOptionsFS {
 	filter?: (path: string, stat: Stats) => boolean;
 	/** Transform function to modify tar headers before packing */
 	map?: (header: TarHeader) => TarHeader;
+	/** Base directory for symlink security validation, when `dereference` is set to true. */
+	baseDir?: string;
 }
 
 /**
@@ -36,6 +37,11 @@ export interface UnpackOptionsFS extends UnpackOptions {
 	 * @default 1024
 	 */
 	maxDepth?: number;
+	/**
+	 * Maximum number of concurrent filesystem operations during extraction.
+	 * @default os.cpus().length || 8
+	 */
+	concurrency?: number;
 }
 
 /** Describes a file on the local filesystem to be added to the archive. */

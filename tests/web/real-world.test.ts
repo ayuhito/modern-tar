@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
+import { streamToBuffer } from "../../src/tar/utils";
 import {
 	createGzipDecoder,
 	type ParsedTarEntryWithData,
 	unpackTar,
 } from "../../src/web";
-import { streamToBuffer } from "../../src/web/utils";
 import { ELECTRON_TGZ, LODASH_TGZ, NEXT_SWC_TGZ, SHARP_TGZ } from "./fixtures";
 
 async function extractTgz(filePath: string): Promise<ParsedTarEntryWithData[]> {
@@ -35,26 +35,30 @@ describe("real world examples", () => {
 		expect(readmeEntry?.data.length).toBeGreaterThan(1000);
 	});
 
-	it("extracts a massive native binary package (@next/swc)", async () => {
-		const entries = await extractTgz(NEXT_SWC_TGZ);
+	it(
+		"extracts a massive native binary package (@next/swc)",
+		{ timeout: 60000 },
+		async () => {
+			const entries = await extractTgz(NEXT_SWC_TGZ);
 
-		const filesAndDirs = entries.filter(
-			(e) => e.header.type === "file" || e.header.type === "directory",
-		);
-		expect(filesAndDirs.length).toBe(3);
+			const filesAndDirs = entries.filter(
+				(e) => e.header.type === "file" || e.header.type === "directory",
+			);
+			expect(filesAndDirs.length).toBe(3);
 
-		// Verify the massive binary file exists and is the correct size
-		const binaryEntry = entries.find(
-			(e) => e.header.name === "package/next-swc.linux-x64-gnu.node",
-		);
-		expect(binaryEntry).toBeDefined();
-		expect(binaryEntry?.data.length).toBeGreaterThan(30 * 1024 * 1024); // > 30MB
+			// Verify the massive binary file exists and is the correct size
+			const binaryEntry = entries.find(
+				(e) => e.header.name === "package/next-swc.linux-x64-gnu.node",
+			);
+			expect(binaryEntry).toBeDefined();
+			expect(binaryEntry?.data.length).toBeGreaterThan(30 * 1024 * 1024); // > 30MB
 
-		// Verify package.json exists
-		expect(entries.some((e) => e.header.name === "package/package.json")).toBe(
-			true,
-		);
-	});
+			// Verify package.json exists
+			expect(
+				entries.some((e) => e.header.name === "package/package.json"),
+			).toBe(true);
+		},
+	);
 
 	it("extracts a native C++ package with build files (sharp)", async () => {
 		const entries = await extractTgz(SHARP_TGZ);

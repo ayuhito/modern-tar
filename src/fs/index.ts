@@ -1,5 +1,4 @@
-export { packTarSources } from "./archive";
-export { packTar } from "./pack";
+export { packTar, packTarSources } from "./pack";
 export type {
 	ContentSource,
 	DirectorySource,

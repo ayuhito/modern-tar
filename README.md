@@ -186,7 +186,9 @@ const extractStream = unpackTar('./output', {
 	// Filesystem-specific options
 	fmode: 0o644, // Override file permissions
 	dmode: 0o755, // Override directory permissions
-	maxDepth: 50  // Limit extraction depth for security (default: 1024)
+	maxDepth: 50,  // Limit extraction depth for security (default: 1024)
+	concurrency: 8, // Limit concurrent filesystem operations (default: CPU cores)
+	streamTimeout: 10000 // Timeout after 10 seconds of inactivity (default: 5000ms)
 });
 
 await pipeline(sourceStream, extractStream);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { generatePax } from "../../src/tar/pax";
+import { decoder } from "../../src/tar/utils";
 import { packTar, type TarEntry, unpackTar } from "../../src/web";
-import { generatePax } from "../../src/web/pack-pax";
-import { decoder } from "../../src/web/utils";
 
 describe("PAX format support", () => {
 	it("uses PAX for filename > 100 chars", async () => {

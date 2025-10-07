@@ -64,6 +64,7 @@ controller.finalize();
 
 Create a transform stream that parses tar bytes into entries.
 
+- **`options`**: Optional decoder configuration (see `DecoderOptions`).
 - **Returns**: `TransformStream` that converts tar archive bytes to `ParsedTarEntry` objects.
 
 **Example:**
@@ -78,25 +79,9 @@ for await (const entry of entriesStream) {
 }
 ```
 
-### `createTarOptionsTransformer(options?: UnpackOptions): TransformStream<ParsedTarEntry, ParsedTarEntry>`
 
-Create a transform stream that applies unpacking options (`strip`, `filter`, `map`) to tar entries.
 
-- **`options`**: Optional unpacking configuration (see `UnpackOptions`).
-- **Returns**: `TransformStream` that processes `ParsedTarEntry` objects.
 
-**Example:**
-
-```typescript
-import { createTarDecoder, createTarOptionsTransformer } from 'modern-tar';
-
-const transformedStream = sourceStream
-  .pipeThrough(createTarDecoder())
-  .pipeThrough(createTarOptionsTransformer({
-    strip: 1,
-    filter: (header) => header.name.endsWith('.txt'),
-  }));
-```
 
 ### `createGzipEncoder(): CompressionStream`
 
@@ -161,6 +146,7 @@ const extractStream = unpackTar('/restore/location', {
   strip: 1,
   fmode: 0o644, // Set consistent file permissions
   strict: true, // Enable strict validation
+  streamTimeout: 10000, // Timeout after 10 seconds of inactivity
 });
 await pipeline(tarStream, extractStream);
 ```
@@ -195,6 +181,9 @@ await pipeline(archiveStream, createWriteStream('app.tar'));
 ### Core Types
 
 ```typescript
+// Union type for entry body data that can be packed into a tar archive
+type TarEntryData = string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> | Blob | null | undefined;
+
 // Header information for a tar entry
 interface TarHeader {
   name: string;                    // File/directory name
@@ -213,7 +202,7 @@ interface TarHeader {
 // Input entry for packing functions
 interface TarEntry {
   header: TarHeader;
-  body?: string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> | Blob | null;
+  body?: TarEntryData;
 }
 
 // Output entry from a streaming decoder
@@ -241,6 +230,12 @@ interface UnpackOptions extends DecoderOptions {
   filter?: (header: TarHeader) => boolean;
   /** Transform function to modify tar headers before extraction */
   map?: (header: TarHeader) => TarHeader;
+  /**
+   * The number of milliseconds of inactivity before a stream is considered stalled.
+   * Prevents hangs when processing corrupted or incomplete archives.
+   * @default 5000
+   */
+  streamTimeout?: number;
 }
 ```
 
@@ -276,7 +271,7 @@ interface DirectorySource {
 interface ContentSource {
   type: "content";
   /** Raw content to add. Supports string, Uint8Array, ArrayBuffer, ReadableStream, Blob, or null. */
-	content: TarEntryData;
+  content: TarEntryData;
   /** Destination path inside the tar archive */
   target: string;
   /** Optional Unix file permissions (e.g., 0o644, 0o755) */
@@ -293,6 +288,8 @@ interface UnpackOptionsFS extends UnpackOptions {
   filter?: (header: TarHeader) => boolean;
   /** Transform function to modify headers before extraction */
   map?: (header: TarHeader) => TarHeader;
+  /** Stream timeout in milliseconds for detecting stalled streams */
+  streamTimeout?: number;
 
   // Filesystem-specific options:
   /** Default mode for created directories (e.g., 0o755). Overrides tar header mode */
@@ -307,5 +304,10 @@ interface UnpackOptionsFS extends UnpackOptions {
    * @default 1024
    */
   maxDepth?: number;
+  /**
+   * Maximum number of concurrent filesystem operations during extraction.
+   * @default os.cpus().length || 8
+   */
+  concurrency?: number;
 }
 ```

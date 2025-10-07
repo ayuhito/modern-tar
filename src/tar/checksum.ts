@@ -1,14 +1,12 @@
-import { USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE } from "./constants";
-import { readOctal } from "./utils";
+import { USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE } from "./constants.js";
+import { readOctal } from "./utils.js";
 
 // ASCII code for a space character.
 const CHECKSUM_SPACE = 32; // ' '
 // ASCII code for the '0' character.
 const ASCII_ZERO = 48; // '0'
 
-/**
- * Validates the checksum of a tar header block.
- */
+// Validates the checksum of a tar header block.
 export function validateChecksum(block: Uint8Array): boolean {
 	const stored = readOctal(block, USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE);
 
@@ -28,9 +26,7 @@ export function validateChecksum(block: Uint8Array): boolean {
 	return stored === sum;
 }
 
-/**
- * Calculates and writes the checksum directly to the block.
- */
+// Calculates and writes the checksum directly to the block.
 export function writeChecksum(block: Uint8Array): void {
 	// Fill with spaces for the calculation.
 	block.fill(

@@ -1,11 +1,13 @@
 import { createWriteStream } from "node:fs";
 import * as fs from "node:fs/promises";
+import { cpus } from "node:os";
 import * as path from "node:path";
-import { Readable, Writable } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createTarDecoder, createTarOptionsTransformer } from "../web/index";
-import { streamToBuffer } from "../web/utils";
-import { normalizeUnicode, validateBounds, validatePath } from "./path";
+import { transformHeader } from "../tar/options";
+import type { TarHeader } from "../tar/types";
+import { createTarUnpacker } from "../tar/unpacker";
+import { normalizeUnicode, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
 /**
@@ -43,244 +45,369 @@ export function unpackTar(
 	directoryPath: string,
 	options: UnpackOptionsFS = {},
 ): Writable {
-	// Create a stream pair for proper backpressure handling.
-	const { readable, writable: webWritable } = new TransformStream<
-		Uint8Array,
-		Uint8Array
-	>();
+	const { streamTimeout = 5000, ...fsOptions } = options;
+	let timeoutId: NodeJS.Timeout | null = null;
 
-	const entryStream = readable
-		.pipeThrough(createTarDecoder(options))
-		.pipeThrough(createTarOptionsTransformer(options));
+	const { handler, signal } = createFSHandler(directoryPath, fsOptions);
+	const unpacker = createTarUnpacker(handler, fsOptions);
 
-	const webWriter = webWritable.getWriter();
-	let isWriterClosed = false;
-	let isProcessingComplete = false;
+	let stream: Writable;
 
-	const processingPromise = (async () => {
-		const resolvedDestDir = normalizeUnicode(path.resolve(directoryPath));
-		const validatedDirs = new Set<string>([resolvedDestDir]);
-
-		// Ensure destination directory exists upfront
-		await fs.mkdir(resolvedDestDir, { recursive: true });
-
-		const reader = entryStream.getReader();
-		try {
-			// Prevent DoS attacks with deeply nested paths
-			const maxDepth = options.maxDepth ?? 1024;
-
-			while (true) {
-				const { done, value: entry } = await reader.read();
-				if (done) {
-					break;
-				}
-
-				const { header } = entry;
-				const normalizedName = normalizeUnicode(header.name);
-
-				// Check path depth to prevent DoS attacks
-				if (maxDepth !== Infinity) {
-					const depth = normalizedName.split("/").length;
-
-					if (depth > maxDepth) {
-						throw new Error("Tar exceeds max specified depth.");
-					}
-				}
-
-				// Check for absolute paths in the entry name
-				if (path.isAbsolute(normalizedName)) {
-					throw new Error(`Absolute path found in "${header.name}".`);
-				}
-
-				const outPath = path.join(resolvedDestDir, normalizedName);
-
-				validateBounds(
-					outPath,
-					resolvedDestDir,
-					`Entry "${header.name}" points outside the extraction directory.`,
+	function resetTimeout() {
+		if (timeoutId) clearTimeout(timeoutId);
+		if (streamTimeout !== Infinity && streamTimeout > 0) {
+			timeoutId = setTimeout(() => {
+				const err = new Error(
+					`Stream timed out after ${streamTimeout}ms of inactivity.`,
 				);
-
-				const parentDir = path.dirname(outPath);
-
-				await validatePath(parentDir, resolvedDestDir, validatedDirs);
-				await fs.mkdir(parentDir, { recursive: true });
-
-				switch (header.type) {
-					case "directory": {
-						const mode = options.dmode ?? header.mode;
-						await fs.mkdir(outPath, {
-							recursive: true,
-							mode,
-						});
-
-						validatedDirs.add(outPath);
-						break;
-					}
-
-					case "file": {
-						// For < 32kb files, buffer the content and use writeFile to avoid overhead of creating a stream.
-						if (header.size <= 32 * 1024) {
-							await fs.writeFile(outPath, await streamToBuffer(entry.body), {
-								mode: options.fmode ?? header.mode,
-							});
-						} else {
-							await pipeline(
-								Readable.fromWeb(entry.body),
-								createWriteStream(outPath, {
-									mode: options.fmode ?? header.mode,
-								}),
-							);
-						}
-
-						break;
-					}
-
-					case "symlink": {
-						if (!header.linkname) break;
-
-						const resolvedTarget = path.resolve(
-							path.dirname(outPath),
-							header.linkname,
-						);
-						validateBounds(
-							resolvedTarget,
-							resolvedDestDir,
-							`Symlink "${header.linkname}" points outside the extraction directory.`,
-						);
-						await fs.symlink(header.linkname, outPath);
-
-						// This prevents cache poisoning attacks where a directory is replaced by a symlink.
-						//
-						// Invalidate the whole cache on Windows, because Windows normalizes paths aggressively.
-						// Other platforms, we can just remove the specific directory from the cache.
-						if (process.platform === "win32") {
-							validatedDirs.clear();
-							validatedDirs.add(resolvedDestDir);
-						} else {
-							validatedDirs.delete(outPath);
-						}
-
-						break;
-					}
-
-					case "link": {
-						if (!header.linkname) break;
-
-						const normalizedLinkname = normalizeUnicode(header.linkname);
-
-						// Check for absolute paths in hardlink target
-						if (path.isAbsolute(normalizedLinkname)) {
-							throw new Error(
-								`Hardlink "${header.linkname}" points outside the extraction directory.`,
-							);
-						}
-
-						const resolvedLinkTarget = path.resolve(
-							resolvedDestDir,
-							normalizedLinkname,
-						);
-						validateBounds(
-							resolvedLinkTarget,
-							resolvedDestDir,
-							`Hardlink target "${header.linkname}" points outside the extraction directory.`,
-						);
-
-						await validatePath(
-							path.dirname(resolvedLinkTarget),
-							resolvedDestDir,
-							validatedDirs,
-						);
-
-						await fs.link(resolvedLinkTarget, outPath);
-						break;
-					}
-
-					default: {
-						// Unsupported type, skip it. Handles "character-device", "block-device", "fifo", etc.
-						await entry.body.cancel();
-						break;
-					}
-				}
-
-				// Apply timestamps if available
-				if (header.mtime) {
-					try {
-						const utimesFn = header.type === "symlink" ? fs.lutimes : fs.utimes;
-						await utimesFn(outPath, header.mtime, header.mtime);
-					} catch {
-						// Ignore timestamp errors
-					}
-				}
-			}
-		} finally {
-			isProcessingComplete = true;
-			reader.releaseLock();
+				stream.destroy(err);
+			}, streamTimeout);
 		}
-	})().catch((err) => {
-		isProcessingComplete = true;
-		throw err;
-	});
+	}
 
-	const writable = new Writable({
-		async write(chunk, _encoding, callback) {
-			// Prevent writes after processing completes to avoid race condition.
-			if (
-				isWriterClosed ||
-				isProcessingComplete ||
-				webWriter.desiredSize === null
-			) {
-				return callback();
-			}
-
+	stream = new Writable({
+		write(chunk, _, callback) {
+			resetTimeout(); // Reset timer on every chunk
+			if (signal.aborted) return callback(signal.reason as Error);
 			try {
-				await webWriter.write(chunk);
+				unpacker.write(chunk);
 				callback();
-			} catch (err) {
-				if (
-					err instanceof TypeError &&
-					err.stack?.includes("TransformStream") &&
-					webWriter.desiredSize === null
-				) {
-					return callback(); // EOF archive markers might cause stream to close early on slow I/O.
-				}
-				callback(err as Error);
+			} catch (writeErr) {
+				callback(writeErr as Error);
 			}
 		},
 
 		async final(callback) {
-			if (isWriterClosed) return callback();
-
+			if (timeoutId) clearTimeout(timeoutId); // Clean up timer on success
 			try {
-				isWriterClosed = true;
-				try {
-					await webWriter.close();
-				} catch {
-					// Writer may already be closed, ignore this error
-				}
-
-				await processingPromise;
+				if (signal.aborted) return callback(signal.reason as Error);
+				unpacker.end();
+				await handler.process();
 				callback();
-			} catch (err) {
-				callback(err as Error);
+			} catch (finalErr) {
+				callback(finalErr as Error);
 			}
-		},
-
-		destroy(err, callback) {
-			if (isWriterClosed) return callback(err);
-
-			isWriterClosed = true;
-			isProcessingComplete = true;
-
-			// Abort the web writer and ensure the processing promise is also terminated.
-			webWriter.abort(err).catch(() => {});
-			entryStream.cancel(err).catch(() => {});
-
-			// Wait for the promise to settle to ensure resources are released
-			processingPromise.finally(() => {
-				callback(err);
-			});
 		},
 	});
 
-	return writable;
+	stream.on("close", () => {
+		if (timeoutId) clearTimeout(timeoutId);
+	});
+
+	resetTimeout(); // Start the initial timer.
+
+	return stream;
+}
+
+function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
+	const {
+		maxDepth = 1024,
+		dmode,
+		fmode,
+		concurrency = cpus().length || 8,
+	} = options;
+
+	const abortController = new AbortController();
+	const { signal } = abortController;
+
+	// Queue for managing concurrency.
+	const opQueue: (() => void)[] = [];
+	let activeOps = 0;
+
+	// Build a dependency graph of promise paths to ensure tars on the same path are processed
+	// sequentially while still allowing concurrency for different paths.
+	const pathPromises = new Map<string, Promise<TarHeader["type"]>>();
+	let activeEntryStream: PassThrough | null = null;
+
+	let processingEnded = false;
+	let resolveDrain: () => void;
+	const drainPromise = new Promise<void>((resolve) => {
+		resolveDrain = resolve;
+	});
+
+	const processQueue = () => {
+		// Clear the queue if aborted.
+		if (signal.aborted) opQueue.length = 0;
+
+		// Start new operations while under the concurrency limit.
+		while (activeOps < concurrency && opQueue.length > 0) {
+			activeOps++;
+			const op = opQueue.shift();
+			if (!op) break;
+			op();
+		}
+
+		if (processingEnded && activeOps === 0 && opQueue.length === 0) {
+			resolveDrain();
+		}
+	};
+
+	// Create the destination directory promise first.
+	const destDirPromise = (async () => {
+		const resolved = normalizeUnicode(path.resolve(directoryPath));
+		await fs.mkdir(resolved, { recursive: true });
+		return resolved;
+	})();
+
+	// Recursively ensure all parent directories exist.
+	const ensureDirectoryExists = (
+		dirPath: string,
+	): Promise<TarHeader["type"]> => {
+		// Check cache first.
+		let promise = pathPromises.get(dirPath);
+		if (promise) return promise;
+
+		promise = (async () => {
+			// If the directory is the destination directory, it already exists.
+			const destDir = await destDirPromise;
+			if (dirPath === destDir) return "directory";
+
+			// Ensure parent directory exists first.
+			await ensureDirectoryExists(path.dirname(dirPath));
+
+			// Check if the directory exists.
+			try {
+				const stat = await fs.lstat(dirPath);
+				if (stat.isDirectory()) return "directory";
+
+				// If it's a symlink, ensure it points to a directory within bounds.
+				if (stat.isSymbolicLink()) {
+					const realPath = await fs.realpath(dirPath);
+					validateBounds(
+						realPath,
+						destDir,
+						`Symlink "${dirPath}" points outside the extraction directory.`,
+					);
+					const realStat = await fs.stat(realPath);
+					if (realStat.isDirectory()) return "directory" as const;
+				}
+
+				throw new Error(`"${dirPath}" is not a valid directory component.`);
+			} catch (err) {
+				// If it doesn't exist, create it.
+				if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+					try {
+						await fs.mkdir(dirPath, { mode: dmode });
+					} catch (mkdirErr) {
+						// If it was already created by a concurrent operation, verify it's a directory.
+						if (
+							mkdirErr instanceof Error &&
+							"code" in mkdirErr &&
+							mkdirErr.code === "EEXIST"
+						) {
+							const stat = await fs.lstat(dirPath);
+							if (!stat.isDirectory()) {
+								throw new Error(
+									`Path component "${dirPath}" was created as a non-directory.`,
+								);
+							}
+							return "directory";
+						}
+						throw mkdirErr;
+					}
+					return "directory";
+				}
+				throw err;
+			}
+		})();
+
+		pathPromises.set(dirPath, promise);
+		return promise;
+	};
+
+	const processHeader = async (
+		header: TarHeader,
+		entryStream: PassThrough,
+	): Promise<TarHeader["type"]> => {
+		try {
+			// Await the destination directory to ensure it's created first.
+			const destDir = await destDirPromise;
+			const normalizedName = normalizeUnicode(header.name);
+
+			// Prevent ReDOS via deep paths.
+			if (maxDepth !== Infinity && normalizedName.split("/").length > maxDepth)
+				throw new Error("Tar exceeds max specified depth.");
+
+			// Prevent absolute paths and ensure within destDir.
+			if (path.isAbsolute(normalizedName))
+				throw new Error(`Absolute path found in "${header.name}".`);
+
+			const outPath = path.join(destDir, normalizedName);
+			validateBounds(
+				outPath,
+				destDir,
+				`Entry "${header.name}" points outside the extraction directory.`,
+			);
+
+			// Ensure parent directory exists.
+			const parentDir = path.dirname(outPath);
+			await ensureDirectoryExists(parentDir);
+
+			switch (header.type) {
+				case "directory":
+					await fs.mkdir(outPath, {
+						recursive: true,
+						mode: dmode ?? header.mode,
+					});
+					break;
+
+				case "file": {
+					const fileStream = createWriteStream(outPath, {
+						mode: fmode ?? header.mode,
+					});
+					await pipeline(entryStream, fileStream);
+					break;
+				}
+
+				case "symlink": {
+					const { linkname } = header;
+					if (!linkname) return header.type;
+					const target = path.resolve(parentDir, linkname);
+					validateBounds(
+						target,
+						destDir,
+						`Symlink "${linkname}" points outside the extraction directory.`,
+					);
+					await fs.symlink(linkname, outPath);
+					break;
+				}
+
+				case "link": {
+					const { linkname } = header;
+					if (!linkname) return header.type;
+
+					// Resolve the hardlink target path and ensure it's within destDir.
+					const normalizedLink = normalizeUnicode(linkname);
+					if (path.isAbsolute(normalizedLink)) {
+						throw new Error(
+							`Hardlink "${linkname}" points outside the extraction directory.`,
+						);
+					}
+
+					const linkTarget = path.resolve(destDir, normalizedLink);
+					validateBounds(
+						linkTarget,
+						destDir,
+						`Hardlink "${linkname}" points outside the extraction directory.`,
+					);
+
+					// Validate the directory containing the link source.
+					await ensureDirectoryExists(path.dirname(linkTarget));
+
+					// Wait for the target file to be created before attempting the link.
+					const targetPromise = pathPromises.get(linkTarget);
+					if (targetPromise) await targetPromise;
+
+					await fs.link(linkTarget, outPath);
+					break;
+				}
+
+				default:
+					return header.type; // Unsupported type
+			}
+
+			// Set modification time if available.
+			try {
+				if (header.mtime) {
+					const utimes = header.type === "symlink" ? fs.lutimes : fs.utimes;
+					await utimes(outPath, header.mtime, header.mtime).catch(() => {});
+				}
+			} catch {
+				// Ignore utime errors
+			}
+
+			return header.type;
+		} finally {
+			// Ensure the entry stream is drained to avoid blocking.
+			if (!entryStream.readableEnded) {
+				entryStream.resume();
+			}
+		}
+	};
+
+	const handler = {
+		onHeader(header: TarHeader) {
+			if (signal.aborted) return;
+
+			activeEntryStream = new PassThrough();
+			const entryStream = activeEntryStream;
+
+			// Queue the operation.
+			const startOperation = () => {
+				let opPromise: Promise<TarHeader["type"]>;
+				try {
+					const transformed = transformHeader(header, options);
+					if (!transformed) {
+						entryStream.resume();
+						activeOps--;
+						processQueue();
+						return;
+					}
+
+					const destDir = path.resolve(directoryPath);
+					const normalizedTarget = path
+						.join(destDir, normalizeUnicode(transformed.name))
+						.replace(/\/$/, "");
+
+					const priorOpPromise =
+						pathPromises.get(normalizedTarget) || Promise.resolve(undefined);
+
+					opPromise = priorOpPromise.then(async (priorOp) => {
+						if (signal.aborted) throw signal.reason;
+
+						if (priorOp) {
+							const isConflict =
+								(priorOp === "directory" && transformed.type !== "directory") ||
+								(priorOp !== "directory" && transformed.type === "directory");
+
+							if (isConflict) {
+								throw new Error(
+									`Path conflict: cannot create ${transformed.type} over existing ${priorOp} at "${transformed.name}"`,
+								);
+							}
+						}
+						return await processHeader(transformed, entryStream);
+					});
+					pathPromises.set(normalizedTarget, opPromise);
+				} catch (err) {
+					opPromise = Promise.reject(err);
+					abortController.abort(err as Error);
+					entryStream?.destroy(err as Error);
+				}
+
+				opPromise
+					.catch((err) => abortController.abort(err))
+					.finally(() => {
+						activeOps--;
+						processQueue();
+					});
+			};
+
+			opQueue.push(startOperation);
+			processQueue();
+		},
+
+		onData(chunk: Uint8Array) {
+			if (!signal.aborted) activeEntryStream?.write(chunk);
+		},
+
+		onEndEntry() {
+			activeEntryStream?.end();
+			activeEntryStream = null;
+		},
+
+		onError(error: Error) {
+			abortController.abort(error);
+			activeEntryStream?.destroy(error);
+		},
+
+		async process() {
+			processingEnded = true;
+			processQueue();
+			await drainPromise;
+			if (signal.aborted) throw signal.reason;
+		},
+	};
+
+	return { handler, signal };
 }

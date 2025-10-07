@@ -5,10 +5,10 @@ import {
 	USTAR_NAME_SIZE,
 	USTAR_PREFIX_SIZE,
 	USTAR_UNAME_SIZE,
-} from "./constants";
-import { createTarHeader } from "./pack";
-import type { TarHeader } from "./types";
-import { decoder, encoder } from "./utils";
+} from "./constants.js";
+import { createTarHeader } from "./header.js";
+import type { TarHeader } from "./types.js";
+import { decoder, encoder } from "./utils.js";
 
 // Checks a tar header for fields that exceed USTAR limits and generates a PAX header entry if necessary.
 export function generatePax(header: TarHeader): {
@@ -73,9 +73,8 @@ export function generatePax(header: TarHeader): {
 			.map(([key, value]) => {
 				const record = `${key}=${value}\n`;
 
-				// Get byte length to handle multi-byte Unicode characters correctly.
+				// Get byte length to handle multi byte Unicode characters correctly.
 				const partLength = encoder.encode(record).length + 1; // +1 for the space
-
 				let totalLength = partLength + String(partLength).length;
 
 				// Calculate again to handle the new length increase.
@@ -105,7 +104,7 @@ export function generatePax(header: TarHeader): {
 	return { paxHeader, paxBody };
 }
 
-// Attempts to split a long path into a USTAR-compatible name and prefix.
+// Tries to split a long path into a USTAR compatible name and prefix.
 export function findUstarSplit(
 	path: string,
 ): { name: string; prefix: string } | null {

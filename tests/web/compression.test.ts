@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { decoder, encoder, streamToBuffer } from "../../src/tar/utils";
 import {
 	createGzipDecoder,
 	createGzipEncoder,
@@ -8,7 +9,6 @@ import {
 	type TarEntry,
 	unpackTar,
 } from "../../src/web/index";
-import { decoder, encoder, streamToBuffer } from "../../src/web/utils";
 
 describe("compression", () => {
 	describe("streaming compression", () => {

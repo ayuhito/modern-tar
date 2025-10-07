@@ -10,10 +10,8 @@ export const DEFAULT_FILE_MODE = 0o644;
 /** Default permissions for directories (rwxr-xr-x). */
 export const DEFAULT_DIR_MODE = 0o755;
 
-/** Offsets and sizes of fields in a USTAR header block.
- *
- * @see https://www.gnu.org/software/tar/manual/html_node/Standard.html
- */
+// Offsets and sizes of fields in a USTAR header block.
+// @see https://www.gnu.org/software/tar/manual/html_node/Standard.html
 
 // Name field
 export const USTAR_NAME_OFFSET = 0;
@@ -113,3 +111,6 @@ export const FLAGTYPE = {
 	L: "gnu-long-name",
 	K: "gnu-long-link-name",
 } as const;
+
+/** Pre-allocated zero block for padding and EOF. */
+export const ZERO_BLOCK = new Uint8Array(BLOCK_SIZE);

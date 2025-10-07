@@ -94,4 +94,25 @@ export interface UnpackOptions extends DecoderOptions {
 	filter?: (header: TarHeader) => boolean;
 	/** Transform function to modify tar headers before extraction */
 	map?: (header: TarHeader) => TarHeader;
+	/**
+	 * The number of milliseconds of inactivity before a stream is considered stalled.
+	 * Prevents hangs when processing corrupted or incomplete archives.
+	 * @default 5000
+	 */
+	streamTimeout?: number;
+}
+
+/**
+ * Handler interface for unpacking events.
+ * Consumers implement this to define what happens when entries and data are found.
+ */
+export interface UnpackHandler {
+	/** Called when a new entry header is parsed */
+	onHeader(header: TarHeader): void;
+	/** Called when data chunks are available for the current entry */
+	onData(chunk: Uint8Array): void;
+	/** Called when the current entry is complete */
+	onEndEntry(): void;
+	/** Called when an error occurs during unpacking */
+	onError(error: Error): void;
 }

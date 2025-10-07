@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createTarPacker, packTar, unpackTar } from "../../src/web";
 import {
 	USTAR_CHECKSUM_OFFSET,
 	USTAR_CHECKSUM_SIZE,
 	USTAR_NAME_OFFSET,
 	USTAR_SIZE_OFFSET,
-} from "../../src/web/constants";
-import { decoder, encoder, streamToBuffer } from "../../src/web/utils";
+} from "../../src/tar/constants";
+import { decoder, encoder, streamToBuffer } from "../../src/tar/utils";
+import { createTarPacker, packTar, unpackTar } from "../../src/web";
 
 describe("checksum validation", () => {
 	it("should reject tar entries with corrupted checksums", async () => {
