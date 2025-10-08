@@ -2161,6 +2161,113 @@ describe("security", () => {
 				expect(content).toBe("allowed content");
 			},
 		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents pack time symlink path traversal vulnerability",
+			async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				const evilDir = path.join(tmpDir, "source-evil");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.mkdir(evilDir, { recursive: true });
+
+				// Create a sensitive file outside the intended base directory
+				const sensitiveFile = path.join(evilDir, "secret.txt");
+				await fs.writeFile(sensitiveFile, "classified information");
+
+				// Create a malicious symlink that uses the vulnerable startsWith check
+				// This symlink name starts with the baseDir string but points outside it
+				const maliciousSymlink = path.join(sourceDir, "exploit");
+				await fs.symlink(
+					`../${path.basename(evilDir)}/secret.txt`,
+					maliciousSymlink,
+				);
+
+				// Pack with dereference: true should NOT include the symlinked content
+				const packStream = packTarFS(sourceDir, { dereference: true });
+
+				const chunks: Buffer[] = [];
+				packStream.on("data", (chunk) => chunks.push(chunk));
+
+				await new Promise<void>((resolve, reject) => {
+					packStream.on("end", resolve);
+					packStream.on("error", reject);
+				});
+
+				const tarBuffer = Buffer.concat(chunks);
+
+				// Extract and verify the malicious symlink was excluded
+				const extractDir = path.join(tmpDir, "extracted");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				const extractStream = unpackTar(extractDir);
+				await pipeline(Readable.from([tarBuffer]), extractStream);
+
+				// Should be empty - the unsafe symlink should have been filtered out
+				const extractedFiles = await fs.readdir(extractDir);
+				expect(extractedFiles).toEqual([]);
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"show path prefix vulnerability would be exploitable with just vulnerable startsWith check",
+			async () => {
+				const baseDir = path.join(tmpDir, "archive");
+				const maliciousDir = path.join(tmpDir, "archive-evil");
+				await fs.mkdir(baseDir, { recursive: true });
+				await fs.mkdir(maliciousDir, { recursive: true });
+
+				// Create target file in the malicious directory
+				const targetFile = path.join(maliciousDir, "stolen.txt");
+				await fs.writeFile(targetFile, "stolen data");
+
+				// Create a symlink that would pass a naive startsWith check
+				// because "archive-evil" starts with "archive"
+				const exploitSymlink = path.join(baseDir, "exploit");
+				await fs.symlink(
+					`../${path.basename(maliciousDir)}/stolen.txt`,
+					exploitSymlink,
+				);
+
+				// Verify that resolvedTarget would start with baseDir string (vulnerable check)
+				const linkTarget = await fs.readlink(exploitSymlink);
+				const resolvedTarget = path.resolve(
+					path.dirname(exploitSymlink),
+					linkTarget,
+				);
+
+				// This would pass the vulnerable check: resolvedTarget.startsWith(baseDir)
+				expect(resolvedTarget.startsWith(baseDir)).toBe(true);
+
+				// But should fail our fixed check: resolvedTarget === baseDir || resolvedTarget.startsWith(baseDir + path.sep)
+				const isSafe =
+					resolvedTarget === baseDir ||
+					resolvedTarget.startsWith(baseDir + path.sep);
+				expect(isSafe).toBe(false);
+
+				// Pack with dereference: true - should exclude the unsafe symlink
+				const packStream = packTarFS(baseDir, { dereference: true });
+
+				const chunks: Buffer[] = [];
+				packStream.on("data", (chunk) => chunks.push(chunk));
+
+				await new Promise<void>((resolve, reject) => {
+					packStream.on("end", resolve);
+					packStream.on("error", reject);
+				});
+
+				const tarBuffer = Buffer.concat(chunks);
+
+				// Extract and verify no files were included
+				const extractDir = path.join(tmpDir, "extracted");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				const extractStream = unpackTar(extractDir);
+				await pipeline(Readable.from([tarBuffer]), extractStream);
+
+				const extractedFiles = await fs.readdir(extractDir);
+				expect(extractedFiles).toEqual([]);
+			},
+		);
 	});
 
 	it("prevents alignment DoS vulnerability in isZeroBlock", async () => {

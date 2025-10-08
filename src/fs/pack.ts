@@ -282,7 +282,11 @@ async function isSymlinkUnsafe(
 		if (lstat.isSymbolicLink()) {
 			const linkTarget = await fs.readlink(sourcePath);
 			const resolvedTarget = path.resolve(path.dirname(sourcePath), linkTarget);
-			return !resolvedTarget.startsWith(baseDir);
+			// Ensure the resolved target is the base directory itself or a subdirectory.
+			return !(
+				resolvedTarget === baseDir ||
+				resolvedTarget.startsWith(baseDir + path.sep)
+			);
 		}
 	} catch {
 		// If we can't read the symlink, it's safer to skip it
