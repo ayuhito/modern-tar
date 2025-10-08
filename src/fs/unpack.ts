@@ -284,17 +284,25 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 						);
 					}
 
-					const linkTarget = path.resolve(destDir, normalizedLink);
+					// Check the link target path after resolving against parentDir.
+					const linkTarget = path.join(destDir, normalizedLink);
+					await ensureDirectoryExists(path.dirname(linkTarget));
+
+					// Resolve the real path of the parent directory which follows symlinks.
+					const realTargetParent = await fs.realpath(path.dirname(linkTarget));
+					const realLinkTarget = path.join(
+						realTargetParent,
+						path.basename(linkTarget),
+					);
+
+					// Check that the real path is within the destination directory.
 					validateBounds(
-						linkTarget,
+						realLinkTarget,
 						destDir,
 						`Hardlink "${linkname}" points outside the extraction directory.`,
 					);
 
-					// Validate the directory containing the link source.
-					await ensureDirectoryExists(path.dirname(linkTarget));
-
-					// Wait for the target file to be created before attempting the link.
+					// Wait for the target to be created if it is in the map.
 					const targetPromise = pathPromises.get(linkTarget);
 					if (targetPromise) await targetPromise;
 
@@ -345,16 +353,24 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 					}
 
 					const destDir = path.resolve(directoryPath);
-					const normalizedTarget = path
-						.join(destDir, normalizeUnicode(transformed.name))
-						.replace(/\/$/, "");
 
+					// Ensure that "path" and "path/" are treated as the same key on all platforms.
+					const keyPath = path.join(
+						destDir,
+						normalizeUnicode(transformed.name),
+					);
+					const normalizedTarget =
+						keyPath.endsWith("/") || keyPath.endsWith("\\")
+							? keyPath.slice(0, -1)
+							: keyPath;
+
+					// Chain onto any prior operation for this path.
 					const priorOpPromise =
 						pathPromises.get(normalizedTarget) || Promise.resolve(undefined);
 
+					// Start the operation promise chain.
 					opPromise = priorOpPromise.then(async (priorOp) => {
 						if (signal.aborted) throw signal.reason;
-
 						if (priorOp) {
 							const isConflict =
 								(priorOp === "directory" && transformed.type !== "directory") ||
@@ -366,6 +382,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 								);
 							}
 						}
+
 						return await processHeader(transformed, entryStream);
 					});
 					pathPromises.set(normalizedTarget, opPromise);
