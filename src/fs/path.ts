@@ -33,11 +33,8 @@ export function validateBounds(
 	destDir: string,
 	errorMessage: string,
 ): void {
-	const normalizedTarget = normalizeUnicode(targetPath);
-	if (
-		!normalizedTarget.startsWith(destDir + path.sep) &&
-		normalizedTarget !== destDir
-	) {
+	const target = normalizeUnicode(path.resolve(targetPath));
+	const dest = path.resolve(destDir);
+	if (target !== dest && !target.startsWith(dest + path.sep))
 		throw new Error(errorMessage);
-	}
 }
