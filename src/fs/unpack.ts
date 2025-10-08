@@ -144,9 +144,10 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 
 	// Create the destination directory promise first.
 	const destDirPromise = (async () => {
-		const resolved = normalizeUnicode(path.resolve(directoryPath));
-		await fs.mkdir(resolved, { recursive: true });
-		return resolved;
+		const symbolic = normalizeUnicode(path.resolve(directoryPath));
+		await fs.mkdir(symbolic, { recursive: true });
+		const real = await fs.realpath(symbolic);
+		return { symbolic, real };
 	})();
 
 	// Recursively ensure all parent directories exist.
@@ -160,7 +161,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 		promise = (async () => {
 			// If the directory is the destination directory, it already exists.
 			const destDir = await destDirPromise;
-			if (dirPath === destDir) return "directory";
+			if (dirPath === destDir.symbolic) return "directory";
 
 			// Ensure parent directory exists first.
 			await ensureDirectoryExists(path.dirname(dirPath));
@@ -175,7 +176,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 					const realPath = await fs.realpath(dirPath);
 					validateBounds(
 						realPath,
-						destDir,
+						destDir.real,
 						`Symlink "${dirPath}" points outside the extraction directory.`,
 					);
 					const realStat = await fs.stat(realPath);
@@ -232,10 +233,10 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 			if (path.isAbsolute(normalizedName))
 				throw new Error(`Absolute path found in "${header.name}".`);
 
-			const outPath = path.join(destDir, normalizedName);
+			const outPath = path.join(destDir.symbolic, normalizedName);
 			validateBounds(
 				outPath,
-				destDir,
+				destDir.symbolic,
 				`Entry "${header.name}" points outside the extraction directory.`,
 			);
 
@@ -265,7 +266,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 					const target = path.resolve(parentDir, linkname);
 					validateBounds(
 						target,
-						destDir,
+						destDir.symbolic,
 						`Symlink "${linkname}" points outside the extraction directory.`,
 					);
 					await fs.symlink(linkname, outPath);
@@ -284,8 +285,13 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 						);
 					}
 
-					// Check the link target path after resolving against parentDir.
-					const linkTarget = path.join(destDir, normalizedLink);
+					// This is the symbolic path to the link's target inside the extraction dir.
+					const linkTarget = path.join(destDir.symbolic, normalizedLink);
+					validateBounds(
+						linkTarget,
+						destDir.symbolic,
+						`Hardlink "${linkname}" points outside the extraction directory.`,
+					);
 					await ensureDirectoryExists(path.dirname(linkTarget));
 
 					// Resolve the real path of the parent directory which follows symlinks.
@@ -298,7 +304,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 					// Check that the real path is within the destination directory.
 					validateBounds(
 						realLinkTarget,
-						destDir,
+						destDir.real,
 						`Hardlink "${linkname}" points outside the extraction directory.`,
 					);
 
