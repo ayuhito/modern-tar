@@ -486,5 +486,175 @@ describe("decompression", () => {
 			// Stream should also fail
 			await expect(streamToBuffer(compressedStream)).rejects.toThrow();
 		});
+
+		it("detects malformed gzip headers", async () => {
+			// Create malformed gzip data
+			const malformedGzip = new Uint8Array([
+				0x1f,
+				0x8b, // Gzip magic
+				0x08, // Deflate method
+				0xff, // Invalid flags
+				0x00,
+				0x00,
+				0x00,
+				0x00, // Timestamp
+				0x00, // Extra flags
+				0x03, // OS
+				0x00,
+				0x01,
+				0x02, // Truncated/invalid deflate data
+			]);
+
+			// Use the higher-level API which properly handles errors
+			const inputStream = new ReadableStream({
+				start(controller) {
+					controller.enqueue(malformedGzip);
+					controller.close();
+				},
+			});
+
+			const decompressedStream = inputStream.pipeThrough(createGzipDecoder());
+
+			// Should throw an error due to malformed gzip
+			await expect(async () => {
+				const reader = decompressedStream.getReader();
+				try {
+					while (true) {
+						const { done } = await reader.read();
+						if (done) break;
+					}
+				} finally {
+					reader.releaseLock();
+				}
+			}).rejects.toThrow();
+		});
+
+		it("detects truncated gzip streams", async () => {
+			const originalData = "Hello, World!";
+
+			// First create valid gzip
+			const compressTransform = createGzipEncoder();
+			const chunks: Uint8Array[] = [];
+
+			const reader = compressTransform.readable.getReader();
+			const writer = compressTransform.writable.getWriter();
+
+			const readPromise = (async () => {
+				try {
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
+						chunks.push(value);
+					}
+				} finally {
+					reader.releaseLock();
+				}
+			})();
+
+			await writer.write(new TextEncoder().encode(originalData));
+			await writer.close();
+			await readPromise;
+
+			const fullGzip = new Uint8Array(
+				chunks.reduce((sum, chunk) => sum + chunk.length, 0),
+			);
+			let offset = 0;
+			for (const chunk of chunks) {
+				fullGzip.set(chunk, offset);
+				offset += chunk.length;
+			}
+
+			// Truncate the gzip data
+			const truncatedGzip = fullGzip.slice(0, Math.max(1, fullGzip.length - 5));
+
+			// Use the higher-level API which properly handles errors
+			const inputStream = new ReadableStream({
+				start(controller) {
+					controller.enqueue(truncatedGzip);
+					controller.close();
+				},
+			});
+
+			const decompressedStream = inputStream.pipeThrough(createGzipDecoder());
+
+			// Should throw an error due to truncated gzip
+			await expect(async () => {
+				const reader = decompressedStream.getReader();
+				try {
+					while (true) {
+						const { done } = await reader.read();
+						if (done) break;
+					}
+				} finally {
+					reader.releaseLock();
+				}
+			}).rejects.toThrow();
+		});
+
+		it("handles compression bomb scenarios", async () => {
+			// Create a tar with highly compressible content
+			const largeContent = "A".repeat(1024 * 100); // 100KB of repeated 'A's
+			const entries: TarEntry[] = [
+				{
+					header: {
+						name: "large-file.txt",
+						size: largeContent.length,
+						type: "file",
+					},
+					body: largeContent,
+				},
+			];
+
+			const tarBuffer = await packTar(entries);
+
+			// Compress the tar
+			const compressTransform = createGzipEncoder();
+			const chunks: Uint8Array[] = [];
+
+			const reader = compressTransform.readable.getReader();
+			const writer = compressTransform.writable.getWriter();
+
+			const readPromise = (async () => {
+				try {
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
+						chunks.push(value);
+					}
+				} finally {
+					reader.releaseLock();
+				}
+			})();
+
+			await writer.write(tarBuffer);
+			await writer.close();
+			await readPromise;
+
+			const compressedSize = chunks.reduce(
+				(sum, chunk) => sum + chunk.length,
+				0,
+			);
+
+			// Verify significant compression ratio (potential compression bomb)
+			expect(compressedSize).toBeLessThan(largeContent.length / 10);
+
+			// Verify we can still decompress safely
+			const totalCompressed = new Uint8Array(compressedSize);
+			let offset = 0;
+			for (const chunk of chunks) {
+				totalCompressed.set(chunk, offset);
+				offset += chunk.length;
+			}
+
+			const decompressedStream = new ReadableStream({
+				start(controller) {
+					controller.enqueue(totalCompressed);
+					controller.close();
+				},
+			}).pipeThrough(createGzipDecoder());
+
+			const decompressedBuffer = await streamToBuffer(decompressedStream);
+			expect(decompressedBuffer.length).toBe(tarBuffer.length);
+		});
 	});
 });
