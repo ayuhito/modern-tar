@@ -353,14 +353,26 @@ export function createTarUnpacker(
 // Instead of checking each byte individually (512 iterations), we can check
 // 8 bytes at a time using BigUint64Array (64 iterations).
 function isZeroBlock(block: Uint8Array): boolean {
-	const view = new BigUint64Array(
-		block.buffer,
-		block.byteOffset,
-		block.length / 8,
-	);
+	// If the block's offset within its underlying buffer is 8-byte aligned, we can safely
+	// use BigUint64Array for a fast path check.
+	if (block.byteOffset % 8 === 0) {
+		const view = new BigUint64Array(
+			block.buffer,
+			block.byteOffset,
+			block.length / 8,
+		);
 
-	for (let i = 0; i < view.length; i++) {
-		if (view[i] !== 0n) return false;
+		for (let i = 0; i < view.length; i++) {
+			if (view[i] !== 0n) return false;
+		}
+
+		return true;
+	}
+
+	// If the block is not 8-byte aligned, creating a BigUint64Array would throw, so fallback
+	// to counting every byte.
+	for (let i = 0; i < block.length; i++) {
+		if (block[i] !== 0) return false;
 	}
 
 	return true;

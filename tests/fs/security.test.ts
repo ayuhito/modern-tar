@@ -2162,4 +2162,43 @@ describe("security", () => {
 			},
 		);
 	});
+
+	it("prevents alignment DoS vulnerability in isZeroBlock", async () => {
+		// Verifies that unaligned data chunks don't cause RangeError crashes
+		const extractDir = path.join(tmpDir, "extract");
+		await fs.mkdir(extractDir, { recursive: true });
+
+		const entries: TarEntry[] = [
+			{
+				header: { name: "test.txt", type: "file", size: 4 },
+				body: "test",
+			},
+		];
+
+		const tarBuffer = await packTar(entries);
+
+		// Test unaligned chunking that would crash vulnerable version
+		let sent = false;
+		const unalignedStream = new Readable({
+			read() {
+				if (!sent) {
+					this.push(tarBuffer.subarray(0, 513)); // Unaligned chunk
+					this.push(tarBuffer.subarray(513));
+					this.push(null);
+					sent = true;
+				}
+			},
+		});
+
+		const unpackStream = unpackTar(extractDir);
+		await expect(
+			pipeline(unalignedStream, unpackStream),
+		).resolves.not.toThrow();
+
+		const content = await fs.readFile(
+			path.join(extractDir, "test.txt"),
+			"utf8",
+		);
+		expect(content).toBe("test");
+	});
 });

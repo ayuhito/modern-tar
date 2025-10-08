@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createTarUnpacker } from "../../src/tar/unpacker";
 import {
 	decoder,
 	encoder,
@@ -359,5 +360,36 @@ describe("tar utilities", () => {
 			// readOctal treats '9' as part of calculation, this documents actual behavior
 			expect(typeof result).toBe("number");
 		});
+	});
+
+	it("handles unaligned zero blocks without crashing", () => {
+		let errorOccurred = false;
+
+		const handler = {
+			onHeader: () => {},
+			onData: () => {},
+			onEndEntry: () => {},
+			onError: (_error: Error) => {
+				errorOccurred = true;
+			},
+		};
+
+		const unpacker = createTarUnpacker(handler);
+
+		// Create a large buffer with unaligned offset that contains a zero block
+		// This ensures the read() function will use the subarray path that preserves
+		// the unaligned byteOffset, which would crash in the vulnerable version
+		const buffer = new ArrayBuffer(2048);
+		const unalignedChunk = new Uint8Array(buffer, 1, 1536); // offset=1, contains multiple 512-byte blocks
+
+		// Fill with zeros to create zero blocks that will trigger isZeroBlock()
+		unalignedChunk.fill(0);
+
+		expect(() => {
+			unpacker.write(unalignedChunk);
+			unpacker.end();
+		}).not.toThrow();
+
+		expect(errorOccurred).toBe(false);
 	});
 });
