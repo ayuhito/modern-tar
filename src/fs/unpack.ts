@@ -166,7 +166,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 		let promise = pathPromises.get(dirPath);
 		if (promise) return promise;
 
-			// If the directory is the destination directory, it already exists.
+		// If the directory is the destination directory, it already exists.
 		promise = (async (): Promise<TarHeader["type"]> => {
 			const destDir = await destDirPromise;
 			if (dirPath === destDir.symbolic) return "directory";
@@ -178,8 +178,8 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 			try {
 				await fs.mkdir(dirPath, { mode: dmode });
 				return "directory";
-			} catch (err: any) {
-				if (err.code !== "EEXIST") throw err;
+			} catch (err: unknown) {
+				if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 
 				const stat = await fs.lstat(dirPath);
 				if (stat.isDirectory()) return "directory";
