@@ -242,6 +242,8 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 				case "file": {
 					const fileStream = createWriteStream(outPath, {
 						mode: fmode ?? header.mode,
+						// Use 512KB buffer for files > 1MB.
+						highWaterMark: header.size > 1048576 ? 524288 : undefined,
 					});
 					await pipeline(entryStream, fileStream);
 					break;
