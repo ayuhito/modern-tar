@@ -146,9 +146,17 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 	const destDirPromise = (async () => {
 		const symbolic = normalizeUnicode(path.resolve(directoryPath));
 		await fs.mkdir(symbolic, { recursive: true });
-		const real = await fs.realpath(symbolic);
-		return { symbolic, real };
+		try {
+			const real = await fs.realpath(symbolic);
+			return { symbolic, real };
+		} catch (err) {
+			if (signal.aborted) throw signal.reason;
+			throw err;
+		}
 	})();
+	destDirPromise.catch((err) => {
+		if (!signal.aborted) abortController.abort(err);
+	});
 
 	// Recursively ensure all parent directories exist.
 	const ensureDirectoryExists = (
@@ -158,8 +166,8 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 		let promise = pathPromises.get(dirPath);
 		if (promise) return promise;
 
-		promise = (async () => {
 			// If the directory is the destination directory, it already exists.
+		promise = (async (): Promise<TarHeader["type"]> => {
 			const destDir = await destDirPromise;
 			if (dirPath === destDir.symbolic) return "directory";
 
@@ -168,6 +176,11 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 
 			// Check if the directory exists.
 			try {
+				await fs.mkdir(dirPath, { mode: dmode });
+				return "directory";
+			} catch (err: any) {
+				if (err.code !== "EEXIST") throw err;
+
 				const stat = await fs.lstat(dirPath);
 				if (stat.isDirectory()) return "directory";
 
@@ -180,35 +193,9 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 						`Symlink "${dirPath}" points outside the extraction directory.`,
 					);
 					const realStat = await fs.stat(realPath);
-					if (realStat.isDirectory()) return "directory" as const;
+					if (realStat.isDirectory()) return "directory";
 				}
-
 				throw new Error(`"${dirPath}" is not a valid directory component.`);
-			} catch (err) {
-				// If it doesn't exist, create it.
-				if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-					try {
-						await fs.mkdir(dirPath, { mode: dmode });
-					} catch (mkdirErr) {
-						// If it was already created by a concurrent operation, verify it's a directory.
-						if (
-							mkdirErr instanceof Error &&
-							"code" in mkdirErr &&
-							mkdirErr.code === "EEXIST"
-						) {
-							const stat = await fs.lstat(dirPath);
-							if (!stat.isDirectory()) {
-								throw new Error(
-									`Path component "${dirPath}" was created as a non-directory.`,
-								);
-							}
-							return "directory";
-						}
-						throw mkdirErr;
-					}
-					return "directory";
-				}
-				throw err;
 			}
 		})();
 
@@ -321,13 +308,9 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 			}
 
 			// Set modification time if available.
-			try {
-				if (header.mtime) {
-					const utimes = header.type === "symlink" ? fs.lutimes : fs.utimes;
-					await utimes(outPath, header.mtime, header.mtime).catch(() => {});
-				}
-			} catch {
-				// Ignore utime errors
+			if (header.mtime) {
+				const utimes = header.type === "symlink" ? fs.lutimes : fs.utimes;
+				await utimes(outPath, header.mtime, header.mtime).catch(() => {});
 			}
 
 			return header.type;
