@@ -186,10 +186,8 @@ export function createTarUnpacker(
 						}
 
 						// Apply prefix and overrides if present.
-						if (internalHeader.prefix && internalHeader.magic === "ustar") {
+						if (internalHeader.prefix)
 							header.name = `${internalHeader.prefix}/${header.name}`;
-						}
-
 						applyOverrides(header, paxGlobals);
 						applyOverrides(header, nextEntryOverrides);
 						nextEntryOverrides = {};

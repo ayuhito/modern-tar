@@ -81,14 +81,21 @@ describe("extract", () => {
 
 	it("extracts a tar with a long name (USTAR prefix)", async () => {
 		const buffer = await fs.readFile(LONG_NAME_TAR);
-		const entries = await unpackTar(buffer);
-		expect(entries).toHaveLength(1);
-
-		// The parser should now combine the 'prefix' and 'name' fields.
 		const expectedName =
 			"my/file/is/longer/than/100/characters/and/should/use/the/prefix/header/foobarbaz/foobarbaz/foobarbaz/foobarbaz/foobarbaz/foobarbaz/filename.txt";
+
+		// Test both strict and non-strict modes
+		const entries = await unpackTar(buffer);
+		const entriesStrict = await unpackTar(buffer, { strict: true });
+
+		expect(entries).toHaveLength(1);
+		expect(entriesStrict).toHaveLength(1);
+
+		// Both should correctly combine the 'prefix' and 'name' fields
 		expect(entries[0].header.name).toBe(expectedName);
+		expect(entriesStrict[0].header.name).toBe(expectedName);
 		expect(decoder.decode(entries[0].data)).toBe("hello long name\n");
+		expect(decoder.decode(entriesStrict[0].data)).toBe("hello long name\n");
 	});
 
 	it("extracts a tar with unicode name (PAX header)", async () => {

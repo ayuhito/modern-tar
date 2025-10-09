@@ -25,6 +25,24 @@ describe("GNU format support", () => {
 			expect(content).toBe("Hello, world!");
 		});
 
+		it("extracts a gnu format tar in strict mode", async () => {
+			const buffer = await readFile(GNU_TAR);
+			const entries = await unpackTar(buffer, { strict: true });
+
+			expect(entries).toHaveLength(1);
+			const [entry] = entries;
+
+			expect(entry.header.name).toBe("test.txt");
+			expect(entry.header.size).toBe(14);
+			expect(entry.header.uid).toBe(12345);
+			expect(entry.header.gid).toBe(67890);
+			expect(entry.header.uname).toBe("myuser");
+			expect(entry.header.gname).toBe("mygroup");
+
+			const content = decoder.decode(entry.data).trim();
+			expect(content).toBe("Hello, world!");
+		});
+
 		it("correctly parses GNU incremental format archives", async () => {
 			const buffer = await readFile(GNU_INCREMENTAL_TAR);
 			const entries = await unpackTar(buffer);
@@ -41,6 +59,19 @@ describe("GNU format support", () => {
 
 			const content = decoder.decode(entry.data).trim();
 			expect(content).toBe("Hello, world!");
+		});
+
+		it("does not apply prefix for GNU tar format", async () => {
+			// GNU incremental tar has non-pathname data in prefix field
+			const buffer = await readFile(GNU_INCREMENTAL_TAR);
+			const entries = await unpackTar(buffer, { strict: true });
+
+			expect(entries).toHaveLength(1);
+			const [entry] = entries;
+
+			// Should NOT have prefix applied (would be corrupted filename if it did)
+			expect(entry.header.name).toBe("test.txt");
+			expect(entry.header.name).not.toContain("1347402"); // timestamp data
 		});
 	});
 
