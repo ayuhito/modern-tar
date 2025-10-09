@@ -6,8 +6,6 @@ import {
 	DEFAULT_FILE_MODE,
 	FLAGTYPE,
 	TYPEFLAG,
-	USTAR_CHECKSUM_OFFSET,
-	USTAR_CHECKSUM_SIZE,
 	USTAR_GID_OFFSET,
 	USTAR_GID_SIZE,
 	USTAR_GNAME_OFFSET,
@@ -47,9 +45,8 @@ import {
 	writeString,
 } from "./utils";
 
-//Internal header with additional fields needed during parsing.
+// Internal header with additional fields needed during parsing.
 export interface InternalTarHeader extends TarHeader {
-	checksum: number;
 	prefix?: string;
 }
 
@@ -149,7 +146,6 @@ export function parseUstarHeader(
 		mtime: new Date(
 			readNumeric(block, USTAR_MTIME_OFFSET, USTAR_MTIME_SIZE) * 1000,
 		),
-		checksum: readOctal(block, USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE),
 		type: FLAGTYPE[typeflag] || "file",
 		linkname: readString(block, USTAR_LINKNAME_OFFSET, USTAR_LINKNAME_SIZE),
 	};
