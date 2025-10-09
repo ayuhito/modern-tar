@@ -140,13 +140,6 @@ export function parseUstarHeader(
 		USTAR_TYPEFLAG_SIZE,
 	) as keyof typeof FLAGTYPE;
 
-	const magic = readString(block, USTAR_MAGIC_OFFSET, USTAR_MAGIC_SIZE);
-	// Check if this is USTAR-like (handles both standard USTAR and GNU tar).
-	const isUstarLike = magic.trim() === "ustar";
-	// Only standard USTAR (not GNU tar) has valid prefix field for pathnames.
-	// GNU tar uses "ustar  " and repurposes prefix for timestamp metadata.
-	const isStandardUstar = magic === "ustar";
-
 	const header: InternalTarHeader = {
 		name: readString(block, USTAR_NAME_OFFSET, USTAR_NAME_SIZE),
 		mode: readOctal(block, USTAR_MODE_OFFSET, USTAR_MODE_SIZE),
@@ -161,15 +154,17 @@ export function parseUstarHeader(
 		linkname: readString(block, USTAR_LINKNAME_OFFSET, USTAR_LINKNAME_SIZE),
 	};
 
+	const magic = readString(block, USTAR_MAGIC_OFFSET, USTAR_MAGIC_SIZE);
+
 	// Both GNU and USTAR formats have uname and gname.
-	if (isUstarLike) {
+	if (magic.trim() === "ustar") {
 		header.uname = readString(block, USTAR_UNAME_OFFSET, USTAR_UNAME_SIZE);
 		header.gname = readString(block, USTAR_GNAME_OFFSET, USTAR_GNAME_SIZE);
 	}
 
-	// But ONLY standard USTAR has a valid path prefix. The GNU format reuses this
-	// field for other metadata.
-	if (isStandardUstar)
+	// Only standard USTAR (not GNU tar) has valid prefix field for pathnames.
+	// GNU tar uses "ustar  " and repurposes prefix for timestamp metadata.
+	if (magic === "ustar")
 		header.prefix = readString(block, USTAR_PREFIX_OFFSET, USTAR_PREFIX_SIZE);
 
 	return header;
