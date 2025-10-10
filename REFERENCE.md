@@ -107,11 +107,11 @@ const tarStream = gzipStream.pipeThrough(createGzipDecoder());
 
 ## Node.js Filesystem API (`modern-tar/fs`)
 
-### `packTar(directoryPath: string, options?: PackOptionsFS): Readable`
+### `packTar(sources: string | TarSource[], options?: PackOptionsFS): Readable`
 
-Pack a directory into a Node.js Readable stream containing tar archive bytes.
+Pack a directory or multiple sources into a Node.js Readable stream containing tar archive bytes.
 
-- **`directoryPath`**: Path to the directory to pack.
+- **`sources`**: Either a directory path string or an array of `TarSource` objects.
 - **`options`**: Optional packing configuration (see `PackOptionsFS`).
 - **Returns**: Node.js `Readable` stream of tar archive bytes.
 
@@ -120,10 +120,19 @@ Pack a directory into a Node.js Readable stream containing tar archive bytes.
 ```typescript
 import { packTar } from 'modern-tar/fs';
 
+// Pack a directory
 const tarStream = packTar('/home/user/project', {
   dereference: true,  // Follow symlinks
   filter: (path, stats) => !path.includes('tmp'),
 });
+
+// Pack multiple sources
+const sources = [
+  { type: 'file', source: './package.json', target: 'project/package.json' },
+  { type: 'directory', source: './src', target: 'project/src' },
+  { type: 'content', content: 'Hello World!', target: 'project/hello.txt' }
+];
+const archiveStream = packTar(sources);
 ```
 
 ### `unpackTar(directoryPath: string, options?: UnpackOptionsFS): Writable`
@@ -151,30 +160,7 @@ const extractStream = unpackTar('/restore/location', {
 await pipeline(tarStream, extractStream);
 ```
 
-### `packTarSources(sources: TarSource[]): Readable`
 
-Pack multiple sources (files, directories, or raw content) into a tar archive stream.
-
-- **`sources`**: Array of `TarSource` objects describing what to include in the archive.
-- **Returns**: Node.js `Readable` stream of tar archive bytes.
-
-**Example:**
-
-```typescript
-import { packTarSources, type TarSource } from 'modern-tar/fs';
-import { createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
-
-const sources: TarSource[] = [
-  { type: 'file', source: './README.md', target: 'docs/readme.txt' },
-  { type: 'directory', source: './src', target: 'app/src' },
-  { type: 'content', content: '{"version": "1.0.0"}', target: 'app/config.json' },
-  { type: 'content', content: Buffer.from('binary data'), target: 'data/binary.dat' }
-];
-
-const archiveStream = packTarSources(sources);
-await pipeline(archiveStream, createWriteStream('app.tar'));
-```
 
 ## Types
 
@@ -251,7 +237,7 @@ interface PackOptionsFS {
   map?: (header: TarHeader) => TarHeader;
 }
 
-// Source types for packTarSources function
+// Source types for packTar function
 interface FileSource {
   type: "file";
   /** Path to the source file on the local filesystem */

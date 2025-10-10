@@ -1,209 +1,33 @@
-import { createReadStream } from "node:fs";
+import type { Stats } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import * as fs from "node:fs/promises";
+import { cpus } from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
+
 import { createTarPacker } from "../tar/packer";
 import type { TarHeader } from "../tar/types";
 import { normalizeBody } from "../tar/utils";
 import type { PackOptionsFS, TarSource } from "./types";
 
+type FileBody = { handle: FileHandle; size: number } | Uint8Array;
+
+type JobResult = {
+	header: TarHeader;
+	body?: FileBody;
+};
+
 /**
- * Packs multiple sources into a tar archive as a Node.js Readable stream from an
- * array of sources (files, directories, or raw content).
- *
- * @param sources - An array of {@link TarSource} objects describing what to include.
- * @param options - Optional packing configuration using {@link PackOptionsFS}.
- * @returns A Node.js [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable)
- * stream that outputs the tar archive bytes.
- *
- * @example
- * ```typescript
- * import { packTarSources, TarSource } from 'modern-tar/fs';
- *
- * const sources: TarSource[] = [
- * { type: 'file', source: './package.json', target: 'project/package.json' },
- * { type: 'directory', source: './src', target: 'project/src' },
- * { type: 'content', content: 'hello world', target: 'project/hello.txt' }
- * ];
- *
- * const archiveStream = packTarSources(sources);
- * await pipeline(archiveStream, createWriteStream('project.tar'));
- * ```
+ * @deprecated Use `packTar` instead. This function is now an alias for `packTar`.
  */
-export function packTarSources(
-	sources: TarSource[],
-	options: PackOptionsFS = {},
-): Readable {
-	const { dereference = false, filter, map, baseDir } = options;
-	const stream = new Readable({ read() {} });
-
-	const packer = createTarPacker(
-		(chunk) => stream.push(Buffer.from(chunk)),
-		(error) => stream.destroy(error),
-		() => stream.push(null), // End the stream.
-	);
-
-	(async () => {
-		try {
-			// Use a stack for non-recursive depth-first traversal.
-			const stack: TarSource[] = [...sources].reverse();
-			const seenInodes = new Map<number, string>();
-			const getStat = dereference ? fs.stat : fs.lstat;
-
-			while (stack.length > 0) {
-				// biome-ignore lint/style/noNonNullAssertion: Length checked above.
-				const source = stack.pop()!;
-
-				// Normalize paths to use forward slashes.
-				const target = source.target.replace(/\\/g, "/");
-
-				switch (source.type) {
-					case "file": {
-						// Skip unsafe symlinks when dereferencing.
-						if (
-							dereference &&
-							baseDir &&
-							(await isSymlinkUnsafe(source.source, baseDir))
-						) {
-							break;
-						}
-
-						const stat = await getStat(source.source);
-						if (filter && !filter(source.source, stat)) break;
-
-						let header: TarHeader = {
-							name: target,
-							size: 0,
-							mode: stat.mode,
-							mtime: stat.mtime,
-							uid: stat.uid,
-							gid: stat.gid,
-							type: "file",
-						};
-
-						if (stat.isFile()) {
-							header.size = stat.size;
-							// Handle hardlinks by tracking inode numbers.
-							if (stat.nlink > 1) {
-								const linkTarget = seenInodes.get(stat.ino);
-								if (linkTarget) {
-									header.type = "link";
-									header.linkname = linkTarget;
-									header.size = 0;
-								} else {
-									seenInodes.set(stat.ino, header.name);
-								}
-							}
-						} else if (stat.isSymbolicLink()) {
-							header.type = "symlink";
-							header.linkname = await fs.readlink(source.source);
-							header.size = 0;
-						} else {
-							break; // Skip unsupported file types (FIFOs, sockets, etc.)
-						}
-
-						if (map) header = map(header);
-
-						packer.add(header);
-
-						// Stream file content directly to the packer.
-						if (header.type === "file" && header.size > 0) {
-							for await (const chunk of createReadStream(source.source)) {
-								packer.write(chunk);
-							}
-						}
-						packer.endEntry();
-						break;
-					}
-
-					case "directory": {
-						// Skip unsafe symlinks when dereferencing.
-						if (
-							dereference &&
-							baseDir &&
-							(await isSymlinkUnsafe(source.source, baseDir))
-						) {
-							break;
-						}
-
-						const stat = await getStat(source.source);
-						if (filter && !filter(source.source, stat)) break;
-
-						let header: TarHeader = {
-							name: target.endsWith("/") ? target : `${target}/`,
-							size: 0,
-							mode: stat.mode,
-							mtime: stat.mtime,
-							uid: stat.uid,
-							gid: stat.gid,
-							type: "directory",
-						};
-
-						if (map) header = map(header);
-						packer.add(header);
-						packer.endEntry();
-
-						// Add directory children to the stack for processing.
-						const dirents = await fs.readdir(source.source, {
-							withFileTypes: true,
-						});
-
-						for (let i = dirents.length - 1; i >= 0; i--) {
-							const dirent = dirents[i];
-							const childSourcePath = path.join(source.source, dirent.name);
-							const childTargetPath = `${target.replace(/\/$/, "")}/${dirent.name}`;
-
-							// Skip unsafe symlinks when dereferencing.
-							if (
-								baseDir &&
-								dereference &&
-								(await isSymlinkUnsafe(childSourcePath, baseDir))
-							) {
-								continue;
-							}
-
-							stack.push({
-								type: dirent.isDirectory() ? "directory" : "file",
-								source: childSourcePath,
-								target: childTargetPath,
-							});
-						}
-
-						break;
-					}
-
-					case "content": {
-						const data = await normalizeBody(source.content);
-						let header: TarHeader = {
-							name: target,
-							size: data.length,
-							mode: source.mode ?? 0o644,
-							type: "file",
-						};
-
-						if (map) header = map(header);
-						packer.add(header);
-
-						if (data.length > 0) packer.write(data);
-						packer.endEntry();
-						break;
-					}
-				}
-			}
-			packer.finalize();
-		} catch (error) {
-			stream.destroy(error as Error);
-		}
-	})();
-
-	return stream;
-}
+export const packTarSources = packTar;
 
 /**
- * Pack a directory into a Node.js `Readable` stream. This is a convenience
- * wrapper around `packTarSources` that reads the contents of the specified directory.
+ * Pack a directory or multiple sources into a Node.js `Readable` stream containing
+ * tar archive bytes. Can pack either a single directory or an array of sources
+ * (files, directories, or raw content).
  *
- * @param directoryPath - Path to directory to pack.
+ * @param sources - Either a directory path string or an array of {@link TarSource} objects.
  * @param options - Optional packing configuration using {@link PackOptionsFS}.
  * @returns Node.js [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable) stream of tar archive bytes
  *
@@ -217,6 +41,15 @@ export function packTarSources(
  * const tarStream = packTar('/home/user/project');
  * await pipeline(tarStream, createWriteStream('project.tar'));
  *
+ * // Pack multiple sources
+ * const sources = [
+ *   { type: 'file', source: './package.json', target: 'project/package.json' },
+ *   { type: 'directory', source: './src', target: 'project/src' },
+ *   { type: 'content', content: 'hello world', target: 'project/hello.txt' }
+ * ];
+ * const archiveStream = packTar(sources);
+ * await pipeline(archiveStream, createWriteStream('project.tar'));
+ *
  * // With filtering and transformation
  * const filteredStream = packTar('/my/project', {
  *   filter: (path, stats) => !path.includes('node_modules'),
@@ -226,72 +59,275 @@ export function packTarSources(
  * ```
  */
 export function packTar(
-	directoryPath: string,
+	sources: TarSource[] | string,
 	options: PackOptionsFS = {},
 ): Readable {
 	const stream = new Readable({ read() {} });
 
 	(async () => {
-		try {
-			const resolvedPath = path.resolve(directoryPath);
-			const dirents = await fs.readdir(resolvedPath, { withFileTypes: true });
+		const packer = createTarPacker(
+			(chunk) => stream.push(Buffer.from(chunk)),
+			stream.destroy.bind(stream),
+			() => stream.push(null),
+		);
 
-			// Create sources for the top level contents of the directory.
-			const allSources: TarSource[] = dirents.map((dirent) => ({
-				type: dirent.isDirectory() ? "directory" : "file",
-				source: path.join(resolvedPath, dirent.name),
-				target: dirent.name,
-			}));
+		const {
+			dereference = false,
+			filter,
+			map,
+			baseDir,
+			concurrency = cpus().length || 8,
+		} = options;
 
-			// Filter out unsafe symlinks when dereferencing.
-			const sources: TarSource[] = [];
-			for (const source of allSources) {
-				if (
-					source.type === "content" ||
-					!options.dereference ||
-					!(await isSymlinkUnsafe(source.source, resolvedPath))
-				) {
-					sources.push(source);
+		// Determine input type and resolve directory path if needed
+		const isDir = typeof sources === "string";
+		const directoryPath = isDir ? path.resolve(sources) : null;
+
+		// Create initial job queue from directory contents or provided sources
+		const jobs: TarSource[] = isDir
+			? // biome-ignore lint/style/noNonNullAssertion: isDir matches this check.
+				(await fs.readdir(directoryPath!, { withFileTypes: true })).map(
+					(entry) => ({
+						type: entry.isDirectory() ? "directory" : "file",
+						// biome-ignore lint/style/noNonNullAssertion: Checked above.
+						source: path.join(directoryPath!, entry.name),
+						target: entry.name,
+					}),
+				)
+			: (sources as TarSource[]);
+
+		const results = new Map<number, JobResult | null>();
+		// Resolvers is used to notify the writer when a job result is ready.
+		const resolvers = new Map<number, () => void>();
+		// inodes can be 64-bit, so use bigint for correctness.
+		const seenInodes = new Map<bigint, string>();
+
+		let jobIndex = 0;
+		let writeIndex = 0;
+		let activeWorkers = 0;
+		let allJobsQueued = false;
+
+		const writer = async () => {
+			const readBuffer = Buffer.alloc(64 * 1024);
+
+			while (true) {
+				if (stream.destroyed) return;
+
+				// Terminate only when all jobs generated by workers have been written.
+				if (allJobsQueued && writeIndex >= jobs.length) {
+					break;
 				}
+
+				// Wait for the next result if it's not ready yet.
+				if (!results.has(writeIndex)) {
+					await new Promise<void>((resolve) =>
+						resolvers.set(writeIndex, resolve),
+					);
+					continue;
+				}
+
+				// Write out all ready results in order. Clean up maps to free memory.
+				// biome-ignore lint/style/noNonNullAssertion: .has check above.
+				const result = results.get(writeIndex)!;
+				results.delete(writeIndex);
+				resolvers.delete(writeIndex);
+
+				// Skip null results (filtered out).
+				if (!result) {
+					writeIndex++;
+					continue;
+				}
+
+				packer.add(result.header);
+
+				// Write file content if present.
+				if (result.body) {
+					if (result.body instanceof Uint8Array) {
+						if (result.body.length > 0) packer.write(result.body);
+					} else {
+						const { handle, size } = result.body;
+						try {
+							let bytesLeft = size;
+							while (bytesLeft > 0 && !stream.destroyed) {
+								const toRead = Math.min(bytesLeft, readBuffer.length);
+
+								const { bytesRead } = await handle.read(
+									readBuffer,
+									0,
+									toRead,
+									null,
+								);
+
+								if (bytesRead === 0) break; // EOF
+
+								packer.write(readBuffer.subarray(0, bytesRead));
+								bytesLeft -= bytesRead;
+							}
+						} catch (error) {
+							stream.destroy(error as Error);
+							return;
+						} finally {
+							await handle.close();
+						}
+					}
+				}
+				packer.endEntry();
+				writeIndex++;
+			}
+		};
+
+		const controller = () => {
+			if (stream.destroyed || allJobsQueued) return;
+
+			// Start new workers while under concurrency limit and jobs remain.
+			while (activeWorkers < concurrency && jobIndex < jobs.length) {
+				activeWorkers++;
+				const currentIndex = jobIndex++;
+
+				processJob(jobs[currentIndex], currentIndex)
+					.catch(stream.destroy.bind(stream))
+					.finally(() => {
+						activeWorkers--;
+						controller(); // Check for more work.
+					});
 			}
 
-			// Forward data to our stream from source packer.
-			const sourceStream = packTarSources(sources, {
-				...options,
-				baseDir: resolvedPath,
-			});
+			// If no active workers and all jobs have been queued, signal completion.
+			if (activeWorkers === 0 && jobIndex >= jobs.length) {
+				allJobsQueued = true;
+				resolvers.get(writeIndex)?.(); // Unblock writer if it's waiting.
+			}
+		};
 
-			sourceStream.on("data", (chunk) => stream.push(chunk));
-			sourceStream.on("end", () => stream.push(null));
-			sourceStream.on("error", (err) => stream.destroy(err));
-		} catch (error) {
-			stream.destroy(error as Error);
-		}
-	})();
+		const processJob = async (job: TarSource, index: number) => {
+			let jobResult: JobResult | null = null;
+
+			// Normalize target path to use forward slashes.
+			const target = job.target.replace(/\\/g, "/");
+
+			try {
+				if (job.type === "content") {
+					const data = await normalizeBody(job.content);
+					const stat = {
+						size: data.length,
+						isFile: () => true,
+						isDirectory: () => false,
+						isSymbolicLink: () => false,
+						mode: job.mode ?? 0o644,
+						mtime: new Date(),
+						uid: process.getuid?.() ?? 0,
+						gid: process.getgid?.() ?? 0,
+					} as Stats;
+
+					if (filter && !filter(target, stat)) return;
+
+					let header: TarHeader = {
+						name: target,
+						type: "file",
+						size: stat.size,
+						mode: stat.mode,
+						mtime: stat.mtime,
+						uid: stat.uid,
+						gid: stat.gid,
+					};
+
+					if (map) header = map(header);
+
+					jobResult = { header, body: data };
+					return;
+				}
+
+				let stat = await fs.lstat(job.source, { bigint: true });
+
+				// Optionally follow symlinks to their targets.
+				if (dereference && stat.isSymbolicLink()) {
+					const linkTarget = await fs.readlink(job.source);
+					const resolved = path.resolve(path.dirname(job.source), linkTarget);
+
+					// Ensure symlinks do not point outside the base directory.
+					const resolvedBase = baseDir ?? directoryPath ?? process.cwd();
+					if (
+						!resolved.startsWith(resolvedBase + path.sep) &&
+						resolved !== resolvedBase
+					) {
+						return; // Skip and do no further work.
+					}
+
+					stat = await fs.stat(job.source, { bigint: true }); // Follow the link.
+				}
+
+				// BigIntStats have the same methods as regular Stats.
+				if (filter && !filter(target, stat as unknown as Stats)) return;
+
+				// Cast bigint fields to number where safe.
+				let header: TarHeader = {
+					name: target,
+					size: 0,
+					mode: Number(stat.mode),
+					mtime: stat.mtime,
+					uid: Number(stat.uid),
+					gid: Number(stat.gid),
+					type: "file", // Default type
+				};
+
+				let body: FileBody | undefined;
+				if (stat.isDirectory()) {
+					header.type = "directory";
+					header.name = target.endsWith("/") ? target : `${target}/`;
+
+					// Enqueue children for processing.
+					try {
+						for (const d of await fs.readdir(job.source, {
+							withFileTypes: true,
+						})) {
+							jobs.push({
+								type: d.isDirectory() ? "directory" : "file",
+								source: path.join(job.source, d.name),
+								target: `${header.name}${d.name}`, // Reuse normalized parent path.
+							});
+						}
+					} catch {}
+				} else if (stat.isSymbolicLink()) {
+					// Store the link itself, not the target file.
+					header.type = "symlink";
+					header.linkname = await fs.readlink(job.source);
+				} else if (stat.isFile()) {
+					header.size = Number(stat.size);
+
+					// Deduplicate hard links with inode number.
+					if (stat.nlink > 1 && seenInodes.has(stat.ino)) {
+						header.type = "link";
+						// biome-ignore lint/style/noNonNullAssertion: .has check above.
+						header.linkname = seenInodes.get(stat.ino)!;
+						header.size = 0;
+					} else {
+						// Else handle as a regular file.
+						if (stat.nlink > 1) seenInodes.set(stat.ino, target);
+						if (header.size > 0) {
+							const handle = await fs.open(job.source, "r");
+							body = { handle, size: header.size };
+						}
+					}
+				} else {
+					return; // Skip unsupported file types (sockets, FIFOs, etc.)
+				}
+
+				if (map) header = map(header);
+				jobResult = { header, body };
+			} finally {
+				// Store the result (or null if filtered out) and notify the writer.
+				results.set(index, jobResult);
+				resolvers.get(index)?.();
+			}
+		};
+
+		// Start the controller and writer.
+		controller();
+		await writer();
+
+		// Finalize the packer to write end-of-archive blocks.
+		if (!stream.destroyed) packer.finalize();
+	})().catch((error) => stream.destroy(error));
 
 	return stream;
-}
-
-// If dereference is true, we need to ensure that the symlink target does not point outside baseDir.
-async function isSymlinkUnsafe(
-	sourcePath: string,
-	baseDir: string,
-): Promise<boolean> {
-	try {
-		const lstat = await fs.lstat(sourcePath);
-		if (lstat.isSymbolicLink()) {
-			const linkTarget = await fs.readlink(sourcePath);
-			const resolvedTarget = path.resolve(path.dirname(sourcePath), linkTarget);
-			// Ensure the resolved target is the base directory itself or a subdirectory.
-			return !(
-				resolvedTarget === baseDir ||
-				resolvedTarget.startsWith(baseDir + path.sep)
-			);
-		}
-	} catch {
-		// If we can't read the symlink, it's safer to skip it
-		return true;
-	}
-
-	return false;
 }

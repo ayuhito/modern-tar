@@ -5,12 +5,7 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	packTar as packTarFS,
-	packTarSources,
-	type TarSource,
-	unpackTar,
-} from "../../src/fs";
+import { packTar as packTarFS, type TarSource, unpackTar } from "../../src/fs";
 
 import { packTar, type TarEntry } from "../../src/web";
 import { INVALID_TAR } from "../web/fixtures";
@@ -2127,7 +2122,7 @@ describe("security", () => {
 					{ type: "file", source: forbiddenSymlink, target: "forbidden-link" },
 				];
 
-				const packStream = packTarSources(sources, {
+				const packStream = packTarFS(sources, {
 					dereference: true,
 					baseDir: allowedDir, // Custom security boundary
 				});

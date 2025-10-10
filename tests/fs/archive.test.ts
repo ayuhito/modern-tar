@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { packTarSources, type TarSource, unpackTar } from "../../src/fs";
+import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/utils";
 
 const isWindows = process.platform === "win32";
@@ -48,7 +48,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -84,7 +84,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -125,7 +125,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -195,7 +195,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -237,7 +237,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -265,7 +265,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -305,7 +305,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -343,7 +343,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -360,7 +360,7 @@ describe("packTarSources", () => {
 	it("handles empty sources array", async () => {
 		const sources: TarSource[] = [];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "empty.tar");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
@@ -388,7 +388,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -422,7 +422,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 		const tarPath = path.join(tmpDir, "test.tar");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -445,7 +445,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const archiveStream = packTarSources(sources);
+		const archiveStream = packTar(sources);
 
 		// Should reject when trying to read the stream
 		await expect(async () => {
@@ -467,7 +467,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const stream = packTarSources(invalidSources);
+		const stream = packTar(invalidSources);
 		await expect(
 			new Promise((resolve, reject) => {
 				stream.on("error", reject);
@@ -486,7 +486,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const boolStream = packTarSources(booleanSources);
+		const boolStream = packTar(booleanSources);
 		await expect(
 			new Promise((resolve, reject) => {
 				boolStream.on("error", reject);
@@ -505,7 +505,7 @@ describe("packTarSources", () => {
 			},
 		];
 
-		const objStream = packTarSources(objectSources);
+		const objStream = packTar(objectSources);
 		await expect(
 			new Promise((resolve, reject) => {
 				objStream.on("error", reject);

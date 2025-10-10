@@ -16,6 +16,11 @@ export interface PackOptionsFS {
 	map?: (header: TarHeader) => TarHeader;
 	/** Base directory for symlink security validation, when `dereference` is set to true. */
 	baseDir?: string;
+	/**
+	 * Maximum number of concurrent filesystem operations during packing.
+	 * @default os.cpus().length || 8
+	 */
+	concurrency?: number;
 }
 
 /**

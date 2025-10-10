@@ -197,7 +197,7 @@ await pipeline(sourceStream, extractStream);
 #### Archive Creation
 
 ```typescript
-import { packTarSources, type TarSource } from 'modern-tar/fs';
+import { packTar, type TarSource } from 'modern-tar/fs';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 
@@ -209,7 +209,7 @@ const sources: TarSource[] = [
   { type: 'content', content: '#!/bin/bash\necho "Executable"', target: 'bin/script.sh', mode: 0o755 }
 ];
 
-const archiveStream = packTarSources(sources);
+const archiveStream = packTar(sources);
 await pipeline(archiveStream, createWriteStream('project.tar'));
 ```
 
