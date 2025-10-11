@@ -328,7 +328,10 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 		onHeader(header: TarHeader) {
 			if (signal.aborted) return;
 
-			activeEntryStream = new PassThrough();
+			activeEntryStream = new PassThrough({
+				// Use 512KB buffer for files > 1MB.
+				highWaterMark: header.size > 1048576 ? 524288 : undefined,
+			});
 			const entryStream = activeEntryStream;
 
 			// Queue the operation.
