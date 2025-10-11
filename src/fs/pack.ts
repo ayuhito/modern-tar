@@ -66,7 +66,7 @@ export function packTar(
 
 	(async () => {
 		const packer = createTarPacker(
-			(chunk) => stream.push(chunk),
+			(chunk) => stream.push(Buffer.from(chunk)),
 			stream.destroy.bind(stream),
 			() => stream.push(null),
 		);
@@ -308,7 +308,7 @@ export function packTar(
 							if (header.size < 32 * 1024) {
 								body = await fs.readFile(job.source);
 							} else {
-								// For large files, stream from disk when needed.
+								// For large files, stream from from disk when needed.
 								body = {
 									handle: await fs.open(job.source, "r"),
 									size: header.size,
