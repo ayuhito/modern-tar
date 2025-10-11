@@ -304,8 +304,16 @@ export function packTar(
 						// Else handle as a regular file.
 						if (stat.nlink > 1) seenInodes.set(stat.ino, target);
 						if (header.size > 0) {
-							const handle = await fs.open(job.source, "r");
-							body = { handle, size: header.size };
+							// If the file is small (< 32KB), read it into a buffer immediately.
+							if (header.size < 32 * 1024) {
+								body = await fs.readFile(job.source);
+							} else {
+								// For large files, stream from from disk when needed.
+								body = {
+									handle: await fs.open(job.source, "r"),
+									size: header.size,
+								};
+							}
 						}
 					}
 				} else {
