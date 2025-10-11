@@ -2,6 +2,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -225,6 +226,116 @@ describe("packTarSources", () => {
 		expect(blobExtracted).toBe("Hello from Blob!");
 		expect(streamExtracted).toBe("Hello from ReadableStream!");
 		expect(emptyContent).toBe("");
+	});
+
+	it("packs content sources with Node Readable", async () => {
+		const readableContent = "Hello from Readable!";
+		const readable = Readable.from([Buffer.from(readableContent, 'utf-8')]);
+
+		const sources: TarSource[] = [
+			{
+				type: "content",
+				content: readable,
+				target: "streams/readable.txt",
+			},
+		];
+
+		const archiveStream = packTar(sources);
+		const tarPath = path.join(tmpDir, "readable-test.tar");
+		const destDir = path.join(tmpDir, "readable-extracted");
+
+		await pipeline(archiveStream, createWriteStream(tarPath));
+		const unpackStream = unpackTar(destDir);
+		await pipeline(createReadStream(tarPath), unpackStream);
+
+		const extractedContent = await fs.readFile(
+			path.join(destDir, "streams", "readable.txt"),
+			"utf-8",
+		);
+
+		expect(extractedContent).toBe("Hello from Node.js Readable!");
+	});
+
+	it("packs content sources with Node Readable streams of different chunk types", async () => {
+		// Test with string chunks
+		const stringChunks = Readable.from(['Hello ', 'from ', 'string ', 'chunks!']);
+
+		// Test with mixed Buffer and Uint8Array chunks
+		const mixedChunks = new Readable({
+			read() {}
+		});
+		mixedChunks.push(Buffer.from('Mixed: '));
+		mixedChunks.push(new Uint8Array([66, 117, 102, 102, 101, 114])); // "Buffer"
+		mixedChunks.push(' and ');
+		mixedChunks.push(new Uint8Array([85, 105, 110, 116, 56])); // "Uint8"
+		mixedChunks.push(null); // End stream
+
+		const sources: TarSource[] = [
+			{
+				type: "content",
+				content: stringChunks,
+				target: "streams/string-chunks.txt",
+			},
+			{
+				type: "content",
+				content: mixedChunks,
+				target: "streams/mixed-chunks.txt",
+			},
+		];
+
+		const archiveStream = packTar(sources);
+		const tarPath = path.join(tmpDir, "chunks-test.tar");
+		const destDir = path.join(tmpDir, "chunks-extracted");
+
+		await pipeline(archiveStream, createWriteStream(tarPath));
+		const unpackStream = unpackTar(destDir);
+		await pipeline(createReadStream(tarPath), unpackStream);
+
+		// Verify the content from different chunk types
+		const stringContent = await fs.readFile(
+			path.join(destDir, "streams", "string-chunks.txt"),
+			"utf-8",
+		);
+		const mixedContent = await fs.readFile(
+			path.join(destDir, "streams", "mixed-chunks.txt"),
+			"utf-8",
+		);
+
+		expect(stringContent).toBe("Hello from string chunks!");
+		expect(mixedContent).toBe("Mixed: Buffer and Uint8");
+	});
+
+	it("packs content sources with Web Readable Streams", async () => {
+		const webStreamContent = "Hello from Web ReadableStream!";
+		const webStream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(encoder.encode(webStreamContent));
+				controller.close();
+			},
+		});
+
+		const sources: TarSource[] = [
+			{
+				type: "content",
+				content: webStream,
+				target: "streams/web-stream.txt",
+			},
+		];
+
+		const archiveStream = packTar(sources);
+		const tarPath = path.join(tmpDir, "web-stream-test.tar");
+		const destDir = path.join(tmpDir, "web-stream-extracted");
+
+		await pipeline(archiveStream, createWriteStream(tarPath));
+		const unpackStream = unpackTar(destDir);
+		await pipeline(createReadStream(tarPath), unpackStream);
+
+		const extractedContent = await fs.readFile(
+			path.join(destDir, "streams", "web-stream.txt"),
+			"utf-8",
+		);
+
+		expect(extractedContent).toBe("Hello from Web ReadableStream!");
 	});
 
 	it("packs content source with custom mode", async () => {

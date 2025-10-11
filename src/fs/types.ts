@@ -1,4 +1,5 @@
 import type { Stats } from "node:fs";
+import type { Readable } from "node:stream";
 import type { TarEntryData, TarHeader, UnpackOptions } from "../tar/types";
 
 /**
@@ -71,7 +72,7 @@ export interface DirectorySource {
 export interface ContentSource {
 	type: "content";
 	/** Raw content to add. Supports string, Uint8Array, ArrayBuffer, ReadableStream, Blob, or null. */
-	content: TarEntryData;
+	content: TarEntryData | Readable;
 	/** Destination path for the content inside the tar archive. */
 	target: string;
 	/** Optional Unix file permissions for the entry (e.g., 0o644). */

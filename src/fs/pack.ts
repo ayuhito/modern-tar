@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import { cpus } from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
+import { buffer } from "node:stream/consumers";
 
 import { createTarPacker } from "../tar/packer";
 import type { TarHeader } from "../tar/types";
@@ -207,7 +208,13 @@ export function packTar(
 
 			try {
 				if (job.type === "content") {
-					const data = await normalizeBody(job.content);
+					let data: Uint8Array;
+					if (job.content instanceof Readable || job.content instanceof ReadableStream) {
+						data = await buffer(job.content);
+					} else {
+						data = await normalizeBody(job.content);
+					}
+
 					const stat = {
 						size: data.length,
 						isFile: () => true,

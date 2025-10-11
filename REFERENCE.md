@@ -257,7 +257,7 @@ interface DirectorySource {
 interface ContentSource {
   type: "content";
   /** Raw content to add. Supports string, Uint8Array, ArrayBuffer, ReadableStream, Blob, or null. */
-  content: TarEntryData;
+  content: TarEntryData | Readable;
   /** Destination path inside the tar archive */
   target: string;
   /** Optional Unix file permissions (e.g., 0o644, 0o755) */
