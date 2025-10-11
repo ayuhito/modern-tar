@@ -253,7 +253,7 @@ describe("packTarSources", () => {
 			"utf-8",
 		);
 
-		expect(extractedContent).toBe("Hello from Node.js Readable!");
+		expect(extractedContent).toBe("Hello from Readable!");
 	});
 
 	it("packs content sources with Node Readable streams of different chunk types", async () => {
