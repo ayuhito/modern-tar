@@ -1,12 +1,8 @@
 import { transformHeader } from "../tar/options";
-import type {
-	ParsedTarEntryWithData,
-	TarEntry,
-	TarHeader,
-	UnpackOptions,
-} from "../tar/types";
+import type { TarHeader, UnpackOptions } from "../tar/types";
 import { normalizeBody, streamToBuffer } from "../tar/utils";
 import { createTarPacker } from "./pack";
+import type { ParsedTarEntryWithData, TarEntry } from "./types";
 import { createTarDecoder } from "./unpack";
 
 /**

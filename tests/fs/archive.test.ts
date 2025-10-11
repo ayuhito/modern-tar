@@ -185,9 +185,10 @@ describe("packTarSources", () => {
 				target: "types/blob.txt",
 			},
 			{
-				type: "content",
+				type: "stream",
 				content: stream,
 				target: "types/stream.txt",
+				size: Buffer.byteLength(streamContent, "utf-8"),
 			},
 			{
 				type: "content",
@@ -228,15 +229,16 @@ describe("packTarSources", () => {
 		expect(emptyContent).toBe("");
 	});
 
-	it("packs content sources with Node Readable", async () => {
+	it("packs StreamSource with Node Readable", async () => {
 		const readableContent = "Hello from Readable!";
-		const readable = Readable.from([Buffer.from(readableContent, 'utf-8')]);
+		const readable = Readable.from([Buffer.from(readableContent, "utf-8")]);
 
 		const sources: TarSource[] = [
 			{
-				type: "content",
+				type: "stream",
 				content: readable,
 				target: "streams/readable.txt",
+				size: Buffer.byteLength(readableContent, "utf-8"),
 			},
 		];
 
@@ -258,28 +260,35 @@ describe("packTarSources", () => {
 
 	it("packs content sources with Node Readable streams of different chunk types", async () => {
 		// Test with string chunks
-		const stringChunks = Readable.from(['Hello ', 'from ', 'string ', 'chunks!']);
+		const stringChunks = Readable.from([
+			"Hello ",
+			"from ",
+			"string ",
+			"chunks!",
+		]);
 
 		// Test with mixed Buffer and Uint8Array chunks
 		const mixedChunks = new Readable({
-			read() {}
+			read() {},
 		});
-		mixedChunks.push(Buffer.from('Mixed: '));
+		mixedChunks.push(Buffer.from("Mixed: "));
 		mixedChunks.push(new Uint8Array([66, 117, 102, 102, 101, 114])); // "Buffer"
-		mixedChunks.push(' and ');
+		mixedChunks.push(" and ");
 		mixedChunks.push(new Uint8Array([85, 105, 110, 116, 56])); // "Uint8"
 		mixedChunks.push(null); // End stream
 
 		const sources: TarSource[] = [
 			{
-				type: "content",
+				type: "stream",
 				content: stringChunks,
 				target: "streams/string-chunks.txt",
+				size: Buffer.byteLength("Hello from string chunks!", "utf-8"),
 			},
 			{
-				type: "content",
+				type: "stream",
 				content: mixedChunks,
 				target: "streams/mixed-chunks.txt",
+				size: Buffer.byteLength("Mixed: Buffer and Uint8", "utf-8"),
 			},
 		];
 
@@ -305,7 +314,7 @@ describe("packTarSources", () => {
 		expect(mixedContent).toBe("Mixed: Buffer and Uint8");
 	});
 
-	it("packs content sources with Web Readable Streams", async () => {
+	it("packs StreamSource with Web ReadableStream", async () => {
 		const webStreamContent = "Hello from Web ReadableStream!";
 		const webStream = new ReadableStream({
 			start(controller) {
@@ -316,9 +325,10 @@ describe("packTarSources", () => {
 
 		const sources: TarSource[] = [
 			{
-				type: "content",
+				type: "stream",
 				content: webStream,
 				target: "streams/web-stream.txt",
+				size: Buffer.byteLength(webStreamContent, "utf-8"),
 			},
 		];
 
@@ -624,5 +634,212 @@ describe("packTarSources", () => {
 				objStream.resume();
 			}),
 		).rejects.toThrow(/Unsupported content type/);
+	});
+
+	it("handles StreamSource with custom mode", async () => {
+		const content = "Stream with custom mode";
+		const readable = Readable.from([Buffer.from(content, "utf-8")]);
+
+		const sources: TarSource[] = [
+			{
+				type: "stream",
+				content: readable,
+				target: "custom-mode-stream.txt",
+				size: Buffer.byteLength(content, "utf-8"),
+				mode: 0o755,
+			},
+		];
+
+		const archiveStream = packTar(sources);
+		const tarPath = path.join(tmpDir, "custom-mode-stream.tar");
+		const destDir = path.join(tmpDir, "custom-mode-stream-extracted");
+
+		await pipeline(archiveStream, createWriteStream(tarPath));
+		const unpackStream = unpackTar(destDir);
+		await pipeline(createReadStream(tarPath), unpackStream);
+
+		const extractedContent = await fs.readFile(
+			path.join(destDir, "custom-mode-stream.txt"),
+			"utf-8",
+		);
+
+		expect(extractedContent).toBe(content);
+
+		// Check that the file mode is correctly set
+		const stat = await fs.stat(path.join(destDir, "custom-mode-stream.txt"));
+		expect(stat.mode & 0o777).toBe(0o755);
+	});
+
+	it("handles large StreamSource efficiently without OOM", async () => {
+		// Create a 10MB stream that generates data on the fly
+		const chunkSize = 1024 * 1024; // 1MB chunks
+		const totalChunks = 10;
+		const totalSize = chunkSize * totalChunks;
+
+		let chunkCount = 0;
+		const largeStream = new ReadableStream({
+			start(controller) {
+				const interval = setInterval(() => {
+					if (chunkCount >= totalChunks) {
+						clearInterval(interval);
+						controller.close();
+						return;
+					}
+
+					// Generate a 1MB chunk of data
+					const chunk = new Uint8Array(chunkSize);
+					chunk.fill(65 + (chunkCount % 26)); // Fill with A-Z pattern
+					controller.enqueue(chunk);
+					chunkCount++;
+				}, 1);
+			},
+		});
+
+		const sources: TarSource[] = [
+			{
+				type: "stream",
+				content: largeStream,
+				target: "large-file.bin",
+				size: totalSize,
+			},
+		];
+
+		const archiveStream = packTar(sources);
+		const tarPath = path.join(tmpDir, "large-stream.tar");
+		const destDir = path.join(tmpDir, "large-stream-extracted");
+
+		await pipeline(archiveStream, createWriteStream(tarPath));
+		const unpackStream = unpackTar(destDir);
+		await pipeline(createReadStream(tarPath), unpackStream);
+
+		// Verify the file was extracted correctly
+		const stat = await fs.stat(path.join(destDir, "large-file.bin"));
+		expect(stat.size).toBe(totalSize);
+
+		// Verify first few bytes to ensure content integrity
+		const handle = await fs.open(path.join(destDir, "large-file.bin"), "r");
+		const buffer = Buffer.alloc(1024);
+		await handle.read(buffer, 0, 1024, 0);
+		await handle.close();
+
+		// First chunk should be filled with 'A' (65)
+		expect(buffer[0]).toBe(65);
+		expect(buffer[1023]).toBe(65);
+	});
+
+	it("throws error for StreamSource with mismatched size", async () => {
+		const content = "Short content";
+		const readable = Readable.from([Buffer.from(content, "utf-8")]);
+
+		const sources: TarSource[] = [
+			{
+				type: "stream",
+				content: readable,
+				target: "mismatched-size.txt",
+				size: 1000, // Much larger than actual content
+			},
+		];
+
+		const archiveStream = packTar(sources);
+		const chunks: Buffer[] = [];
+
+		await expect(async () => {
+			for await (const chunk of archiveStream) {
+				chunks.push(chunk);
+			}
+		}).rejects.toThrow();
+	});
+
+	it("handles multiple StreamSources in mixed archive", async () => {
+		const stream1Content = "First stream content";
+		const stream2Content = "Second stream content";
+
+		const stream1 = Readable.from([Buffer.from(stream1Content, "utf-8")]);
+		const stream2 = new ReadableStream({
+			start(controller) {
+				controller.enqueue(encoder.encode(stream2Content));
+				controller.close();
+			},
+		});
+
+		const sources: TarSource[] = [
+			{
+				type: "file",
+				source: path.join(FIXTURES_DIR, "a", "hello.txt"),
+				target: "hello.txt",
+			},
+			{
+				type: "stream",
+				content: stream1,
+				target: "stream1.txt",
+				size: Buffer.byteLength(stream1Content, "utf-8"),
+			},
+			{
+				type: "content",
+				content: "Regular content",
+				target: "regular.txt",
+			},
+			{
+				type: "stream",
+				content: stream2,
+				target: "stream2.txt",
+				size: Buffer.byteLength(stream2Content, "utf-8"),
+			},
+		];
+
+		const archiveStream = packTar(sources);
+		const tarPath = path.join(tmpDir, "mixed-streams.tar");
+		const destDir = path.join(tmpDir, "mixed-streams-extracted");
+
+		await pipeline(archiveStream, createWriteStream(tarPath));
+		const unpackStream = unpackTar(destDir);
+		await pipeline(createReadStream(tarPath), unpackStream);
+
+		// Verify all files were extracted correctly
+		const helloContent = await fs.readFile(
+			path.join(destDir, "hello.txt"),
+			"utf-8",
+		);
+		const stream1ExtractedContent = await fs.readFile(
+			path.join(destDir, "stream1.txt"),
+			"utf-8",
+		);
+		const regularContent = await fs.readFile(
+			path.join(destDir, "regular.txt"),
+			"utf-8",
+		);
+		const stream2ExtractedContent = await fs.readFile(
+			path.join(destDir, "stream2.txt"),
+			"utf-8",
+		);
+
+		expect(helloContent).toBe(expectedHelloContent);
+		expect(stream1ExtractedContent).toBe(stream1Content);
+		expect(regularContent).toBe("Regular content");
+		expect(stream2ExtractedContent).toBe(stream2Content);
+	});
+
+	it("prevents missing size property on StreamSource", async () => {
+		const content = "Test content";
+		const readable = Readable.from([Buffer.from(content, "utf-8")]);
+
+		const invalidSource = {
+			type: "stream",
+			content: readable,
+			target: "missing-size.txt",
+			// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
+		} as any;
+
+		const sources: TarSource[] = [invalidSource];
+
+		// The packTar function should handle this gracefully or throw an error
+		const archiveStream = packTar(sources);
+
+		await expect(async () => {
+			const chunks: Buffer[] = [];
+			for await (const chunk of archiveStream) {
+				chunks.push(chunk);
+			}
+		}).rejects.toThrow();
 	});
 });

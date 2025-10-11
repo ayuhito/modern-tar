@@ -1,5 +1,6 @@
-import type { DecoderOptions, ParsedTarEntry } from "../tar/types";
+import type { DecoderOptions } from "../tar/types";
 import { createTarUnpacker } from "../tar/unpacker";
+import type { ParsedTarEntry } from "./types";
 
 /**
  * Create a transform stream that parses tar bytes into entries.

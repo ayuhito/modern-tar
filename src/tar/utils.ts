@@ -137,7 +137,6 @@ export async function normalizeBody(body: TarEntryData): Promise<Uint8Array> {
 	if (typeof body === "string") return encoder.encode(body);
 	if (body instanceof ArrayBuffer) return new Uint8Array(body);
 	if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
-	if (body instanceof ReadableStream) return streamToBuffer(body);
 
 	throw new TypeError("Unsupported content type for entry body.");
 }

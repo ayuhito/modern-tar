@@ -68,16 +68,33 @@ export interface DirectorySource {
 	target: string;
 }
 
-/** Describes raw content to be added to the archive. Supports all TarEntryData types including strings, buffers, streams, blobs, and null. */
+/** Describes raw, buffered content to be added to the archive. */
 export interface ContentSource {
 	type: "content";
-	/** Raw content to add. Supports string, Uint8Array, ArrayBuffer, ReadableStream, Blob, or null. */
-	content: TarEntryData | Readable;
+	/** Raw content to add. Supports string, Uint8Array, ArrayBuffer, Blob, or null. */
+	content: TarEntryData;
 	/** Destination path for the content inside the tar archive. */
 	target: string;
 	/** Optional Unix file permissions for the entry (e.g., 0o644). */
 	mode?: number;
 }
 
+/** Describes a stream of content to be added to the archive. */
+export interface StreamSource {
+	type: "stream";
+	/** A Readable or ReadableStream. */
+	content: Readable | ReadableStream;
+	/** Destination path for the content inside the tar archive. */
+	target: string;
+	/** The total size of the stream's content in bytes. This is required for streams. */
+	size: number;
+	/** Optional Unix file permissions for the entry (e.g., 0o644). */
+	mode?: number;
+}
+
 /** A union of all possible source types for creating a tar archive. */
-export type TarSource = FileSource | DirectorySource | ContentSource;
+export type TarSource =
+	| FileSource
+	| DirectorySource
+	| ContentSource
+	| StreamSource;
