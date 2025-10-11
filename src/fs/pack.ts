@@ -66,7 +66,7 @@ export function packTar(
 
 	(async () => {
 		const packer = createTarPacker(
-			(chunk) => stream.push(Buffer.from(chunk)),
+			(chunk) => stream.push(chunk),
 			stream.destroy.bind(stream),
 			() => stream.push(null),
 		);
