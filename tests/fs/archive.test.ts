@@ -667,7 +667,13 @@ describe("packTarSources", () => {
 
 		// Check that the file mode is correctly set
 		const stat = await fs.stat(path.join(destDir, "custom-mode-stream.txt"));
-		expect(stat.mode & 0o777).toBe(0o755);
+		// File modes work differently on Windows
+		if (isWindows) {
+			// On Windows, executable permissions are handled differently
+			expect(stat.mode & 0o777).toBe(0o666);
+		} else {
+			expect(stat.mode & 0o777).toBe(0o755);
+		}
 	});
 
 	it("handles large StreamSource efficiently without OOM", async () => {
