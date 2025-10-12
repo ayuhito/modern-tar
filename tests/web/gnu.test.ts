@@ -295,93 +295,91 @@ describe("GNU format support", () => {
 		});
 	});
 
-	describe("GNU Extensions Edge Cases", () => {
-		it("handles GNU long name ('L' type) edge cases", async () => {
-			const longName = `${"a".repeat(200)}.txt`;
-			const longNameData = encoder.encode(`${longName}\0`);
-			const nameBlock = new Uint8Array(
-				Math.ceil(longNameData.length / 512) * 512,
-			);
-			nameBlock.set(longNameData);
+	it("handles GNU long name ('L' type) edge cases", async () => {
+		const longName = `${"a".repeat(200)}.txt`;
+		const longNameData = encoder.encode(`${longName}\0`);
+		const nameBlock = new Uint8Array(
+			Math.ceil(longNameData.length / 512) * 512,
+		);
+		nameBlock.set(longNameData);
 
-			const gnuHeader = new Uint8Array(512);
-			encoder.encodeInto("././@LongLink", gnuHeader.subarray(0, 100));
-			encoder.encodeInto("0000000", gnuHeader.subarray(100, 108));
-			encoder.encodeInto("0000000", gnuHeader.subarray(108, 116));
-			encoder.encodeInto("0000000", gnuHeader.subarray(116, 124));
-			const nameSize = longNameData.length.toString(8).padStart(11, "0");
-			encoder.encodeInto(nameSize, gnuHeader.subarray(124, 135));
-			encoder.encodeInto("00000000000", gnuHeader.subarray(136, 148));
-			gnuHeader[156] = 76; // 'L' = gnu-long-name type
-			encoder.encodeInto("ustar  ", gnuHeader.subarray(257, 265));
-			writeChecksum(gnuHeader);
+		const gnuHeader = new Uint8Array(512);
+		encoder.encodeInto("././@LongLink", gnuHeader.subarray(0, 100));
+		encoder.encodeInto("0000000", gnuHeader.subarray(100, 108));
+		encoder.encodeInto("0000000", gnuHeader.subarray(108, 116));
+		encoder.encodeInto("0000000", gnuHeader.subarray(116, 124));
+		const nameSize = longNameData.length.toString(8).padStart(11, "0");
+		encoder.encodeInto(nameSize, gnuHeader.subarray(124, 135));
+		encoder.encodeInto("00000000000", gnuHeader.subarray(136, 148));
+		gnuHeader[156] = 76; // 'L' = gnu-long-name type
+		encoder.encodeInto("ustar  ", gnuHeader.subarray(257, 265));
+		writeChecksum(gnuHeader);
 
-			const fileHeader = new Uint8Array(512);
-			encoder.encodeInto("short.txt", fileHeader.subarray(0, 100));
-			encoder.encodeInto("0000644", fileHeader.subarray(100, 108));
-			encoder.encodeInto("0001750", fileHeader.subarray(108, 116));
-			encoder.encodeInto("0001750", fileHeader.subarray(116, 124));
-			encoder.encodeInto("00000000000", fileHeader.subarray(124, 136));
-			encoder.encodeInto("14157760701", fileHeader.subarray(136, 148));
-			fileHeader[156] = 48; // '0' = regular file type
-			encoder.encodeInto("ustar", fileHeader.subarray(257, 262));
-			encoder.encodeInto("00", fileHeader.subarray(263, 265));
-			writeChecksum(fileHeader);
+		const fileHeader = new Uint8Array(512);
+		encoder.encodeInto("short.txt", fileHeader.subarray(0, 100));
+		encoder.encodeInto("0000644", fileHeader.subarray(100, 108));
+		encoder.encodeInto("0001750", fileHeader.subarray(108, 116));
+		encoder.encodeInto("0001750", fileHeader.subarray(116, 124));
+		encoder.encodeInto("00000000000", fileHeader.subarray(124, 136));
+		encoder.encodeInto("14157760701", fileHeader.subarray(136, 148));
+		fileHeader[156] = 48; // '0' = regular file type
+		encoder.encodeInto("ustar", fileHeader.subarray(257, 262));
+		encoder.encodeInto("00", fileHeader.subarray(263, 265));
+		writeChecksum(fileHeader);
 
-			const archive = new Uint8Array(
-				gnuHeader.length + nameBlock.length + fileHeader.length + 1024,
-			);
-			archive.set(gnuHeader, 0);
-			archive.set(nameBlock, 512);
-			archive.set(fileHeader, 512 + nameBlock.length);
+		const archive = new Uint8Array(
+			gnuHeader.length + nameBlock.length + fileHeader.length + 1024,
+		);
+		archive.set(gnuHeader, 0);
+		archive.set(nameBlock, 512);
+		archive.set(fileHeader, 512 + nameBlock.length);
 
-			const [entry] = await unpackTar(archive);
-			expect(entry.header.name).toBe(longName);
-		});
+		const [entry] = await unpackTar(archive);
+		expect(entry.header.name).toBe(longName);
+	});
 
-		it("handles GNU long linkname ('K' type) edge cases", async () => {
-			const longLinkName = `${"b".repeat(200)}.txt`;
-			const linkNameData = encoder.encode(`${longLinkName}\0`);
-			const linkBlock = new Uint8Array(
-				Math.ceil(linkNameData.length / 512) * 512,
-			);
-			linkBlock.set(linkNameData);
+	it("handles GNU long linkname ('K' type) edge cases", async () => {
+		const longLinkName = `${"b".repeat(200)}.txt`;
+		const linkNameData = encoder.encode(`${longLinkName}\0`);
+		const linkBlock = new Uint8Array(
+			Math.ceil(linkNameData.length / 512) * 512,
+		);
+		linkBlock.set(linkNameData);
 
-			const gnuHeader = new Uint8Array(512);
-			encoder.encodeInto("././@LongLink", gnuHeader.subarray(0, 100));
-			encoder.encodeInto("0000000", gnuHeader.subarray(100, 108));
-			encoder.encodeInto("0000000", gnuHeader.subarray(108, 116));
-			encoder.encodeInto("0000000", gnuHeader.subarray(116, 124));
-			const linkSize = linkNameData.length.toString(8).padStart(11, "0");
-			encoder.encodeInto(linkSize, gnuHeader.subarray(124, 135));
-			encoder.encodeInto("00000000000", gnuHeader.subarray(136, 148));
-			gnuHeader[156] = 75; // 'K' = gnu-long-link-name type
-			encoder.encodeInto("ustar  ", gnuHeader.subarray(257, 265));
-			writeChecksum(gnuHeader);
+		const gnuHeader = new Uint8Array(512);
+		encoder.encodeInto("././@LongLink", gnuHeader.subarray(0, 100));
+		encoder.encodeInto("0000000", gnuHeader.subarray(100, 108));
+		encoder.encodeInto("0000000", gnuHeader.subarray(108, 116));
+		encoder.encodeInto("0000000", gnuHeader.subarray(116, 124));
+		const linkSize = linkNameData.length.toString(8).padStart(11, "0");
+		encoder.encodeInto(linkSize, gnuHeader.subarray(124, 135));
+		encoder.encodeInto("00000000000", gnuHeader.subarray(136, 148));
+		gnuHeader[156] = 75; // 'K' = gnu-long-link-name type
+		encoder.encodeInto("ustar  ", gnuHeader.subarray(257, 265));
+		writeChecksum(gnuHeader);
 
-			const symlinkHeader = new Uint8Array(512);
-			encoder.encodeInto("link.txt", symlinkHeader.subarray(0, 100));
-			encoder.encodeInto("0000644", symlinkHeader.subarray(100, 108));
-			encoder.encodeInto("0001750", symlinkHeader.subarray(108, 116));
-			encoder.encodeInto("0001750", symlinkHeader.subarray(116, 124));
-			encoder.encodeInto("00000000000", symlinkHeader.subarray(124, 136));
-			encoder.encodeInto("14157760701", symlinkHeader.subarray(136, 148));
-			symlinkHeader[156] = 50; // '2' = symlink type
-			encoder.encodeInto("ustar", symlinkHeader.subarray(257, 262));
-			encoder.encodeInto("00", symlinkHeader.subarray(263, 265));
-			writeChecksum(symlinkHeader);
+		const symlinkHeader = new Uint8Array(512);
+		encoder.encodeInto("link.txt", symlinkHeader.subarray(0, 100));
+		encoder.encodeInto("0000644", symlinkHeader.subarray(100, 108));
+		encoder.encodeInto("0001750", symlinkHeader.subarray(108, 116));
+		encoder.encodeInto("0001750", symlinkHeader.subarray(116, 124));
+		encoder.encodeInto("00000000000", symlinkHeader.subarray(124, 136));
+		encoder.encodeInto("14157760701", symlinkHeader.subarray(136, 148));
+		symlinkHeader[156] = 50; // '2' = symlink type
+		encoder.encodeInto("ustar", symlinkHeader.subarray(257, 262));
+		encoder.encodeInto("00", symlinkHeader.subarray(263, 265));
+		writeChecksum(symlinkHeader);
 
-			const archive = new Uint8Array(
-				gnuHeader.length + linkBlock.length + symlinkHeader.length + 1024,
-			);
-			archive.set(gnuHeader, 0);
-			archive.set(linkBlock, 512);
-			archive.set(symlinkHeader, 512 + linkBlock.length);
+		const archive = new Uint8Array(
+			gnuHeader.length + linkBlock.length + symlinkHeader.length + 1024,
+		);
+		archive.set(gnuHeader, 0);
+		archive.set(linkBlock, 512);
+		archive.set(symlinkHeader, 512 + linkBlock.length);
 
-			const [entry] = await unpackTar(archive);
-			expect(entry.header.name).toBe("link.txt");
-			expect(entry.header.type).toBe("symlink");
-			expect(entry.header.linkname).toBe(longLinkName);
-		});
+		const [entry] = await unpackTar(archive);
+		expect(entry.header.name).toBe("link.txt");
+		expect(entry.header.type).toBe("symlink");
+		expect(entry.header.linkname).toBe(longLinkName);
 	});
 });

@@ -214,6 +214,7 @@ describe("pack", () => {
 					}),
 					target: "test.txt",
 					// size is intentionally missing
+					// biome-ignore lint/suspicious/noExplicitAny: Testing.
 				} as any, // Cast to bypass TypeScript validation for testing
 			];
 

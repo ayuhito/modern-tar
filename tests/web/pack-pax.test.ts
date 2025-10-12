@@ -422,111 +422,109 @@ describe("PAX format support", () => {
 		});
 	});
 
-	describe("PAX Edge Cases", () => {
-		it("handles malformed PAX records gracefully", async () => {
-			// Test that invalid PAX records don't break parsing
-			const entries: TarEntry[] = [
-				{
-					header: {
-						name: "test.txt",
-						type: "file",
-						size: 4,
-						pax: {
-							// This will create a malformed record when packed
-							invalidSize: "not-a-number",
-							validPath: "test.txt",
-						},
+	it("handles malformed PAX records gracefully", async () => {
+		// Test that invalid PAX records don't break parsing
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: "test.txt",
+					type: "file",
+					size: 4,
+					pax: {
+						// This will create a malformed record when packed
+						invalidSize: "not-a-number",
+						validPath: "test.txt",
 					},
-					body: "test",
 				},
-			];
+				body: "test",
+			},
+		];
 
-			const buffer = await packTar(entries);
-			const extracted = await unpackTar(buffer);
+		const buffer = await packTar(entries);
+		const extracted = await unpackTar(buffer);
 
-			expect(extracted).toHaveLength(1);
-			expect(extracted[0].header.name).toBe("test.txt");
-			// The valid PAX attributes should still be applied
-			expect(extracted[0].header.pax?.validPath).toBe("test.txt");
-		});
+		expect(extracted).toHaveLength(1);
+		expect(extracted[0].header.name).toBe("test.txt");
+		// The valid PAX attributes should still be applied
+		expect(extracted[0].header.pax?.validPath).toBe("test.txt");
+	});
 
-		it("handles PAX records with zero length gracefully", async () => {
-			// Test edge case where PAX record might be empty
-			const entries: TarEntry[] = [
-				{
-					header: {
-						name: "empty-pax.txt",
-						type: "file",
-						size: 4,
-						pax: {
-							// Empty string value
-							emptyValue: "",
-							normalValue: "valid",
-						},
+	it("handles PAX records with zero length gracefully", async () => {
+		// Test edge case where PAX record might be empty
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: "empty-pax.txt",
+					type: "file",
+					size: 4,
+					pax: {
+						// Empty string value
+						emptyValue: "",
+						normalValue: "valid",
 					},
-					body: "test",
 				},
-			];
+				body: "test",
+			},
+		];
 
-			const buffer = await packTar(entries);
-			const extracted = await unpackTar(buffer);
+		const buffer = await packTar(entries);
+		const extracted = await unpackTar(buffer);
 
-			expect(extracted).toHaveLength(1);
-			expect(extracted[0].header.name).toBe("empty-pax.txt");
-			expect(extracted[0].header.pax?.emptyValue).toBe("");
-			expect(extracted[0].header.pax?.normalValue).toBe("valid");
-		});
+		expect(extracted).toHaveLength(1);
+		expect(extracted[0].header.name).toBe("empty-pax.txt");
+		expect(extracted[0].header.pax?.emptyValue).toBe("");
+		expect(extracted[0].header.pax?.normalValue).toBe("valid");
+	});
 
-		it("handles PAX records with special characters in values", async () => {
-			const entries: TarEntry[] = [
-				{
-					header: {
-						name: "special.txt",
-						type: "file",
-						size: 4,
-						pax: {
-							comment: "Contains\nnewlines\tand\ttabs",
-							path: "file with spaces and unicode: 🚀",
-							custom: "value_without_equals",
-						},
+	it("handles PAX records with special characters in values", async () => {
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: "special.txt",
+					type: "file",
+					size: 4,
+					pax: {
+						comment: "Contains\nnewlines\tand\ttabs",
+						path: "file with spaces and unicode: 🚀",
+						custom: "value_without_equals",
 					},
-					body: "test",
 				},
-			];
+				body: "test",
+			},
+		];
 
-			const buffer = await packTar(entries);
-			const extracted = await unpackTar(buffer);
+		const buffer = await packTar(entries);
+		const extracted = await unpackTar(buffer);
 
-			expect(extracted).toHaveLength(1);
-			expect(extracted[0].header.pax?.comment).toBe(
-				"Contains\nnewlines\tand\ttabs",
-			);
-			expect(extracted[0].header.name).toBe("file with spaces and unicode: 🚀");
-			expect(extracted[0].header.pax?.custom).toBe("value_without_equals");
-		});
+		expect(extracted).toHaveLength(1);
+		expect(extracted[0].header.pax?.comment).toBe(
+			"Contains\nnewlines\tand\ttabs",
+		);
+		expect(extracted[0].header.name).toBe("file with spaces and unicode: 🚀");
+		expect(extracted[0].header.pax?.custom).toBe("value_without_equals");
+	});
 
-		it("handles global PAX headers correctly", async () => {
-			// Test PAX header behavior - the implementation may include all entries
-			const entries: TarEntry[] = [
-				{
-					header: {
-						name: "file1.txt",
-						type: "file",
-						size: 4,
-						pax: {
-							comment: "test_comment",
-						},
+	it("handles global PAX headers correctly", async () => {
+		// Test PAX header behavior - the implementation may include all entries
+		const entries: TarEntry[] = [
+			{
+				header: {
+					name: "file1.txt",
+					type: "file",
+					size: 4,
+					pax: {
+						comment: "test_comment",
 					},
-					body: "test",
 				},
-			];
+				body: "test",
+			},
+		];
 
-			const buffer = await packTar(entries);
-			const extracted = await unpackTar(buffer);
+		const buffer = await packTar(entries);
+		const extracted = await unpackTar(buffer);
 
-			expect(extracted).toHaveLength(1);
-			expect(extracted[0].header.name).toBe("file1.txt");
-			expect(extracted[0].header.pax?.comment).toBe("test_comment");
-		});
+		expect(extracted).toHaveLength(1);
+		expect(extracted[0].header.name).toBe("file1.txt");
+		expect(extracted[0].header.pax?.comment).toBe("test_comment");
 	});
 });
