@@ -288,9 +288,11 @@ describe("pack", () => {
 		await fs.mkdir(testDir);
 		await fs.writeFile(path.join(testDir, "nested.txt"), "nested content");
 
-		// Set specific permissions
-		await fs.chmod(testFile, 0o600); // rw-------
-		await fs.chmod(testDir, 0o700);  // rwx------
+		// Set specific permissions (only on Unix systems)
+		if (process.platform !== "win32") {
+			await fs.chmod(testFile, 0o600); // rw-------
+			await fs.chmod(testDir, 0o700);  // rwx------
+		}
 
 		// Pack with mode overrides
 		const sources = [
@@ -304,7 +306,7 @@ describe("pack", () => {
 
 		await pipeline(packStream, unpackStream);
 
-		// Check that extracted files have the overridden modes, not the original ones
+		// Check that extracted files have the overridden modes
 		const extractedFile = path.join(destDir, "override.txt");
 		const extractedDir = path.join(destDir, "overridedir");
 
@@ -315,10 +317,17 @@ describe("pack", () => {
 		const fileMode = fileStat.mode & 0o777;
 		const dirMode = dirStat.mode & 0o777;
 
-		expect(fileMode).toBe(0o644); // Should be overridden mode, not 0o600
-		expect(dirMode).toBe(0o755);  // Should be overridden mode, not 0o700
+		if (process.platform === "win32") {
+			// On Windows, expect 0o666 for files due to Windows permission handling
+			expect(fileMode).toBe(0o666);
+			expect(dirStat.isDirectory()).toBe(true); // Verify it's a directory
+		} else {
+			// On Unix systems, expect the exact overridden modes
+			expect(fileMode).toBe(0o644); // Should be overridden mode, not 0o600
+			expect(dirMode).toBe(0o755);  // Should be overridden mode, not 0o700
+		}
 
-		// Verify content is still correct
+		// Verify content is still correct (all platforms)
 		const content = await fs.readFile(extractedFile, "utf-8");
 		expect(content).toBe("test content");
 
@@ -397,9 +406,17 @@ describe("pack", () => {
 		const contentStat = await fs.stat(extractedContent);
 
 		// Check modes (mask to get only permission bits)
-		expect(fileStat.mode & 0o777).toBe(customFileMode);
-		expect(dirStat.mode & 0o777).toBe(customDirMode);
-		expect(contentStat.mode & 0o777).toBe(customFileMode);
+		if (process.platform === "win32") {
+			// On Windows, expect 0o666 for files due to Windows permission handling
+			expect(fileStat.mode & 0o777).toBe(0o666);
+			expect(contentStat.mode & 0o777).toBe(0o666);
+			expect(dirStat.isDirectory()).toBe(true);
+		} else {
+			// On Unix systems, expect the exact overridden modes
+			expect(fileStat.mode & 0o777).toBe(customFileMode);
+			expect(dirStat.mode & 0o777).toBe(customDirMode);
+			expect(contentStat.mode & 0o777).toBe(customFileMode);
+		}
 
 		// Check modification times (within 1 second tolerance for filesystem precision)
 		const timeDiff = Math.abs(fileStat.mtime.getTime() - customMtime.getTime());
@@ -471,7 +488,13 @@ describe("pack", () => {
 		expect(content).toBe("partial override test");
 
 		// Mode should be preserved from filesystem (masked to permission bits)
-		expect(extractedStat.mode & 0o777).toBe(originalStat.mode & 0o777);
+		if (process.platform === "win32") {
+			// On Windows, expect 0o666 for files
+			expect(extractedStat.mode & 0o777).toBe(0o666);
+		} else {
+			// On Unix systems, expect the original filesystem mode
+			expect(extractedStat.mode & 0o777).toBe(originalStat.mode & 0o777);
+		}
 
 		// Modification time should be preserved (within tolerance)
 		const timeDiff = Math.abs(extractedStat.mtime.getTime() - originalStat.mtime.getTime());
