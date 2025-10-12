@@ -249,8 +249,8 @@ export function packTar(
 						isSymbolicLink: () => false,
 						mode: job.mode ?? 0o644,
 						mtime: job.mtime ?? new Date(),
-						uid: job.uid ?? 0,
-						gid: job.gid ?? 0,
+						uid: job.uid ?? (process.getuid?.() ?? 0),
+						gid: job.gid ?? (process.getgid?.() ?? 0),
 					} as Stats;
 
 					if (filter && !filter(target, stat)) return;
