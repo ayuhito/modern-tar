@@ -200,4 +200,81 @@ describe("pack", () => {
 			expect(stats.size).toBe(file.size);
 		}
 	});
+
+	describe("stream source validation", () => {
+		it("throws error when StreamSource has invalid size", async () => {
+			const sources = [
+				{
+					type: "stream" as const,
+					content: new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode("test content"));
+							controller.close();
+						},
+					}),
+					target: "test.txt",
+					// size is intentionally missing
+				} as any, // Cast to bypass TypeScript validation for testing
+			];
+
+			const packStream = packTar(sources);
+
+			await expect(async () => {
+				for await (const _chunk of packStream) {
+					// Just consume the stream to trigger the error
+				}
+			}).rejects.toThrow("StreamSource requires a positive size property.");
+		});
+
+		it("throws error when StreamSource has zero size", async () => {
+			const sources = [
+				{
+					type: "stream" as const,
+					content: new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode("test content"));
+							controller.close();
+						},
+					}),
+					target: "test.txt",
+					size: 0,
+				},
+			];
+
+			const packStream = packTar(sources);
+
+			await expect(async () => {
+				for await (const _chunk of packStream) {
+					// Just consume the stream to trigger the error
+				}
+			}).rejects.toThrow("StreamSource requires a positive size property.");
+		});
+
+		it("works correctly with valid StreamSource size", async () => {
+			const content = "test content for valid stream";
+			const sources = [
+				{
+					type: "stream" as const,
+					content: new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode(content));
+							controller.close();
+						},
+					}),
+					target: "valid-stream.txt",
+					size: content.length,
+				},
+			];
+
+			const destDir = path.join(tmpDir, "extracted");
+			const packStream = packTar(sources);
+			const unpackStream = unpackTar(destDir);
+
+			await pipeline(packStream, unpackStream);
+
+			const extractedFile = path.join(destDir, "valid-stream.txt");
+			const extractedContent = await fs.readFile(extractedFile, "utf-8");
+			expect(extractedContent).toBe(content);
+		});
+	});
 });

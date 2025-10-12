@@ -205,8 +205,11 @@ import { pipeline } from 'node:stream/promises';
 const sources: TarSource[] = [
   { type: 'file', source: './package.json', target: 'project/package.json' },
   { type: 'directory', source: './src', target: 'project/src' },
+  
   { type: 'content', content: 'Hello World!', target: 'project/hello.txt' },
-  { type: 'content', content: '#!/bin/bash\necho "Executable"', target: 'bin/script.sh', mode: 0o755 }
+  { type: 'content', content: '#!/bin/bash\necho "Executable"', target: 'bin/script.sh', mode: 0o755 },
+  { type: 'stream', content: createReadStream('./large-file.bin'), target: 'project/data.bin', size: 1048576 },
+  { type: 'stream', content: fetch('/api/data').then(r => r.body!), target: 'project/remote.json', size: 2048 }
 ];
 
 const archiveStream = packTar(sources);

@@ -223,12 +223,24 @@ export function packTar(
 			const target = job.target.replace(/\\/g, "/");
 
 			try {
-				const isStream = job.type === "stream";
-				if (job.type === "content" || isStream) {
-					const body = isStream
-						? job.content
-						: await normalizeBody(job.content);
-					const size = isStream ? job.size : (body as Uint8Array).length;
+				if (job.type === "content" || job.type === "stream") {
+					let body: FileBody;
+					let size: number;
+
+					if (job.type === "stream") {
+						// Validate size and throw if invalid.
+						if (typeof job.size !== "number" || job.size <= 0)
+							throw new Error(
+								"StreamSource requires a positive size property.",
+							);
+
+						size = job.size;
+						body = job.content;
+					} else {
+						const content = await normalizeBody(job.content);
+						size = content.length;
+						body = content;
+					}
 
 					const stat = {
 						size,
@@ -246,7 +258,7 @@ export function packTar(
 					let header: TarHeader = {
 						name: target,
 						type: "file",
-						size: stat.size,
+						size,
 						mode: stat.mode,
 						mtime: stat.mtime,
 						uid: stat.uid,
