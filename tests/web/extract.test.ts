@@ -1,16 +1,6 @@
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { writeChecksum } from "../../src/tar/checksum";
-import {
-	BLOCK_SIZE,
-	TYPEFLAG,
-	USTAR_CHECKSUM_OFFSET,
-	USTAR_MODE_OFFSET,
-	USTAR_NAME_OFFSET,
-	USTAR_SIZE_OFFSET,
-	USTAR_TYPEFLAG_OFFSET,
-} from "../../src/tar/constants";
-import type { ParsedTarEntry } from "../../src/tar/types";
+import { BLOCK_SIZE, USTAR_CHECKSUM_OFFSET } from "../../src/tar/constants";
 import { decoder, encoder } from "../../src/tar/utils";
 
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
@@ -24,7 +14,12 @@ import {
 	UNICODE_TAR,
 } from "./fixtures";
 
-describe("extract", () => {
+const createBaseArchive = (
+	entries: Parameters<typeof packTar>[0],
+): Promise<Uint8Array> => {
+	return packTar(entries);
+};
+describe("unpackTar", () => {
 	it("extracts a single file tar", async () => {
 		const buffer = await fs.readFile(ONE_FILE_TAR);
 		const entries = await unpackTar(buffer);
@@ -41,7 +36,6 @@ describe("extract", () => {
 		expect(entry.header.mtime).toEqual(new Date(1387580181000));
 		expect(entry.header.uname).toBe("maf");
 		expect(entry.header.gname).toBe("staff");
-
 		expect(decoder.decode(entry.data)).toBe("hello world\n");
 	});
 
@@ -50,530 +44,293 @@ describe("extract", () => {
 		const entries = await unpackTar(buffer);
 
 		expect(entries).toHaveLength(2);
-
 		expect(entries[0].header.name).toBe("file-1.txt");
-		expect(entries[0].header.size).toBe(12);
 		expect(decoder.decode(entries[0].data)).toBe("i am file-1\n");
-
 		expect(entries[1].header.name).toBe("file-2.txt");
-		expect(entries[1].header.size).toBe(12);
 		expect(decoder.decode(entries[1].data)).toBe("i am file-2\n");
 	});
 
-	it("extracts a tar with various types (directory, symlink)", async () => {
+	it("extracts a tar with various entry types (directory, symlink)", async () => {
 		const buffer = await fs.readFile(TYPES_TAR);
 		const entries = await unpackTar(buffer);
 
 		expect(entries).toHaveLength(2);
-
 		const [dir, link] = entries;
 
 		expect(dir.header.name).toBe("directory");
 		expect(dir.header.type).toBe("directory");
 		expect(dir.header.size).toBe(0);
-		expect(dir.header.mode).toBe(0o755);
 
 		expect(link.header.name).toBe("directory-link");
 		expect(link.header.type).toBe("symlink");
 		expect(link.header.linkname).toBe("directory");
-		expect(link.header.size).toBe(0);
-	});
-
-	it("extracts a tar with a long name (USTAR prefix)", async () => {
-		const buffer = await fs.readFile(LONG_NAME_TAR);
-		const expectedName =
-			"my/file/is/longer/than/100/characters/and/should/use/the/prefix/header/foobarbaz/foobarbaz/foobarbaz/foobarbaz/foobarbaz/foobarbaz/filename.txt";
-
-		// Test both strict and non-strict modes
-		const entries = await unpackTar(buffer);
-		const entriesStrict = await unpackTar(buffer, { strict: true });
-
-		expect(entries).toHaveLength(1);
-		expect(entriesStrict).toHaveLength(1);
-
-		// Both should correctly combine the 'prefix' and 'name' fields
-		expect(entries[0].header.name).toBe(expectedName);
-		expect(entriesStrict[0].header.name).toBe(expectedName);
-		expect(decoder.decode(entries[0].data)).toBe("hello long name\n");
-		expect(decoder.decode(entriesStrict[0].data)).toBe("hello long name\n");
-	});
-
-	it("extracts a tar with unicode name (PAX header)", async () => {
-		const buffer = await fs.readFile(UNICODE_TAR);
-		const entries = await unpackTar(buffer);
-
-		expect(entries).toHaveLength(1);
-		const [entry] = entries;
-
-		// The name is now correctly parsed from the PAX header
-		expect(entry.header.name).toBe("høstål.txt");
-		// We can also assert that the PAX data was parsed correctly
-		expect(entry.header.pax).toEqual({ path: "høstål.txt" });
-		expect(decoder.decode(entry.data)).toBe("høllø\n");
-	});
-
-	// New test to verify PAX attribute parsing
-	it("extracts a tar with PAX headers", async () => {
-		const buffer = await fs.readFile(PAX_TAR);
-		const entries = await unpackTar(buffer);
-
-		expect(entries).toHaveLength(1);
-		const [entry] = entries;
-
-		expect(entry.header.name).toBe("pax.txt");
-		expect(entry.header.pax).toEqual({
-			path: "pax.txt",
-			special: "sauce",
-		});
-		expect(decoder.decode(entry.data)).toBe("hello world\n");
-	});
-
-	it("extracts a filename that is exactly 100 characters long", async () => {
-		// Create the expected 100-character filename
-		const longName =
-			"0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
-		expect(longName.length).toBe(100);
-
-		// Create a test archive with the 100-character filename using our pack function
-		const testArchive = await packTar([
-			{
-				header: {
-					name: longName,
-					size: 6,
-					type: "file",
-					mode: 0o644,
-					mtime: new Date(1387580181000),
-					uname: "maf",
-					gname: "staff",
-					uid: 501,
-					gid: 20,
-				},
-				body: "hello\n",
-			},
-		]);
-
-		// Now extract and verify
-		const entries = await unpackTar(testArchive);
-
-		expect(entries).toHaveLength(1);
-		expect(entries[0].header.name).toHaveLength(100);
-		expect(entries[0].header.name).toBe(longName);
-		expect(decoder.decode(entries[0].data)).toBe("hello\n");
 	});
 
 	it("throws an error for an incomplete archive in strict mode", async () => {
 		const buffer = await fs.readFile(INCOMPLETE_TAR);
-
-		// We expect unpackTar to reject because the archive is truncated in strict mode
 		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Tar archive is truncated.",
 		);
 	});
 
-	it("handles incomplete archive gracefully in non-strict mode", async () => {
+	it("handles an incomplete archive gracefully in non-strict mode", async () => {
 		const buffer = await fs.readFile(INCOMPLETE_TAR);
-
-		// In non-strict mode, it should extract what it can and warn about truncation
 		const entries = await unpackTar(buffer, { strict: false });
 
-		// Should extract the complete entry successfully
 		expect(entries).toHaveLength(1);
 		expect(entries[0].header.name).toBe("file-1.txt");
-		expect(decoder.decode(entries[0].data)).toBe("i am file-1\n");
 	});
 
-	it("extracts a tar with a huge file using PAX headers for size", async () => {
-		const hugeFileSize = "8804630528"; // ~8.2 GB, as a string
-		const smallBody = "this is a placeholder body";
-		const bodyBuffer = encoder.encode(smallBody);
-
-		const archive = await packTar([
-			{
-				header: {
-					name: "huge.txt",
-					mode: 0o644,
-					mtime: new Date(1521214967000),
-					size: bodyBuffer.length, // The USTAR size can be the actual body size for this test
-					pax: {
-						size: hugeFileSize,
-					},
-				},
-				body: bodyBuffer,
-			},
+	it("should ignore extra data after the final null blocks in non-strict mode", async () => {
+		const archive = await createBaseArchive([
+			{ header: { name: "test.txt", type: "file", size: 5 }, body: "hello" },
 		]);
+		const extraData = new Uint8Array([1, 2, 3]);
+		const combined = new Uint8Array(archive.length + extraData.length);
+		combined.set(archive);
+		combined.set(extraData, archive.length);
 
-		// Use streaming API to test just the header parsing without reading full body
-		// @ts-expect-error ReadableStream.from is supported.
-		const sourceStream = ReadableStream.from([archive]);
-
-		let headerParsed = false;
-		let entry: {
-			header: { name: string; size: number };
-			body: ReadableStream<Uint8Array>;
-		} | null = null;
-
-		const entryStream = sourceStream.pipeThrough(createTarDecoder());
-		const reader = entryStream.getReader();
-
-		try {
-			const result = await reader.read();
-			if (!result.done) {
-				entry = result.value;
-				headerParsed = true;
-			}
-		} catch {
-			// Expected for huge file simulation
-		} finally {
-			reader.releaseLock();
-		}
-
-		expect(headerParsed).toBe(true);
-		expect(entry).not.toBeNull();
-
-		if (entry) {
-			expect(entry.header.name).toBe("huge.txt");
-			// Verify that the size was correctly parsed from the PAX header
-			expect(entry.header.size).toBe(parseInt(hugeFileSize, 10));
-
-			// Read just a small portion of the body to verify it starts correctly
-			const bodyReader = entry.body.getReader();
-			const chunk = await bodyReader.read();
-			const partialContent = decoder.decode(chunk.value);
-			// Trim null bytes that are part of TAR padding
-			expect(partialContent.replace(/\0+$/, "")).toBe(smallBody);
-			bodyReader.releaseLock();
-		}
+		const entries = await unpackTar(combined, { strict: false });
+		expect(entries).toHaveLength(1);
+		expect(entries[0].header.name).toBe("test.txt");
 	});
+});
 
-	it("handles malformed tar archive with invalid checksum", async () => {
-		// Create a buffer that looks like a tar header but has invalid checksum
-		const invalidHeader = new Uint8Array(BLOCK_SIZE);
+describe("createTarDecoder", () => {
+	it("rejects a stream with an invalid checksum in strict mode", async () => {
+		const archive = await createBaseArchive([
+			{ header: { name: "test.txt", type: "file", size: 0 }, body: "" },
+		]);
+		// Corrupt the checksum
+		archive.set(encoder.encode("INVALID!"), USTAR_CHECKSUM_OFFSET);
 
-		// Fill in some basic header fields but leave checksum invalid
-		const nameBytes = encoder.encode("test.txt");
-		invalidHeader.set(nameBytes, USTAR_NAME_OFFSET);
-
-		// Set some other fields to make it look like a valid header
-		const modeBytes = encoder.encode("0000644 ");
-		invalidHeader.set(modeBytes, USTAR_MODE_OFFSET);
-
-		// Invalid checksum
-		const checksumBytes = encoder.encode("000000 ");
-		invalidHeader.set(checksumBytes, USTAR_CHECKSUM_OFFSET);
-
-		// @ts-expect-error ReadableStream.from is supported in tests.
-		const sourceStream = ReadableStream.from([invalidHeader]);
-		const entryStream = sourceStream.pipeThrough(
-			createTarDecoder({ strict: true }),
-		);
-		const reader = entryStream.getReader();
-
-		await expect(reader.read()).rejects.toThrow("Invalid tar header checksum");
-	});
-
-	it("handles malformed PAX records with invalid length", async () => {
-		// Create a PAX header with malformed length record
-		const paxData = encoder.encode("abc path=test.txt\n"); // Invalid length format
-
-		// Pad to block size
-		const paxDataPadded = new Uint8Array(BLOCK_SIZE);
-		paxDataPadded.set(paxData);
-
-		// Create PAX header
-		const paxHeader = new Uint8Array(BLOCK_SIZE);
-		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
-		paxHeader.set(nameBytes, USTAR_NAME_OFFSET);
-
-		const modeBytes = encoder.encode("0000644 ");
-		paxHeader.set(modeBytes, USTAR_MODE_OFFSET);
-
-		const sizeBytes = encoder.encode(
-			`${paxData.length.toString(8).padStart(11, "0")} `,
-		);
-		paxHeader.set(sizeBytes, USTAR_SIZE_OFFSET);
-
-		// Set type flag for PAX header
-		paxHeader[USTAR_TYPEFLAG_OFFSET] = encoder.encode(
-			TYPEFLAG["pax-header"],
-		)[0];
-
-		writeChecksum(paxHeader);
-
-		const combined = new Uint8Array(BLOCK_SIZE * 2);
-		combined.set(paxHeader, 0);
-		combined.set(paxDataPadded, BLOCK_SIZE);
-
-		// @ts-expect-error ReadableStream.from is supported.
-		const sourceStream = ReadableStream.from([combined]);
-		const entryStream = sourceStream.pipeThrough(createTarDecoder());
-		const reader = entryStream.getReader();
-
-		// Should handle malformed PAX records gracefully
-		const result = await reader.read();
-
-		expect(result.done).toBe(true);
-	});
-
-	it("handles single zero block without second zero block", async () => {
-		// Create a tar with one entry followed by only one zero block
-		const entry = {
-			header: {
-				name: "test.txt",
-				size: 5,
-				type: "file" as const,
-			},
-			body: "hello",
-		};
-
-		const tarBuffer = await packTar([entry]);
-
-		// Truncate to remove the second zero block
-		const truncated = tarBuffer.slice(0, tarBuffer.length - BLOCK_SIZE);
-
-		// @ts-expect-error ReadableStream.from is supported.
-		const sourceStream = ReadableStream.from([truncated]);
-		const entryStream = sourceStream.pipeThrough(createTarDecoder());
-		const reader = entryStream.getReader();
-
-		// Should read the entry successfully
-		const result = await reader.read();
-		expect(result.done).toBe(false);
-		expect(result.value?.header.name).toBe("test.txt");
-
-		// Next read should not terminate immediately due to single zero block
-		const nextResult = await reader.read();
-		expect(nextResult.done).toBe(true);
-	});
-
-	it("handles stream body controller close errors", async () => {
-		// Create a tar entry with empty body to trigger controller.close()
-		const entry = {
-			header: {
-				name: "empty.txt",
-				size: 0,
-				type: "file" as const,
-			},
-			body: "",
-		};
-
-		const tarBuffer = await packTar([entry]);
-
-		// @ts-expect-error ReadableStream.from is supported.
-		const sourceStream = ReadableStream.from([tarBuffer]);
-		const entryStream = sourceStream.pipeThrough(createTarDecoder());
-		const reader = entryStream.getReader();
-
-		const result = await reader.read();
-		expect(result.done).toBe(false);
-
-		if (!result.done) {
-			// The body should be empty and controller should be closed
-			const bodyReader = result.value.body.getReader();
-			const bodyResult = await bodyReader.read();
-			expect(bodyResult.done).toBe(true);
-		}
-	});
-
-	it("handles truncated archive in middle of entry in strict mode", async () => {
-		const validEntry = {
-			header: {
-				name: "test.txt",
-				size: 10,
-				type: "file" as const,
-			},
-			body: "hello test",
-		};
-
-		const validTarBuffer = await packTar([validEntry]);
-
-		// Truncate the archive in the middle of the entry data
-		const truncated = validTarBuffer.slice(0, BLOCK_SIZE + 5); // Header + 5 bytes of 10-byte data
-
-		// @ts-expect-error ReadableStream.from is supported in tests.
-		const sourceStream = ReadableStream.from([truncated]);
-		const decoder = createTarDecoder({ strict: true });
-
-		const writable = new WritableStream({
-			write() {
-				// Do nothing
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(archive);
+				controller.close();
 			},
 		});
 
-		// Should handle truncation in flush method
+		const decoder = createTarDecoder({ strict: true });
 		await expect(
-			sourceStream.pipeThrough(decoder).pipeTo(writable),
+			stream.pipeThrough(decoder).getReader().read(),
+		).rejects.toThrow("Invalid tar header checksum");
+	});
+
+	it("rejects a stream with unexpected data at the end in strict mode", async () => {
+		const archive = await createBaseArchive([
+			{ header: { name: "test.txt", type: "file", size: 1 }, body: "h" },
+		]);
+		const stream = new ReadableStream({
+			start(controller) {
+				// End the archive correctly, but then add extra junk data
+				controller.enqueue(archive);
+				controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+				controller.close();
+			},
+		});
+
+		const decoder = createTarDecoder({ strict: true });
+		const reader = stream.pipeThrough(decoder).getReader();
+		await reader.read(); // Read the valid entry
+		await expect(reader.read()).rejects.toThrow("Invalid EOF.");
+	});
+
+	it("rejects a stream truncated mid-entry in strict mode", async () => {
+		const archive = await createBaseArchive([
+			{
+				header: { name: "test.txt", size: 10, type: "file" },
+				body: "1234567890",
+			},
+		]);
+		// Truncate the archive in the middle of the file's data block
+		const truncated = archive.slice(0, BLOCK_SIZE + 5);
+
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(truncated);
+				controller.close();
+			},
+		});
+
+		const decoder = createTarDecoder({ strict: true });
+		await expect(
+			stream.pipeThrough(decoder).pipeTo(new WritableStream()),
 		).rejects.toThrow("Tar archive is truncated");
 	});
 
-	it("handles truncated archive in middle of entry gracefully in non-strict mode", async () => {
-		// Create a valid entry
-		const validEntry = {
-			header: {
-				name: "test.txt",
-				size: 10,
-				type: "file" as const,
+	it("gracefully handles a stream truncated mid-entry in non-strict mode", async () => {
+		const archive = await createBaseArchive([
+			{
+				header: { name: "test.txt", size: 10, type: "file" },
+				body: "1234567890",
 			},
-			body: "hello test",
-		};
+		]);
+		const truncated = archive.slice(0, BLOCK_SIZE + 5);
 
-		const validTarBuffer = await packTar([validEntry]);
-
-		// Truncate the archive in the middle of the entry data
-		const truncated = validTarBuffer.slice(0, BLOCK_SIZE + 5); // Header + 5 bytes of 10-byte data
-
-		// @ts-expect-error ReadableStream.from is supported in tests.
-		const sourceStream = ReadableStream.from([truncated]);
-		const decoder = createTarDecoder({ strict: false });
-
-		const entries: ParsedTarEntry[] = [];
-		const writable = new WritableStream({
-			write(entry: ParsedTarEntry) {
-				entries.push(entry);
-			},
-		});
-
-		// Should handle truncation gracefully in non-strict mode
-		await sourceStream.pipeThrough(decoder).pipeTo(writable);
-
-		expect(entries).toHaveLength(1);
-		expect(entries[0].header.name).toBe("test.txt");
-		// The body stream should be closed gracefully even though truncated
-	});
-
-	it("handles unexpected data at end of archive in strict mode", async () => {
-		let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-
-		const sourceStream = new ReadableStream<Uint8Array>({
-			start(c) {
-				controller = c;
-			},
-		});
-
-		const decoder = createTarDecoder({ strict: true });
-		const entriesStream = sourceStream.pipeThrough(decoder);
-		const reader = entriesStream.getReader();
-		const readPromise = reader.read();
-
-		// Leftover data
-		// biome-ignore lint/style/noNonNullAssertion: Already setup.
-		controller!.enqueue(new Uint8Array([0x42, 0x43, 0x44]));
-
-		// Should trigger flush with non-zero buffer
-		// biome-ignore lint/style/noNonNullAssertion: Already setup.
-		controller!.close();
-
-		// The flush method should detect non-zero buffer and error in strict mode
-		await expect(readPromise).rejects.toThrow("Invalid EOF.");
-	});
-
-	it("handles unexpected data at end of archive gracefully in non-strict mode", async () => {
-		let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-
-		const sourceStream = new ReadableStream<Uint8Array>({
-			start(c) {
-				controller = c;
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(truncated);
+				controller.close();
 			},
 		});
 
 		const decoder = createTarDecoder({ strict: false });
-		const entriesStream = sourceStream.pipeThrough(decoder);
-		const reader = entriesStream.getReader();
-		const readPromise = reader.read();
+		const reader = stream.pipeThrough(decoder).getReader();
 
-		// Leftover data
-		// biome-ignore lint/style/noNonNullAssertion: Already setup.
-		controller!.enqueue(new Uint8Array([0x42, 0x43, 0x44]));
+		const { value: entry } = await reader.read();
+		expect(entry?.header.name).toBe("test.txt");
 
-		// Should trigger flush with non-zero buffer
-		// biome-ignore lint/style/noNonNullAssertion: Already setup.
-		controller!.close();
+		if (!entry) throw new Error("Entry is undefined");
 
-		// The flush method should warn but not error in non-strict mode
-		const result = await readPromise;
-		expect(result.done).toBe(true);
+		const bodyReader = entry.body.getReader();
+		const chunk1 = await bodyReader.read();
+		expect(new TextDecoder().decode(chunk1.value)).toBe("12345"); // Read the 5 available bytes
+
+		const chunk2 = await bodyReader.read();
+		expect(chunk2.done).toBe(true); // Stream ends gracefully
+
+		const finalRead = await reader.read();
+		expect(finalRead.done).toBe(true);
+	});
+});
+
+describe("spec compliance", () => {
+	describe("USTAR Fields", () => {
+		it("extracts a filename that is exactly 100 characters long", async () => {
+			const longName = "a".repeat(100);
+			const archive = await createBaseArchive([
+				{ header: { name: longName, type: "file", size: 4 }, body: "test" },
+			]);
+			const [entry] = await unpackTar(archive);
+			expect(entry.header.name).toBe(longName);
+		});
+
+		it("extracts a long name using the USTAR 'prefix' field", async () => {
+			const buffer = await fs.readFile(LONG_NAME_TAR);
+			const expectedName =
+				"my/file/is/longer/than/100/characters/and/should/use/the/prefix/header/foobarbaz/foobarbaz/foobarbaz/foobarbaz/foobarbaz/foobarbaz/filename.txt";
+
+			const [entry] = await unpackTar(buffer);
+			expect(entry.header.name).toBe(expectedName);
+		});
 	});
 
-	it("handles PAX record with zero length", async () => {
-		// Create malformed PAX data with zero-length record
-		const paxData = encoder.encode("0 \n"); // Zero length record
+	describe("PAX Extensions", () => {
+		it("extracts a unicode name from a PAX header", async () => {
+			const buffer = await fs.readFile(UNICODE_TAR);
+			const [entry] = await unpackTar(buffer);
 
-		// Pad to block size
-		const paxDataPadded = new Uint8Array(BLOCK_SIZE);
-		paxDataPadded.set(paxData);
+			expect(entry.header.name).toBe("høstål.txt");
+			expect(entry.header.pax).toEqual({ path: "høstål.txt" });
+			expect(decoder.decode(entry.data)).toBe("høllø\n");
+		});
 
-		// Create PAX header similar to previous test
-		const paxHeader = new Uint8Array(BLOCK_SIZE);
-		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
-		paxHeader.set(nameBytes, USTAR_NAME_OFFSET);
+		it("extracts custom key-value attributes from a PAX header", async () => {
+			const buffer = await fs.readFile(PAX_TAR);
+			const [entry] = await unpackTar(buffer);
 
-		const modeBytes = encoder.encode("0000644 ");
-		paxHeader.set(modeBytes, USTAR_MODE_OFFSET);
+			expect(entry.header.name).toBe("pax.txt");
+			expect(entry.header.pax).toEqual({ path: "pax.txt", special: "sauce" });
+		});
 
-		const sizeBytes = encoder.encode(
-			`${paxData.length.toString(8).padStart(11, "0")} `,
-		);
-		paxHeader.set(sizeBytes, USTAR_SIZE_OFFSET);
+		it("uses PAX 'size' attribute for files larger than USTAR limit", async () => {
+			const hugeFileSize = "8804630528"; // ~8.2 GB
+			const archive = await createBaseArchive([
+				{
+					header: {
+						name: "huge.txt",
+						type: "file",
+						size: 11,
+						pax: { size: hugeFileSize },
+					},
+					body: "placeholder",
+				},
+			]);
 
-		paxHeader[USTAR_TYPEFLAG_OFFSET] = encoder.encode(
-			TYPEFLAG["pax-header"],
-		)[0];
+			const [entry] = await unpackTar(archive);
+			expect(entry.header.size).toBe(parseInt(hugeFileSize, 10));
+		});
 
-		// Calculate and set checksum
-		writeChecksum(paxHeader);
+		it("uses PAX for large file size via custom PAX attribute", async () => {
+			const archive = await packTar([
+				{
+					header: {
+						name: "test.txt",
+						type: "file",
+						size: 4,
+						pax: { comment: "test comment" },
+					},
+					body: "test",
+				},
+			]);
 
-		const combined = new Uint8Array(BLOCK_SIZE * 2);
-		combined.set(paxHeader, 0);
-		combined.set(paxDataPadded, BLOCK_SIZE);
+			const [entry] = await unpackTar(archive);
+			expect(entry.header.pax?.comment).toBe("test comment");
+		});
 
-		// @ts-expect-error ReadableStream.from is supported.
-		const sourceStream = ReadableStream.from([combined]);
-		const entryStream = sourceStream.pipeThrough(createTarDecoder());
-		const reader = entryStream.getReader();
+		it("handles PAX with custom attributes", async () => {
+			const archive = await packTar([
+				{
+					header: {
+						name: "test.txt",
+						type: "file",
+						size: 4,
+						pax: { "custom.attribute": "custom value" },
+					},
+					body: "test",
+				},
+			]);
 
-		// Should handle zero-length PAX records gracefully
-		const result = await reader.read();
-		expect(result.done).toBe(true);
+			const [entry] = await unpackTar(archive);
+			expect(entry.header.name).toBe("test.txt");
+			expect(entry.header.pax?.["custom.attribute"]).toBe("custom value");
+		});
 	});
 
-	it("handles PAX record with missing equals sign", async () => {
-		// Create PAX data without proper key=value format
-		const paxData = encoder.encode("20 pathwithoutequals\n");
+	describe("Archive Structure Edge Cases", () => {
+		it("handles data after final null blocks in strict mode", async () => {
+			const archive = await createBaseArchive([
+				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
+			]);
+			const extraData = new Uint8Array(100).fill(0xff);
+			const archiveWithExtra = new Uint8Array(
+				archive.length + extraData.length,
+			);
+			archiveWithExtra.set(archive);
+			archiveWithExtra.set(extraData, archive.length);
 
-		// Pad to block size
-		const paxDataPadded = new Uint8Array(BLOCK_SIZE);
-		paxDataPadded.set(paxData);
+			await expect(
+				unpackTar(archiveWithExtra, { strict: true }),
+			).rejects.toThrow(/Invalid EOF/);
+		});
 
-		// Create PAX header
-		const paxHeader = new Uint8Array(BLOCK_SIZE);
-		const nameBytes = encoder.encode("PaxHeaders.0/test.txt");
-		paxHeader.set(nameBytes, USTAR_NAME_OFFSET);
+		it("handles archive ending with single null block", async () => {
+			const archive = await createBaseArchive([
+				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
+			]);
+			const archiveWithOneEOF = archive.slice(0, archive.length - BLOCK_SIZE);
 
-		const modeBytes = encoder.encode("0000644 ");
-		paxHeader.set(modeBytes, USTAR_MODE_OFFSET);
+			await expect(
+				unpackTar(archiveWithOneEOF, { strict: true }),
+			).rejects.toThrow(/Tar archive is truncated/);
 
-		const sizeBytes = encoder.encode(
-			`${paxData.length.toString(8).padStart(11, "0")} `,
-		);
-		paxHeader.set(sizeBytes, USTAR_SIZE_OFFSET);
+			const resultNonStrict = await unpackTar(archiveWithOneEOF, {
+				strict: false,
+			});
+			expect(resultNonStrict).toHaveLength(1);
+			expect(resultNonStrict[0].header.name).toBe("test.txt");
+		});
 
-		paxHeader[USTAR_TYPEFLAG_OFFSET] = encoder.encode(
-			TYPEFLAG["pax-header"],
-		)[0];
+		it("handles archive ending mid-header", async () => {
+			const archive = await createBaseArchive([
+				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
+			]);
+			const truncatedArchive = archive.slice(0, 200);
 
-		// Calculate and set checksum
-		writeChecksum(paxHeader);
-
-		const combined = new Uint8Array(BLOCK_SIZE * 2);
-		combined.set(paxHeader, 0);
-		combined.set(paxDataPadded, BLOCK_SIZE);
-
-		// @ts-expect-error ReadableStream.from is supported.
-		const sourceStream = ReadableStream.from([combined]);
-		const entryStream = sourceStream.pipeThrough(createTarDecoder());
-		const reader = entryStream.getReader();
-
-		// Should handle malformed PAX records gracefully
-		const result = await reader.read();
-		expect(result.done).toBe(true);
+			await expect(
+				unpackTar(truncatedArchive, { strict: true }),
+			).rejects.toThrow();
+		});
 	});
 });

@@ -4,6 +4,7 @@ import {
 	decoder,
 	encoder,
 	normalizeBody,
+	readNumeric,
 	readOctal,
 	readString,
 	streamToBuffer,
@@ -359,6 +360,65 @@ describe("tar utilities", () => {
 
 			// readOctal treats '9' as part of calculation, this documents actual behavior
 			expect(typeof result).toBe("number");
+		});
+	});
+
+	describe("readNumeric", () => {
+		it("correctly parses base-256 encoded numbers", () => {
+			const buffer = new Uint8Array(8);
+			buffer[0] = 0x80; // Base-256 indicator
+			buffer[1] = 0x00;
+			buffer[2] = 0x00;
+			buffer[3] = 0x00;
+			buffer[4] = 0x01;
+			buffer[5] = 0x86;
+			buffer[6] = 0xa0;
+			buffer[7] = 0x00;
+
+			const result = readNumeric(buffer, 0, 8);
+			expect(result).toBe(25600000);
+		});
+
+		it("correctly parses large UIDs using base-256 encoding", () => {
+			const largeUid = 0x7fffffff; // 2^31 - 1
+			const buffer = new Uint8Array(8);
+			buffer[0] = 0x80; // Base-256 indicator
+			let remaining = largeUid;
+			for (let i = 7; i >= 1; i--) {
+				buffer[i] = remaining & 0xff;
+				remaining = Math.floor(remaining / 256);
+			}
+			buffer[0] |= remaining & 0x7f;
+
+			const result = readNumeric(buffer, 0, 8);
+			expect(result).toBe(largeUid);
+		});
+
+		it("falls back to octal parsing for normal numbers", () => {
+			const buffer = encoder.encode("0001755\x00");
+			const result = readNumeric(buffer, 0, 8);
+			expect(result).toBe(0o1755);
+		});
+
+		it("throws error for numbers larger than MAX_SAFE_INTEGER", () => {
+			const buffer = new Uint8Array(8).fill(0xff);
+			expect(() => readNumeric(buffer, 0, 8)).toThrow("TAR number too large");
+		});
+
+		it("correctly handles the MSB mask for base-256", () => {
+			const buffer = new Uint8Array(8);
+			buffer[0] = 0x80; // MSB set, other bits clear
+			buffer[1] = 0x00;
+			buffer[2] = 0x00;
+			buffer[3] = 0x00;
+			buffer[4] = 0x00;
+			buffer[5] = 0x00;
+			buffer[6] = 0x00;
+			buffer[7] = 0x7f; // Small value
+
+			const result = readNumeric(buffer, 0, 8);
+			// First byte contributes 0 since MSB is masked out and other bits are 0
+			expect(result).toBe(0x7f);
 		});
 	});
 

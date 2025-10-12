@@ -79,22 +79,19 @@ export function readNumeric(
 	// (0x80 = 10000000)
 	if (view[offset] & 0x80) {
 		let result = 0;
-		for (let i = 0; i < size; i++) {
-			// (result << 8) is equivalent to (result * 256) but faster.
-			// | view[offset + i] is equivalent to + view[offset + i] for positive numbers.
-			result = (result << 8) | view[offset + i];
+
+		// The first byte has the MSB set as a marker.
+		// We mask it out (0x7F = 01111111) to get its value.
+		result = view[offset] & 0x7f;
+
+		// Process the remaining bytes.
+		for (let i = 1; i < size; i++) {
+			result = result * 256 + view[offset + i];
 		}
 
-		// Clear the base-256 indicator bit.
-		//
-		// - (size - 1) * 8: Calculates the bit position of the MSB of the entire number.
-		// - 0x80 << ...: Creates a bitmask `10000000` to MSB position.
-		// - ~: NOT operator inverts this mask (e.g., `0x7FFFFFFF`).
-		// - result & ...: A bitwise AND with the inverted mask forces the MSB to zero.
-		//
-		// This prevents the number from being interpreted as negative that could lead to a
-		// an overflow and thus a vulnerability.
-		return result & ~(0x80 << ((size - 1) * 8));
+		if (!Number.isSafeInteger(result)) throw new Error("TAR number too large");
+
+		return result;
 	}
 
 	return readOctal(view, offset, size);

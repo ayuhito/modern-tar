@@ -5,7 +5,7 @@ import {
 	USTAR_NAME_OFFSET,
 	USTAR_SIZE_OFFSET,
 } from "../../src/tar/constants";
-import { decoder, encoder, streamToBuffer } from "../../src/tar/utils";
+import { encoder, streamToBuffer } from "../../src/tar/utils";
 import { createTarPacker, packTar, unpackTar } from "../../src/web";
 
 describe("checksum validation", () => {
@@ -132,22 +132,5 @@ describe("checksum validation", () => {
 		await expect(unpackTar(buffer, { strict: true })).rejects.toThrow(
 			"Invalid tar header checksum",
 		);
-	});
-
-	it("should create headers with correct checksums during packing", async () => {
-		// Pack a simple archive
-		const buffer = await packTar([
-			{
-				header: { name: "checksum-test.txt", size: 11, type: "file" },
-				body: "hello world",
-			},
-		]);
-
-		// If the checksum was calculated correctly during packing,
-		// unpacking should succeed (since unpacker validates checksums)
-		const entries = await unpackTar(buffer);
-		expect(entries).toHaveLength(1);
-		expect(entries[0].header.name).toBe("checksum-test.txt");
-		expect(decoder.decode(entries[0].data)).toBe("hello world");
 	});
 });

@@ -166,6 +166,20 @@ export function parseUstarHeader(
 	return header;
 }
 
+const PAX_MAPPING: Record<
+	string,
+	[keyof HeaderOverrides, (val: string) => number | string]
+> = {
+	path: ["name", (v) => v],
+	linkpath: ["linkname", (v) => v],
+	size: ["size", (v) => parseInt(v, 10)],
+	mtime: ["mtime", parseFloat],
+	uid: ["uid", (v) => parseInt(v, 10)],
+	gid: ["gid", (v) => parseInt(v, 10)],
+	uname: ["uname", (v) => v],
+	gname: ["gname", (v) => v],
+};
+
 // Parses PAX record data into an overrides object.
 export function parsePax(buffer: Uint8Array): HeaderOverrides {
 	const decoder = new TextDecoder("utf-8");
@@ -195,31 +209,17 @@ export function parsePax(buffer: Uint8Array): HeaderOverrides {
 		const [key, value] = recordStr.split("=", 2);
 		if (key && value !== undefined) {
 			pax[key] = value;
-			switch (key) {
-				case "path":
-					overrides.name = value;
-					break;
-				case "linkpath":
-					overrides.linkname = value;
-					break;
-				case "size":
-					overrides.size = parseInt(value, 10);
-					break;
-				case "mtime":
-					overrides.mtime = parseFloat(value);
-					break;
-				case "uid":
-					overrides.uid = parseInt(value, 10);
-					break;
-				case "gid":
-					overrides.gid = parseInt(value, 10);
-					break;
-				case "uname":
-					overrides.uname = value;
-					break;
-				case "gname":
-					overrides.gname = value;
-					break;
+			const mapping = PAX_MAPPING[key];
+
+			if (mapping) {
+				const [targetKey, parser] = mapping;
+				const parsedValue = parser(value);
+
+				// Only assign if the value is valid (e.g., not NaN for numbers).
+				if (typeof parsedValue === "string" || !Number.isNaN(parsedValue)) {
+					(overrides as Record<string, string | number>)[targetKey] =
+						parsedValue;
+				}
 			}
 		}
 
