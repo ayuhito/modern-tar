@@ -50,46 +50,52 @@ export interface UnpackOptionsFS extends UnpackOptions {
 	concurrency?: number;
 }
 
+/** Base interface containing common metadata properties for all source types. */
+export interface BaseSource {
+	/** Destination path for the entry inside the tar archive. */
+	target: string;
+	/** Optional modification time. Overrides filesystem values or defaults to current time. */
+	mtime?: Date;
+	/** Optional user ID. Overrides filesystem values or defaults to 0. */
+	uid?: number;
+	/** Optional group ID. Overrides filesystem values or defaults to 0. */
+	gid?: number;
+	/** Optional user name. */
+	uname?: string;
+	/** Optional group name. */
+	gname?: string;
+	/** Optional Unix file permissions for the entry (e.g., 0o644, 0o755). */
+	mode?: number;
+}
+
 /** Describes a file on the local filesystem to be added to the archive. */
-export interface FileSource {
+export interface FileSource extends BaseSource {
 	type: "file";
 	/** Path to the source file on the local filesystem. */
 	source: string;
-	/** Destination path for the file inside the tar archive. */
-	target: string;
 }
 
 /** Describes a directory on the local filesystem to be added to the archive. */
-export interface DirectorySource {
+export interface DirectorySource extends BaseSource {
 	type: "directory";
 	/** Path to the source directory on the local filesystem. */
 	source: string;
-	/** Destination path for the directory inside the tar archive. */
-	target: string;
 }
 
 /** Describes raw, buffered content to be added to the archive. */
-export interface ContentSource {
+export interface ContentSource extends BaseSource {
 	type: "content";
 	/** Raw content to add. Supports string, Uint8Array, ArrayBuffer, Blob, or null. */
 	content: TarEntryData;
-	/** Destination path for the content inside the tar archive. */
-	target: string;
-	/** Optional Unix file permissions for the entry (e.g., 0o644). */
-	mode?: number;
 }
 
 /** Describes a stream of content to be added to the archive. */
-export interface StreamSource {
+export interface StreamSource extends BaseSource {
 	type: "stream";
 	/** A Readable or ReadableStream. */
 	content: Readable | ReadableStream;
-	/** Destination path for the content inside the tar archive. */
-	target: string;
 	/** The total size of the stream's content in bytes. This is required for streams. */
 	size: number;
-	/** Optional Unix file permissions for the entry (e.g., 0o644). */
-	mode?: number;
 }
 
 /** A union of all possible source types for creating a tar archive. */

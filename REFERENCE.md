@@ -236,43 +236,49 @@ interface PackOptionsFS {
   map?: (header: TarHeader) => TarHeader;
 }
 
+// Base interface for all source types
+interface BaseSource {
+  /** Destination path for the entry inside the tar archive */
+  target: string;
+  /** Optional modification time. Overrides filesystem values or defaults to current time. */
+  mtime?: Date;
+  /** Optional user ID. Overrides filesystem values or defaults to 0. */
+  uid?: number;
+  /** Optional group ID. Overrides filesystem values or defaults to 0. */
+  gid?: number;
+  /** Optional user name. */
+  uname?: string;
+  /** Optional group name. */
+  gname?: string;
+  /** Optional Unix file permissions for the entry (e.g., 0o644, 0o755). */
+  mode?: number;
+}
+
 // Source types for packTar function
-interface FileSource {
+interface FileSource extends BaseSource {
   type: "file";
   /** Path to the source file on the local filesystem */
   source: string;
-  /** Destination path inside the tar archive */
-  target: string;
 }
 
-interface DirectorySource {
+interface DirectorySource extends BaseSource {
   type: "directory";
   /** Path to the source directory on the local filesystem */
   source: string;
-  /** Destination path inside the tar archive */
-  target: string;
 }
 
-interface ContentSource {
+interface ContentSource extends BaseSource {
   type: "content";
   /** Raw content to add. Supports string, Uint8Array, ArrayBuffer, ReadableStream, Blob, or null. */
   content: TarEntryData;
-  /** Destination path inside the tar archive */
-  target: string;
-  /** Optional Unix file permissions (e.g., 0o644, 0o755) */
-  mode?: number;
 }
 
-interface StreamSource {
+interface StreamSource extends BaseSource {
   type: "stream";
   /** A Node.js Readable stream or Web ReadableStream. */
   content: Readable | ReadableStream;
-  /** Destination path inside the tar archive */
-  target: string;
   /** The total size of the stream's content in bytes. This is required for streams to prevent hanging. */
   size: number;
-  /** Optional Unix file permissions (e.g., 0o644, 0o755) */
-  mode?: number;
 }
 
 type TarSource = FileSource | DirectorySource | ContentSource | StreamSource;

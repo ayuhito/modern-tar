@@ -278,4 +278,203 @@ describe("pack", () => {
 			expect(extractedContent).toBe(content);
 		});
 	});
+
+	it("allows overriding file and directory modes", async () => {
+		// Create test files with specific permissions
+		const testFile = path.join(tmpDir, "test.txt");
+		const testDir = path.join(tmpDir, "testdir");
+
+		await fs.writeFile(testFile, "test content");
+		await fs.mkdir(testDir);
+		await fs.writeFile(path.join(testDir, "nested.txt"), "nested content");
+
+		// Set specific permissions
+		await fs.chmod(testFile, 0o600); // rw-------
+		await fs.chmod(testDir, 0o700);  // rwx------
+
+		// Pack with mode overrides
+		const sources = [
+			{ type: "file" as const, source: testFile, target: "override.txt", mode: 0o644 },
+			{ type: "directory" as const, source: testDir, target: "overridedir", mode: 0o755 },
+		];
+
+		const destDir = path.join(tmpDir, "extracted");
+		const packStream = packTar(sources);
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
+
+		// Check that extracted files have the overridden modes, not the original ones
+		const extractedFile = path.join(destDir, "override.txt");
+		const extractedDir = path.join(destDir, "overridedir");
+
+		const fileStat = await fs.stat(extractedFile);
+		const dirStat = await fs.stat(extractedDir);
+
+		// Mask to get only permission bits (remove file type bits)
+		const fileMode = fileStat.mode & 0o777;
+		const dirMode = dirStat.mode & 0o777;
+
+		expect(fileMode).toBe(0o644); // Should be overridden mode, not 0o600
+		expect(dirMode).toBe(0o755);  // Should be overridden mode, not 0o700
+
+		// Verify content is still correct
+		const content = await fs.readFile(extractedFile, "utf-8");
+		expect(content).toBe("test content");
+
+		const nestedContent = await fs.readFile(path.join(extractedDir, "nested.txt"), "utf-8");
+		expect(nestedContent).toBe("nested content");
+	});
+
+	it("allows overriding all metadata properties for all source types", async () => {
+		// Create test files
+		const testFile = path.join(tmpDir, "test.txt");
+		const testDir = path.join(tmpDir, "testdir");
+
+		await fs.writeFile(testFile, "test content");
+		await fs.mkdir(testDir);
+		await fs.writeFile(path.join(testDir, "nested.txt"), "nested content");
+
+		// Custom metadata values
+		const customMtime = new Date("2023-01-15T12:00:00Z");
+		const customUid = 1001;
+		const customGid = 1002;
+		const customUname = "testuser";
+		const customGname = "testgroup";
+		const customFileMode = 0o755;
+		const customDirMode = 0o700;
+
+		const sources = [
+			{
+				type: "file" as const,
+				source: testFile,
+				target: "overridden-file.txt",
+				mtime: customMtime,
+				uid: customUid,
+				gid: customGid,
+				uname: customUname,
+				gname: customGname,
+				mode: customFileMode,
+			},
+			{
+				type: "directory" as const,
+				source: testDir,
+				target: "overridden-dir",
+				mtime: customMtime,
+				uid: customUid,
+				gid: customGid,
+				uname: customUname,
+				gname: customGname,
+				mode: customDirMode,
+			},
+			{
+				type: "content" as const,
+				content: "content source data",
+				target: "content-file.txt",
+				mtime: customMtime,
+				uid: customUid,
+				gid: customGid,
+				uname: customUname,
+				gname: customGname,
+				mode: customFileMode,
+			},
+		];
+
+		// Extract the tar and verify metadata
+		const destDir = path.join(tmpDir, "metadata-test");
+		const packStream = packTar(sources);
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
+
+		// Verify extracted file metadata
+		const extractedFile = path.join(destDir, "overridden-file.txt");
+		const extractedDir = path.join(destDir, "overridden-dir");
+		const extractedContent = path.join(destDir, "content-file.txt");
+
+		const fileStat = await fs.stat(extractedFile);
+		const dirStat = await fs.stat(extractedDir);
+		const contentStat = await fs.stat(extractedContent);
+
+		// Check modes (mask to get only permission bits)
+		expect(fileStat.mode & 0o777).toBe(customFileMode);
+		expect(dirStat.mode & 0o777).toBe(customDirMode);
+		expect(contentStat.mode & 0o777).toBe(customFileMode);
+
+		// Check modification times (within 1 second tolerance for filesystem precision)
+		const timeDiff = Math.abs(fileStat.mtime.getTime() - customMtime.getTime());
+		expect(timeDiff).toBeLessThan(1000);
+
+		// Verify content integrity
+		const fileContent = await fs.readFile(extractedFile, "utf-8");
+		const contentFileContent = await fs.readFile(extractedContent, "utf-8");
+		const nestedFileContent = await fs.readFile(path.join(extractedDir, "nested.txt"), "utf-8");
+
+		expect(fileContent).toBe("test content");
+		expect(contentFileContent).toBe("content source data");
+		expect(nestedFileContent).toBe("nested content");
+	});
+
+	it("uses safe defaults for uid and gid in ContentSource and StreamSource", async () => {
+		const sources = [
+			{
+				type: "content" as const,
+				content: "test content",
+				target: "default-content.txt",
+			},
+		];
+
+		const destDir = path.join(tmpDir, "defaults-test");
+		const packStream = packTar(sources);
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
+
+		const extractedFile = path.join(destDir, "default-content.txt");
+		const stat = await fs.stat(extractedFile);
+
+		// Verify content and that it was created successfully with safe defaults
+		const content = await fs.readFile(extractedFile, "utf-8");
+		expect(content).toBe("test content");
+		expect(stat.size).toBe(12); // "test content".length
+	});
+
+	it("allows partial metadata overrides while preserving filesystem values", async () => {
+		const testFile = path.join(tmpDir, "partial.txt");
+		await fs.writeFile(testFile, "partial override test");
+
+		// Get original filesystem metadata
+		const originalStat = await fs.stat(testFile);
+
+		const sources = [
+			{
+				type: "file" as const,
+				source: testFile,
+				target: "partial-override.txt",
+				// Only override uid and uname, leave other metadata from filesystem
+				uid: 9999,
+				uname: "customuser",
+			},
+		];
+
+		const destDir = path.join(tmpDir, "partial-test");
+		const packStream = packTar(sources);
+		const unpackStream = unpackTar(destDir);
+
+		await pipeline(packStream, unpackStream);
+
+		const extractedFile = path.join(destDir, "partial-override.txt");
+		const extractedStat = await fs.stat(extractedFile);
+
+		// Verify content
+		const content = await fs.readFile(extractedFile, "utf-8");
+		expect(content).toBe("partial override test");
+
+		// Mode should be preserved from filesystem (masked to permission bits)
+		expect(extractedStat.mode & 0o777).toBe(originalStat.mode & 0o777);
+
+		// Modification time should be preserved (within tolerance)
+		const timeDiff = Math.abs(extractedStat.mtime.getTime() - originalStat.mtime.getTime());
+		expect(timeDiff).toBeLessThan(1000);
+	});
 });

@@ -248,9 +248,9 @@ export function packTar(
 						isDirectory: () => false,
 						isSymbolicLink: () => false,
 						mode: job.mode ?? 0o644,
-						mtime: new Date(),
-						uid: process.getuid?.() ?? 0,
-						gid: process.getgid?.() ?? 0,
+						mtime: job.mtime ?? new Date(),
+						uid: job.uid ?? 0,
+						gid: job.gid ?? 0,
 					} as Stats;
 
 					if (filter && !filter(target, stat)) return;
@@ -263,6 +263,8 @@ export function packTar(
 						mtime: stat.mtime,
 						uid: stat.uid,
 						gid: stat.gid,
+						uname: job.uname,
+						gname: job.gname,
 					};
 
 					if (map) header = map(header);
@@ -297,10 +299,12 @@ export function packTar(
 				let header: TarHeader = {
 					name: target,
 					size: 0,
-					mode: Number(stat.mode),
-					mtime: stat.mtime,
-					uid: Number(stat.uid),
-					gid: Number(stat.gid),
+					mode: job.mode ?? Number(stat.mode),
+					mtime: job.mtime ?? stat.mtime,
+					uid: job.uid ?? Number(stat.uid),
+					gid: job.gid ?? Number(stat.gid),
+					uname: job.uname,
+					gname: job.gname,
 					type: "file", // Default type
 				};
 
