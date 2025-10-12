@@ -79,10 +79,6 @@ for await (const entry of entriesStream) {
 }
 ```
 
-
-
-
-
 ### `createGzipEncoder(): CompressionStream`
 
 Create a gzip compression stream for `.tar.gz` creation.
@@ -130,7 +126,10 @@ const tarStream = packTar('/home/user/project', {
 const sources = [
   { type: 'file', source: './package.json', target: 'project/package.json' },
   { type: 'directory', source: './src', target: 'project/src' },
-  { type: 'content', content: 'Hello World!', target: 'project/hello.txt' }
+  { type: 'content', content: 'Hello World!', target: 'project/hello.txt' },
+  { type: 'content', content: new Uint8Array([1, 2, 3]), target: 'project/binary.dat' },
+  { type: 'stream', content: createReadStream('./large-file.bin'), target: 'project/data.bin', size: 1048576 },
+  { type: 'stream', content: fetch('/api/data').then(r => r.body!), target: 'project/remote.json', size: 2048 }
 ];
 const archiveStream = packTar(sources);
 ```
@@ -257,14 +256,26 @@ interface DirectorySource {
 interface ContentSource {
   type: "content";
   /** Raw content to add. Supports string, Uint8Array, ArrayBuffer, ReadableStream, Blob, or null. */
-  content: TarEntryData | Readable;
+  content: TarEntryData;
   /** Destination path inside the tar archive */
   target: string;
   /** Optional Unix file permissions (e.g., 0o644, 0o755) */
   mode?: number;
 }
 
-type TarSource = FileSource | DirectorySource | ContentSource;
+interface StreamSource {
+  type: "stream";
+  /** A Node.js Readable stream or Web ReadableStream. */
+  content: Readable | ReadableStream;
+  /** Destination path inside the tar archive */
+  target: string;
+  /** The total size of the stream's content in bytes. This is required for streams to prevent hanging. */
+  size: number;
+  /** Optional Unix file permissions (e.g., 0o644, 0o755) */
+  mode?: number;
+}
+
+type TarSource = FileSource | DirectorySource | ContentSource | StreamSource;
 
 interface UnpackOptionsFS extends UnpackOptions {
   // Inherited from UnpackOptions (platform-neutral):
