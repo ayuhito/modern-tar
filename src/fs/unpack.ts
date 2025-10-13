@@ -301,7 +301,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 					);
 
 					// A self-referential hardlink should be a noop.
-					if (linkTarget === outPath) break;
+					if (linkTarget === outPath) return header.type;
 
 					// Wait for the target to be created if it is in the map.
 					const targetPromise = pathPromises.get(linkTarget);
