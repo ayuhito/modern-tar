@@ -1,7 +1,6 @@
 import * as path from "node:path";
 
 const unicodeCache = new Map<string, string>();
-const MAX_CACHE_SIZE = 10000;
 
 // This implements a simple LRU cache for normalized strings.
 export const normalizeUnicode = (s: string): string => {
@@ -13,15 +12,10 @@ export const normalizeUnicode = (s: string): string => {
 	result = result ?? s.normalize("NFD");
 	unicodeCache.set(s, result);
 
-	// Prune the cache if it's more than 10% over the max size.
-	const overflow = unicodeCache.size - MAX_CACHE_SIZE;
-	if (overflow > MAX_CACHE_SIZE / 10) {
-		const keys = unicodeCache.keys();
-
-		for (let i = 0; i < overflow; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: This is only triggered when keys exist.
-			unicodeCache.delete(keys.next().value!);
-		}
+	// Delete the oldest entry if we exceed the max size.
+	if (unicodeCache.size > 10000) {
+		// biome-ignore lint/style/noNonNullAssertion: At minimum one entry exists here.
+		unicodeCache.delete(unicodeCache.keys().next().value!);
 	}
 
 	return result;
