@@ -300,6 +300,9 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 						`Hardlink "${linkname}" points outside the extraction directory.`,
 					);
 
+					// A self-referential hardlink should be a noop.
+					if (linkTarget === outPath) break;
+
 					// Wait for the target to be created if it is in the map.
 					const targetPromise = pathPromises.get(linkTarget);
 					if (targetPromise) await targetPromise;
@@ -321,9 +324,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 			return header.type;
 		} finally {
 			// Ensure the entry stream is drained to avoid blocking.
-			if (!entryStream.readableEnded) {
-				entryStream.resume();
-			}
+			if (!entryStream.readableEnded) entryStream.resume();
 		}
 	};
 

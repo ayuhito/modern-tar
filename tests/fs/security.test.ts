@@ -327,6 +327,148 @@ describe("security", () => {
 				expect(originalStat.ino).toBe(linkStat.ino);
 				expect(linkStat.nlink).toBe(2);
 			});
+
+			it("should silently skip self-referential hardlinks without erroring", async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				const entries: TarEntry[] = [
+					{
+						header: {
+							name: "autolink",
+							type: "link",
+							linkname: "./autolink", // The target is the same as the name
+							size: 0,
+							mode: 0o644,
+							mtime: new Date(),
+						},
+					},
+				];
+
+				const tarBuffer = await packTar(entries);
+				const tarStream = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
+
+				await expect(
+					pipeline(tarStream, unpackStream),
+				).resolves.toBeUndefined();
+
+				// Verify that no files were created
+				const files = await fs.readdir(extractDir);
+				expect(files).toEqual([]);
+			});
+
+			it("should skip self-referential hardlinks with various path formats", async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				// Test different ways a self-referential link can be expressed
+				const testCases = [
+					{ name: "simple", linkname: "simple" },
+					{ name: "dotslash", linkname: "./dotslash" },
+					{ name: "nested/file", linkname: "nested/file" },
+					{ name: "nested/dotfile", linkname: "./nested/dotfile" },
+				];
+
+				for (const testCase of testCases) {
+					const entries: TarEntry[] = [
+						{
+							header: {
+								name: testCase.name,
+								type: "link",
+								linkname: testCase.linkname,
+								size: 0,
+								mode: 0o644,
+								mtime: new Date(),
+							},
+						},
+					];
+
+					const tarBuffer = await packTar(entries);
+					const tarStream = Readable.from([tarBuffer]);
+					const unpackStream = unpackTar(extractDir);
+
+					// Each case should complete successfully without creating files
+					await expect(
+						pipeline(tarStream, unpackStream),
+					).resolves.toBeUndefined();
+				}
+
+				// Verify that only parent directories were created (no actual files/links)
+				const files = await fs.readdir(extractDir, { recursive: true });
+				// Only "nested" directory should exist from the nested test cases
+				expect(files).toEqual(["nested"]);
+
+				// Verify that the nested directory is empty (no files were created inside it)
+				const nestedFiles = await fs.readdir(path.join(extractDir, "nested"));
+				expect(nestedFiles).toEqual([]);
+			});
+
+			it("should handle mixed archive with self-referential and normal hardlinks", async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				// Create an archive with a normal file, a valid hardlink, and a self-referential hardlink
+				const entries: TarEntry[] = [
+					{
+						header: {
+							name: "original.txt",
+							size: 12,
+							type: "file",
+							mode: 0o644,
+							mtime: new Date(),
+						},
+						body: "test content",
+					},
+					{
+						header: {
+							name: "valid-link.txt",
+							size: 0,
+							type: "link",
+							linkname: "original.txt",
+							mode: 0o644,
+							mtime: new Date(),
+						},
+					},
+					{
+						header: {
+							name: "self-link.txt",
+							size: 0,
+							type: "link",
+							linkname: "self-link.txt", // Self-referential
+							mode: 0o644,
+							mtime: new Date(),
+						},
+					},
+				];
+
+				const tarBuffer = await packTar(entries);
+				const tarStream = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
+
+				await expect(
+					pipeline(tarStream, unpackStream),
+				).resolves.toBeUndefined();
+
+				// Verify that only the original file and valid hardlink were created
+				const files = (await fs.readdir(extractDir)).sort();
+				expect(files).toEqual(["original.txt", "valid-link.txt"]);
+
+				// Verify the valid hardlink works correctly
+				const originalStat = await fs.stat(
+					path.join(extractDir, "original.txt"),
+				);
+				const linkStat = await fs.stat(path.join(extractDir, "valid-link.txt"));
+				expect(originalStat.ino).toBe(linkStat.ino);
+				expect(linkStat.nlink).toBe(2);
+
+				// Verify content is correct
+				const content = await fs.readFile(
+					path.join(extractDir, "valid-link.txt"),
+					"utf-8",
+				);
+				expect(content).toBe("test content");
+			});
 		});
 	});
 
