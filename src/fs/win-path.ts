@@ -1,7 +1,7 @@
 // src/fs/win-path.ts
 
 // Mapping of reserved characters to Unicode Private Use Area equivalents.
-const REPLACEMENTS: { [key: string]: string } = {
+const REPLACEMENTS: Record<string, string> = {
 	":": "\uF03A",
 	"<": "\uF03C",
 	">": "\uF03E",
