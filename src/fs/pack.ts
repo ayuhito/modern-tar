@@ -226,12 +226,18 @@ export function packTar(
 				if (job.type === "content" || job.type === "stream") {
 					let body: FileBody;
 					let size: number;
+					const isDir = target.endsWith("/");
 
 					if (job.type === "stream") {
-						// Validate size and throw if invalid.
-						if (typeof job.size !== "number" || job.size <= 0)
+						if (
+							typeof job.size !== "number" ||
+							(!isDir && job.size <= 0) ||
+							(isDir && job.size !== 0)
+						)
 							throw new Error(
-								"StreamSource requires a positive size property.",
+								isDir
+									? "Streams for directories must have size 0."
+									: "Streams require a positive size.",
 							);
 
 						size = job.size;
@@ -243,11 +249,11 @@ export function packTar(
 					}
 
 					const stat = {
-						size,
-						isFile: () => true,
-						isDirectory: () => false,
+						size: isDir ? 0 : size,
+						isFile: () => !isDir,
+						isDirectory: () => isDir,
 						isSymbolicLink: () => false,
-						mode: job.mode ?? 0o644,
+						mode: job.mode,
 						mtime: job.mtime ?? new Date(),
 						uid: job.uid ?? 0,
 						gid: job.gid ?? 0,
@@ -257,8 +263,8 @@ export function packTar(
 
 					let header: TarHeader = {
 						name: target,
-						type: "file",
-						size,
+						type: isDir ? "directory" : "file",
+						size: isDir ? 0 : size,
 						mode: stat.mode,
 						mtime: stat.mtime,
 						uid: stat.uid,
@@ -269,8 +275,12 @@ export function packTar(
 
 					if (map) header = map(header);
 
-					jobResult = { header, body };
-					return; // No further work needed.
+					jobResult = {
+						header,
+						body: isDir ? undefined : body,
+					};
+
+					return;
 				}
 
 				let stat = await fs.lstat(job.source, { bigint: true });

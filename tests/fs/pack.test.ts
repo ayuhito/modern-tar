@@ -5,6 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
+import { createTarDecoder, type TarHeader } from "../../src/web";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
@@ -224,7 +225,7 @@ describe("pack", () => {
 				for await (const _chunk of packStream) {
 					// Just consume the stream to trigger the error
 				}
-			}).rejects.toThrow("StreamSource requires a positive size property.");
+			}).rejects.toThrow("Streams require a positive size.");
 		});
 
 		it("throws error when StreamSource has zero size", async () => {
@@ -248,7 +249,7 @@ describe("pack", () => {
 				for await (const _chunk of packStream) {
 					// Just consume the stream to trigger the error
 				}
-			}).rejects.toThrow("StreamSource requires a positive size property.");
+			}).rejects.toThrow("Streams require a positive size.");
 		});
 
 		it("works correctly with valid StreamSource size", async () => {
@@ -291,13 +292,23 @@ describe("pack", () => {
 		// Set specific permissions (only on Unix systems)
 		if (process.platform !== "win32") {
 			await fs.chmod(testFile, 0o600); // rw-------
-			await fs.chmod(testDir, 0o700);  // rwx------
+			await fs.chmod(testDir, 0o700); // rwx------
 		}
 
 		// Pack with mode overrides
 		const sources = [
-			{ type: "file" as const, source: testFile, target: "override.txt", mode: 0o644 },
-			{ type: "directory" as const, source: testDir, target: "overridedir", mode: 0o755 },
+			{
+				type: "file" as const,
+				source: testFile,
+				target: "override.txt",
+				mode: 0o644,
+			},
+			{
+				type: "directory" as const,
+				source: testDir,
+				target: "overridedir",
+				mode: 0o755,
+			},
 		];
 
 		const destDir = path.join(tmpDir, "extracted");
@@ -324,14 +335,17 @@ describe("pack", () => {
 		} else {
 			// On Unix systems, expect the exact overridden modes
 			expect(fileMode).toBe(0o644); // Should be overridden mode, not 0o600
-			expect(dirMode).toBe(0o755);  // Should be overridden mode, not 0o700
+			expect(dirMode).toBe(0o755); // Should be overridden mode, not 0o700
 		}
 
 		// Verify content is still correct (all platforms)
 		const content = await fs.readFile(extractedFile, "utf-8");
 		expect(content).toBe("test content");
 
-		const nestedContent = await fs.readFile(path.join(extractedDir, "nested.txt"), "utf-8");
+		const nestedContent = await fs.readFile(
+			path.join(extractedDir, "nested.txt"),
+			"utf-8",
+		);
 		expect(nestedContent).toBe("nested content");
 	});
 
@@ -425,7 +439,10 @@ describe("pack", () => {
 		// Verify content integrity
 		const fileContent = await fs.readFile(extractedFile, "utf-8");
 		const contentFileContent = await fs.readFile(extractedContent, "utf-8");
-		const nestedFileContent = await fs.readFile(path.join(extractedDir, "nested.txt"), "utf-8");
+		const nestedFileContent = await fs.readFile(
+			path.join(extractedDir, "nested.txt"),
+			"utf-8",
+		);
 
 		expect(fileContent).toBe("test content");
 		expect(contentFileContent).toBe("content source data");
@@ -497,7 +514,276 @@ describe("pack", () => {
 		}
 
 		// Modification time should be preserved (within tolerance)
-		const timeDiff = Math.abs(extractedStat.mtime.getTime() - originalStat.mtime.getTime());
+		const timeDiff = Math.abs(
+			extractedStat.mtime.getTime() - originalStat.mtime.getTime(),
+		);
 		expect(timeDiff).toBeLessThan(1000);
+	});
+
+	it("correctly applies default directory mode for ContentSource directory entries", async () => {
+		// This test reproduces a bug where ContentSource entries with directory paths
+		// incorrectly get file mode (0o644) instead of directory mode (0o755)
+		const sources = [
+			{
+				type: "content" as const,
+				content: null, // Directory entries have null content
+				target: "test-directory/", // Directory path (ends with /)
+				// Intentionally not specifying mode to test default behavior
+			},
+			{
+				type: "content" as const,
+				content: "file content",
+				target: "test-file.txt", // File path (no trailing /)
+				// Intentionally not specifying mode to test default behavior
+			},
+		];
+
+		// Create a tar stream and examine the raw headers
+		const packStream = packTar(sources);
+		const decoder = createTarDecoder();
+		const entries: { header: TarHeader; body: ReadableStream }[] = [];
+
+		// Convert Node.js Readable to Web ReadableStream
+		const webStream = new ReadableStream({
+			start(controller) {
+				packStream.on("data", (chunk) => {
+					controller.enqueue(new Uint8Array(chunk));
+				});
+				packStream.on("end", () => {
+					controller.close();
+				});
+				packStream.on("error", (err) => {
+					controller.error(err);
+				});
+			},
+		});
+
+		// Parse the tar stream to get headers
+		const entryStream = webStream.pipeThrough(decoder);
+		const reader = entryStream.getReader();
+
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				entries.push(value);
+				// Consume the body stream to continue reading
+				const bodyReader = value.body.getReader();
+				while (true) {
+					const { done: bodyDone } = await bodyReader.read();
+					if (bodyDone) break;
+				}
+			}
+		} finally {
+			reader.releaseLock();
+		}
+
+		// Verify we have the expected entries
+		expect(entries).toHaveLength(2);
+
+		// Find directory and file entries
+		const dirEntry = entries.find((e) => e.header.name === "test-directory/");
+		const fileEntry = entries.find((e) => e.header.name === "test-file.txt");
+
+		expect(dirEntry).toBeDefined();
+		expect(fileEntry).toBeDefined();
+
+		// Verify types
+		expect(dirEntry?.header.type).toBe("directory");
+		expect(fileEntry?.header.type).toBe("file");
+
+		// The bug: directory should have mode 0o755 (DEFAULT_DIR_MODE), not 0o644 (DEFAULT_FILE_MODE)
+		// This test currently FAILS due to the bug, but will pass after the fix
+		expect(dirEntry?.header.mode).toBe(0o755); // Should be directory default mode
+		expect(fileEntry?.header.mode).toBe(0o644); // Should be file default mode
+	});
+
+	it("correctly applies default directory mode for StreamSource directory entries", async () => {
+		// Test that StreamSource can also create directory entries with correct modes
+		const sources = [
+			{
+				type: "stream" as const,
+				content: new ReadableStream({
+					start(controller) {
+						controller.close(); // Empty stream for directory
+					},
+				}),
+				size: 0, // Directory size is 0
+				target: "stream-directory/", // Directory path (ends with /)
+				// Intentionally not specifying mode to test default behavior
+			},
+			{
+				type: "stream" as const,
+				content: new ReadableStream({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode("stream file content"));
+						controller.close();
+					},
+				}),
+				size: 19, // Length of "stream file content"
+				target: "stream-file.txt", // File path (no trailing /)
+				// Intentionally not specifying mode to test default behavior
+			},
+		];
+
+		// Create a tar stream and examine the raw headers
+		const packStream = packTar(sources);
+		const decoder = createTarDecoder();
+		const entries: { header: TarHeader; body: ReadableStream }[] = [];
+
+		// Convert Node.js Readable to Web ReadableStream
+		const webStream = new ReadableStream({
+			start(controller) {
+				packStream.on("data", (chunk) => {
+					controller.enqueue(new Uint8Array(chunk));
+				});
+				packStream.on("end", () => {
+					controller.close();
+				});
+				packStream.on("error", (err) => {
+					controller.error(err);
+				});
+			},
+		});
+
+		// Parse the tar stream to get headers
+		const entryStream = webStream.pipeThrough(decoder);
+		const reader = entryStream.getReader();
+
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				entries.push(value);
+				// Consume the body stream to continue reading
+				const bodyReader = value.body.getReader();
+				while (true) {
+					const { done: bodyDone } = await bodyReader.read();
+					if (bodyDone) break;
+				}
+			}
+		} finally {
+			reader.releaseLock();
+		}
+
+		// Verify we have the expected entries
+		expect(entries).toHaveLength(2);
+
+		// Find directory and file entries
+		const dirEntry = entries.find((e) => e.header.name === "stream-directory/");
+		const fileEntry = entries.find((e) => e.header.name === "stream-file.txt");
+
+		expect(dirEntry).toBeDefined();
+		expect(fileEntry).toBeDefined();
+
+		// Verify types
+		expect(dirEntry?.header.type).toBe("directory");
+		expect(fileEntry?.header.type).toBe("file");
+
+		// Verify correct default modes are applied
+		expect(dirEntry?.header.mode).toBe(0o755); // Should be directory default mode
+		expect(fileEntry?.header.mode).toBe(0o644); // Should be file default mode
+
+		// Verify sizes
+		expect(dirEntry?.header.size).toBe(0); // Directories have size 0
+		expect(fileEntry?.header.size).toBe(19); // File should have content size
+	});
+
+	it("allows explicit mode override for ContentSource and StreamSource directories", async () => {
+		// Test that explicit mode values are respected even for directories
+		const customDirMode = 0o700;
+		const customFileMode = 0o600;
+
+		const sources = [
+			{
+				type: "content" as const,
+				content: null,
+				target: "custom-dir/",
+				mode: customDirMode, // Explicit directory mode override
+			},
+			{
+				type: "stream" as const,
+				content: new ReadableStream({
+					start(controller) {
+						controller.close();
+					},
+				}),
+				size: 0,
+				target: "custom-stream-dir/",
+				mode: customDirMode, // Explicit directory mode override
+			},
+			{
+				type: "content" as const,
+				content: "test content",
+				target: "custom-file.txt",
+				mode: customFileMode, // Explicit file mode override
+			},
+		];
+
+		// Create a tar stream and examine the raw headers
+		const packStream = packTar(sources);
+		const decoder = createTarDecoder();
+		const entries: { header: TarHeader; body: ReadableStream }[] = [];
+
+		// Convert Node.js Readable to Web ReadableStream
+		const webStream = new ReadableStream({
+			start(controller) {
+				packStream.on("data", (chunk) => {
+					controller.enqueue(new Uint8Array(chunk));
+				});
+				packStream.on("end", () => {
+					controller.close();
+				});
+				packStream.on("error", (err) => {
+					controller.error(err);
+				});
+			},
+		});
+
+		// Parse the tar stream to get headers
+		const entryStream = webStream.pipeThrough(decoder);
+		const reader = entryStream.getReader();
+
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				entries.push(value);
+				// Consume the body stream to continue reading
+				const bodyReader = value.body.getReader();
+				while (true) {
+					const { done: bodyDone } = await bodyReader.read();
+					if (bodyDone) break;
+				}
+			}
+		} finally {
+			reader.releaseLock();
+		}
+
+		// Verify we have the expected entries
+		expect(entries).toHaveLength(3);
+
+		// Find entries
+		const contentDirEntry = entries.find(
+			(e) => e.header.name === "custom-dir/",
+		);
+		const streamDirEntry = entries.find(
+			(e) => e.header.name === "custom-stream-dir/",
+		);
+		const fileEntry = entries.find((e) => e.header.name === "custom-file.txt");
+
+		expect(contentDirEntry).toBeDefined();
+		expect(streamDirEntry).toBeDefined();
+		expect(fileEntry).toBeDefined();
+
+		// Verify types
+		expect(contentDirEntry?.header.type).toBe("directory");
+		expect(streamDirEntry?.header.type).toBe("directory");
+		expect(fileEntry?.header.type).toBe("file");
+
+		// Verify explicit modes are respected
+		expect(contentDirEntry?.header.mode).toBe(customDirMode);
+		expect(streamDirEntry?.header.mode).toBe(customDirMode);
+		expect(fileEntry?.header.mode).toBe(customFileMode);
 	});
 });
