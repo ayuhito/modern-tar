@@ -55,7 +55,7 @@ describe("windows path helpers", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					/contains Windows drive letter traversal/,
+					/points outside extraction directory/,
 				);
 
 				// Verify no files were created due to rejection
@@ -121,7 +121,7 @@ describe("windows path helpers", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					/contains Windows drive letter traversal/,
+					/points outside extraction directory/,
 				);
 			},
 		);
@@ -151,7 +151,7 @@ describe("windows path helpers", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					/contains Windows drive letter traversal/,
+					/points outside extraction directory/,
 				);
 			},
 		);
@@ -599,7 +599,7 @@ describe("windows path helpers", () => {
 
 				// Should still be rejected due to drive letter traversal
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					/contains Windows drive letter traversal/,
+					/points outside extraction directory/,
 				);
 			},
 		);
@@ -640,7 +640,7 @@ describe("windows path helpers", () => {
 
 				for (const pattern of patterns) {
 					expect(() => normalizeWindowsPath(pattern)).toThrow(
-						/contains Windows drive letter traversal/,
+						/points outside extraction directory/,
 					);
 				}
 			},
