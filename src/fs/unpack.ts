@@ -9,6 +9,7 @@ import type { TarHeader } from "../tar/types";
 import { createTarUnpacker } from "../tar/unpacker";
 import { normalizeUnicode, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
+import { normalizeWindowsPath } from "./win-path";
 
 /**
  * Extract a tar archive to a directory.
@@ -210,7 +211,9 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 		try {
 			// Await the destination directory to ensure it's created first.
 			const destDir = await destDirPromise;
-			const normalizedName = normalizeUnicode(header.name);
+			const normalizedName = normalizeUnicode(
+				normalizeWindowsPath(header.name),
+			);
 
 			// Prevent ReDOS via deep paths.
 			if (maxDepth !== Infinity && normalizedName.split("/").length > maxDepth)
