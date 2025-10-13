@@ -112,7 +112,9 @@ export function packTar(
 		let allJobsQueued = false;
 
 		const writer = async () => {
-			const readBuffer = Buffer.alloc(64 * 1024);
+			// Pre-allocate read buffers, but only lazily allocate the large one if needed.
+			const readBufferSmall = Buffer.alloc(64 * 1024); // 64KB
+			let readBufferLarge: Buffer | null = null; // 512KB
 
 			while (true) {
 				if (stream.destroyed) return;
@@ -163,6 +165,14 @@ export function packTar(
 						}
 					} else {
 						const { handle, size } = result.body;
+
+						// Select a 64KB or 512KB buffer based on file size > 1MB.
+						const readBuffer =
+							size > 1048576
+								? // biome-ignore lint/suspicious/noAssignInExpressions: Cleaner.
+									(readBufferLarge ??= Buffer.alloc(512 * 1024))
+								: readBufferSmall;
+
 						try {
 							let bytesLeft = size;
 							while (bytesLeft > 0 && !stream.destroyed) {
