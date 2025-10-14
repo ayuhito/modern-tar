@@ -2,7 +2,12 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { normalizeUnicode, validateBounds } from "../../src/fs/path";
+import {
+	normalizeHeaderName,
+	normalizeUnicode,
+	stripTrailingSlashes,
+	validateBounds,
+} from "../../src/fs/path";
 
 describe("path utilities", () => {
 	let tmpDir: string;
@@ -13,6 +18,183 @@ describe("path utilities", () => {
 
 	afterEach(async () => {
 		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	describe("strip trailing slashes", () => {
+		it.each([
+			// Cases where slashes should be stripped
+			{ input: "path/to/file/", expected: "path/to/file" },
+			{ input: "path/to/file///", expected: "path/to/file" },
+			{ input: "directory/", expected: "directory" },
+			{ input: "///", expected: "" },
+			{ input: "single/", expected: "single" },
+			{ input: "multiple////", expected: "multiple" },
+
+			// Cases that should remain unchanged
+			{ input: "path/with/slash", expected: "path/with/slash" },
+			{ input: "/path/at/root", expected: "/path/at/root" },
+			{ input: "", expected: "" },
+			{ input: "/", expected: "" },
+			{ input: "no-slash", expected: "no-slash" },
+			{
+				input: "path/with/internal/slashes",
+				expected: "path/with/internal/slashes",
+			},
+		])(
+			"should correctly process '$input' into '$expected'",
+			({ input, expected }) => {
+				expect(stripTrailingSlashes(input)).toBe(expected);
+			},
+		);
+
+		it("handles edge cases efficiently", () => {
+			// Empty string
+			expect(stripTrailingSlashes("")).toBe("");
+
+			// Single slash
+			expect(stripTrailingSlashes("/")).toBe("");
+
+			// Only slashes
+			expect(stripTrailingSlashes("////")).toBe("");
+
+			// Single character with slash
+			expect(stripTrailingSlashes("a/")).toBe("a");
+
+			// Single character without slash
+			expect(stripTrailingSlashes("a")).toBe("a");
+		});
+
+		it("preserves leading slashes", () => {
+			expect(stripTrailingSlashes("/path/")).toBe("/path");
+			expect(stripTrailingSlashes("//path//")).toBe("//path");
+			expect(stripTrailingSlashes("///")).toBe("");
+		});
+
+		it("handles mixed content", () => {
+			expect(stripTrailingSlashes("file.txt/")).toBe("file.txt");
+			expect(stripTrailingSlashes("my-file.tar.gz/")).toBe("my-file.tar.gz");
+			expect(stripTrailingSlashes("special@chars#$/")).toBe("special@chars#$");
+		});
+
+		it("handles unicode characters", () => {
+			expect(stripTrailingSlashes("café/")).toBe("café");
+			expect(stripTrailingSlashes("测试文件/")).toBe("测试文件");
+			expect(stripTrailingSlashes("файл///")).toBe("файл");
+		});
+
+		it("handles very long paths", () => {
+			const longPath = "a".repeat(1000);
+			const longPathWithSlash = `${longPath}/`;
+			const longPathWithSlashes = `${longPath}////`;
+
+			expect(stripTrailingSlashes(longPathWithSlash)).toBe(longPath);
+			expect(stripTrailingSlashes(longPathWithSlashes)).toBe(longPath);
+		});
+
+		it("handles paths with spaces", () => {
+			expect(stripTrailingSlashes("path with spaces/")).toBe(
+				"path with spaces",
+			);
+			expect(stripTrailingSlashes("  leading spaces/")).toBe(
+				"  leading spaces",
+			);
+			expect(stripTrailingSlashes("trailing spaces  /")).toBe(
+				"trailing spaces  ",
+			);
+		});
+
+		it("handles security-relevant paths", () => {
+			// Paths that might be used in attacks should be cleaned properly
+			expect(stripTrailingSlashes("../")).toBe("..");
+			expect(stripTrailingSlashes("../../")).toBe("../..");
+			expect(stripTrailingSlashes("./")).toBe(".");
+			expect(stripTrailingSlashes("~/")).toBe("~");
+		});
+
+		it("performance: avoids string allocation when no trailing slashes", () => {
+			const input = "path/without/trailing/slash";
+			const result = stripTrailingSlashes(input);
+
+			// Should return the same string reference when no changes needed
+			expect(result).toBe(input);
+			expect(result === input).toBe(true);
+		});
+
+		it("performance: handles alternating slash patterns", () => {
+			expect(stripTrailingSlashes("a/b/c/d/e/f/")).toBe("a/b/c/d/e/f");
+			expect(stripTrailingSlashes("///a///b///c///")).toBe("///a///b///c");
+		});
+	});
+
+	describe("normalizeHeaderName", () => {
+		it("applies all normalization steps in correct order", () => {
+			// Test that it strips trailing slashes, normalizes Windows paths, and normalizes Unicode
+			expect(normalizeHeaderName("café/")).toBe("cafe\u0301");
+			// On Unix, backslashes are preserved as literal characters since normalizeWindowsPath is a no-op
+			const expected =
+				process.platform === "win32" ? "path/to/file" : "path\\to\\file";
+			expect(normalizeHeaderName("path\\to\\file/")).toBe(expected);
+			expect(normalizeHeaderName("test///")).toBe("test");
+		});
+
+		it("handles Windows drive letters and reserved characters on Windows", () => {
+			// Mock Windows platform
+			const originalPlatform = process.platform;
+			Object.defineProperty(process, "platform", { value: "win32" });
+
+			try {
+				expect(normalizeHeaderName("C:file.txt/")).toBe("file.txt");
+				expect(normalizeHeaderName("path<>file/")).toBe("path\uF03C\uF03Efile");
+				expect(normalizeHeaderName("file|name/")).toBe("file\uF07Cname");
+			} finally {
+				// Restore original platform
+				Object.defineProperty(process, "platform", { value: originalPlatform });
+			}
+		});
+
+		it("handles complex paths with all normalization features", () => {
+			// On Unix, backslashes are preserved as literal characters
+			const expected =
+				process.platform === "win32" ? "cafe\u0301/dir" : "cafe\u0301\\dir";
+			expect(normalizeHeaderName("café\\dir/")).toBe(expected);
+			expect(normalizeHeaderName("测试文件///")).toBe("测试文件");
+			expect(normalizeHeaderName("path/with/unicode/ñ/")).toBe(
+				"path/with/unicode/n\u0303",
+			);
+		});
+
+		it("is consistent between cache key and filesystem operations", () => {
+			// This ensures the same normalization is used everywhere
+			const testPaths = [
+				"file.txt/",
+				"dir\\subdir/",
+				"café/",
+				"path///multiple///slashes/",
+				"unicode/测试/",
+			];
+
+			for (const testPath of testPaths) {
+				const normalized = normalizeHeaderName(testPath);
+				// Should be idempotent
+				expect(normalizeHeaderName(normalized)).toBe(normalized);
+				// Should not have trailing slashes
+				expect(normalized.endsWith("/")).toBe(false);
+			}
+		});
+
+		it("handles edge cases", () => {
+			expect(normalizeHeaderName("")).toBe("");
+			expect(normalizeHeaderName("/")).toBe("");
+			expect(normalizeHeaderName("///")).toBe("");
+			expect(normalizeHeaderName("file")).toBe("file");
+		});
+
+		it("handles security-relevant paths consistently", () => {
+			expect(normalizeHeaderName("../")).toBe("..");
+			expect(normalizeHeaderName("../../")).toBe("../..");
+			expect(normalizeHeaderName("./")).toBe(".");
+			expect(normalizeHeaderName("~/")).toBe("~");
+		});
 	});
 
 	describe("normalizeUnicode", () => {

@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { normalizeWindowsPath } from "./win-path";
 
 const unicodeCache = new Map<string, string>();
 
@@ -20,6 +21,25 @@ export const normalizeUnicode = (s: string): string => {
 
 	return result;
 };
+
+// Strips trailing slashes from a path.
+export function stripTrailingSlashes(p: string): string {
+	let i = p.length - 1;
+	if (i === -1 || p[i] !== "/") {
+		return p;
+	}
+
+	let slashesStart = i;
+	while (i > -1 && p[i] === "/") {
+		slashesStart = i;
+		i--;
+	}
+
+	return p.slice(0, slashesStart);
+}
+
+export const normalizeHeaderName = (s: string) =>
+	normalizeUnicode(normalizeWindowsPath(stripTrailingSlashes(s)));
 
 // Validates that the given target path is within the destination directory and does not escape.
 export function validateBounds(

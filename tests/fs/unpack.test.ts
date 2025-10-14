@@ -483,4 +483,123 @@ describe("extract", () => {
 			expect(content).toBe("hello");
 		}, 10000);
 	});
+
+	describe("malformed archive handling", () => {
+		it("should correctly unpack a file entry with erroneous trailing slashes", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+
+			// Arrange: Create an archive where a file entry's path incorrectly ends with a slash.
+			const entries = [
+				{
+					header: {
+						name: "my-file.txt/", // Malformed path for a file
+						type: "file" as const,
+						size: 7,
+						mode: 0o644,
+						mtime: new Date(),
+					},
+					body: "content",
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const tarStream = Readable.from([tarBuffer]);
+			const unpackStream = unpackTar(destDir);
+
+			await pipeline(tarStream, unpackStream);
+
+			const createdPath = path.join(destDir, "my-file.txt");
+
+			const stats = await fs.stat(createdPath);
+			expect(stats.isFile()).toBe(true);
+			expect(stats.isDirectory()).toBe(false);
+
+			const content = await fs.readFile(createdPath, "utf-8");
+			expect(content).toBe("content");
+		});
+
+		it("should handle multiple trailing slashes on files", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+
+			const entries = [
+				{
+					header: {
+						name: "document.pdf///", // Multiple trailing slashes
+						type: "file" as const,
+						size: 12,
+						mode: 0o644,
+					},
+					body: "PDF content\n",
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const unpackStream = unpackTar(destDir);
+
+			await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+			// Should create file without trailing slashes
+			const filePath = path.join(destDir, "document.pdf");
+			const stats = await fs.stat(filePath);
+			expect(stats.isFile()).toBe(true);
+
+			const content = await fs.readFile(filePath, "utf-8");
+			expect(content).toBe("PDF content\n");
+		});
+
+		it("should handle trailing slashes on directories (which is valid)", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+
+			const entries = [
+				{
+					header: {
+						name: "valid-dir/", // This is actually valid for directories
+						type: "directory" as const,
+						size: 0,
+						mode: 0o755,
+					},
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const unpackStream = unpackTar(destDir);
+
+			await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+			// Should create directory without trailing slash
+			const dirPath = path.join(destDir, "valid-dir");
+			const stats = await fs.stat(dirPath);
+			expect(stats.isDirectory()).toBe(true);
+		});
+
+		it("should handle nested paths with trailing slashes", async () => {
+			const destDir = path.join(tmpDir, "extracted");
+
+			const content = "nested\n";
+			const entries = [
+				{
+					header: {
+						name: "nested/path/file.txt/", // Nested file with trailing slash
+						type: "file" as const,
+						size: content.length, // Match actual content size
+						mode: 0o644,
+					},
+					body: content,
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const unpackStream = unpackTar(destDir);
+
+			await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+			// Should create the nested file structure correctly
+			const filePath = path.join(destDir, "nested", "path", "file.txt");
+			const stats = await fs.stat(filePath);
+			expect(stats.isFile()).toBe(true);
+
+			const readContent = await fs.readFile(filePath, "utf-8");
+			expect(readContent).toBe(content);
+		});
+	});
 });

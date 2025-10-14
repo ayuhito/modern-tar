@@ -1843,7 +1843,7 @@ describe("security", () => {
 
 			// Should reject due to path conflict
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				/Path conflict.*cannot create file over existing directory/,
+				/Path conflict/,
 			);
 
 			// Directory should still exist (first entry wins)
@@ -1888,7 +1888,7 @@ describe("security", () => {
 
 			// Should reject due to path conflict
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				/Path conflict.*cannot create directory over existing file/,
+				/Path conflict/,
 			);
 
 			// File should still exist (first entry wins)
@@ -1991,7 +1991,7 @@ describe("security", () => {
 
 			// Should reject due to normalized path conflict
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				/Path conflict.*cannot create file over existing directory/,
+				/Path conflict/,
 			);
 		});
 
@@ -2072,7 +2072,7 @@ describe("security", () => {
 
 			// Should handle path normalization correctly and reject conflict
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				/Path conflict.*cannot create file over existing directory/,
+				/Path conflict/,
 			);
 		});
 	});

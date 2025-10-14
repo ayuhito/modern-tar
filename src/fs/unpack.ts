@@ -7,9 +7,8 @@ import { pipeline } from "node:stream/promises";
 import { transformHeader } from "../tar/options";
 import type { TarHeader } from "../tar/types";
 import { createTarUnpacker } from "../tar/unpacker";
-import { normalizeUnicode, validateBounds } from "./path";
+import { normalizeHeaderName, normalizeUnicode, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
-import { normalizeWindowsPath } from "./win-path";
 
 /**
  * Extract a tar archive to a directory.
@@ -204,130 +203,6 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 		return promise;
 	};
 
-	const processHeader = async (
-		header: TarHeader,
-		entryStream: PassThrough,
-	): Promise<TarHeader["type"]> => {
-		try {
-			// Await the destination directory to ensure it's created first.
-			const destDir = await destDirPromise;
-			const normalizedName = normalizeUnicode(
-				normalizeWindowsPath(header.name),
-			);
-
-			// Prevent ReDOS via deep paths.
-			if (maxDepth !== Infinity && normalizedName.split("/").length > maxDepth)
-				throw new Error("Tar exceeds max specified depth.");
-
-			// Prevent absolute paths and ensure within destDir.
-			if (path.isAbsolute(normalizedName))
-				throw new Error(`Absolute path found in "${header.name}".`);
-
-			const outPath = path.join(destDir.symbolic, normalizedName);
-			validateBounds(
-				outPath,
-				destDir.symbolic,
-				`Entry "${header.name}" points outside the extraction directory.`,
-			);
-
-			// Ensure parent directory exists.
-			const parentDir = path.dirname(outPath);
-			await ensureDirectoryExists(parentDir);
-
-			switch (header.type) {
-				case "directory":
-					await fs.mkdir(outPath, {
-						recursive: true,
-						mode: dmode ?? header.mode,
-					});
-					break;
-
-				case "file": {
-					const fileStream = createWriteStream(outPath, {
-						mode: fmode ?? header.mode,
-						// Use 512KB buffer for files > 1MB.
-						highWaterMark: header.size > 1048576 ? 524288 : undefined,
-					});
-					await pipeline(entryStream, fileStream);
-					break;
-				}
-
-				case "symlink": {
-					const { linkname } = header;
-					if (!linkname) return header.type;
-					const target = path.resolve(parentDir, linkname);
-					validateBounds(
-						target,
-						destDir.symbolic,
-						`Symlink "${linkname}" points outside the extraction directory.`,
-					);
-					await fs.symlink(linkname, outPath);
-					break;
-				}
-
-				case "link": {
-					const { linkname } = header;
-					if (!linkname) return header.type;
-
-					// Resolve the hardlink target path and ensure it's within destDir.
-					const normalizedLink = normalizeUnicode(linkname);
-					if (path.isAbsolute(normalizedLink)) {
-						throw new Error(
-							`Hardlink "${linkname}" points outside the extraction directory.`,
-						);
-					}
-
-					// This is the symbolic path to the link's target inside the extraction dir.
-					const linkTarget = path.join(destDir.symbolic, normalizedLink);
-					validateBounds(
-						linkTarget,
-						destDir.symbolic,
-						`Hardlink "${linkname}" points outside the extraction directory.`,
-					);
-					await ensureDirectoryExists(path.dirname(linkTarget));
-
-					// Resolve the real path of the parent directory which follows symlinks.
-					const realTargetParent = await fs.realpath(path.dirname(linkTarget));
-					const realLinkTarget = path.join(
-						realTargetParent,
-						path.basename(linkTarget),
-					);
-
-					// Check that the real path is within the destination directory.
-					validateBounds(
-						realLinkTarget,
-						destDir.real,
-						`Hardlink "${linkname}" points outside the extraction directory.`,
-					);
-
-					// A self-referential hardlink should be a noop.
-					if (linkTarget === outPath) return header.type;
-
-					// Wait for the target to be created if it is in the map.
-					const targetPromise = pathPromises.get(linkTarget);
-					if (targetPromise) await targetPromise;
-
-					await fs.link(linkTarget, outPath);
-					break;
-				}
-
-				default:
-					return header.type; // Unsupported type
-			}
-
-			// Set modification time if available.
-			if (header.mtime) {
-				const utimes = header.type === "symlink" ? fs.lutimes : fs.utimes;
-				await utimes(outPath, header.mtime, header.mtime).catch(() => {});
-			}
-
-			return header.type;
-		} finally {
-			// Ensure the entry stream is drained to avoid blocking.
-			if (!entryStream.readableEnded) entryStream.resume();
-		}
-	};
-
 	const handler = {
 		onHeader(header: TarHeader) {
 			if (signal.aborted) return;
@@ -350,21 +225,13 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 						return;
 					}
 
-					const destDir = path.resolve(directoryPath);
-
-					// Ensure that "path" and "path/" are treated as the same key on all platforms.
-					const keyPath = path.join(
-						destDir,
-						normalizeUnicode(transformed.name),
-					);
-					const normalizedTarget =
-						keyPath.endsWith("/") || keyPath.endsWith("\\")
-							? keyPath.slice(0, -1)
-							: keyPath;
+					// Normalize and resolve the target path.
+					const name = normalizeHeaderName(transformed.name);
+					const target = path.join(path.resolve(directoryPath), name);
 
 					// Chain onto any prior operation for this path.
 					const priorOpPromise =
-						pathPromises.get(normalizedTarget) || Promise.resolve(undefined);
+						pathPromises.get(target) || Promise.resolve(undefined);
 
 					// Start the operation promise chain.
 					opPromise = priorOpPromise.then(async (priorOp) => {
@@ -374,16 +241,142 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 								(priorOp === "directory" && transformed.type !== "directory") ||
 								(priorOp !== "directory" && transformed.type === "directory");
 
-							if (isConflict) {
+							if (isConflict)
 								throw new Error(
-									`Path conflict: cannot create ${transformed.type} over existing ${priorOp} at "${transformed.name}"`,
+									`Path conflict ${transformed.type} over existing ${priorOp} at "${transformed.name}"`,
 								);
-							}
 						}
 
-						return await processHeader(transformed, entryStream);
+						try {
+							const destDir = await destDirPromise;
+
+							// Prevent ReDOS via deep paths.
+							if (maxDepth !== Infinity && name.split("/").length > maxDepth)
+								throw new Error("Tar exceeds max specified depth.");
+
+							// Prevent absolute paths and ensure within destDir.
+							if (path.isAbsolute(name))
+								throw new Error(
+									`Absolute path found in "${transformed.name}".`,
+								);
+
+							const outPath = path.join(destDir.symbolic, name);
+							validateBounds(
+								outPath,
+								destDir.symbolic,
+								`Entry "${transformed.name}" points outside the extraction directory.`,
+							);
+
+							// Ensure parent directory exists.
+							const parentDir = path.dirname(outPath);
+							await ensureDirectoryExists(parentDir);
+
+							switch (transformed.type) {
+								case "directory":
+									await fs.mkdir(outPath, {
+										recursive: true,
+										mode: dmode ?? transformed.mode,
+									});
+									break;
+
+								case "file": {
+									const fileStream = createWriteStream(outPath, {
+										mode: fmode ?? transformed.mode,
+										// Use 512KB buffer for files > 1MB.
+										highWaterMark:
+											transformed.size > 1048576 ? 524288 : undefined,
+									});
+									await pipeline(entryStream, fileStream);
+									break;
+								}
+
+								case "symlink": {
+									const { linkname } = transformed;
+									if (!linkname) return transformed.type;
+									const target = path.resolve(parentDir, linkname);
+									validateBounds(
+										target,
+										destDir.symbolic,
+										`Symlink "${linkname}" points outside the extraction directory.`,
+									);
+									await fs.symlink(linkname, outPath);
+									break;
+								}
+
+								case "link": {
+									const { linkname } = transformed;
+									if (!linkname) return transformed.type;
+
+									// Resolve the hardlink target path and ensure it's within destDir.
+									const normalizedLink = normalizeUnicode(linkname);
+									if (path.isAbsolute(normalizedLink)) {
+										throw new Error(
+											`Hardlink "${linkname}" points outside the extraction directory.`,
+										);
+									}
+
+									// This is the symbolic path to the link's target inside the extraction dir.
+									const linkTarget = path.join(
+										destDir.symbolic,
+										normalizedLink,
+									);
+									validateBounds(
+										linkTarget,
+										destDir.symbolic,
+										`Hardlink "${linkname}" points outside the extraction directory.`,
+									);
+									await ensureDirectoryExists(path.dirname(linkTarget));
+
+									// Resolve the real path of the parent directory which follows symlinks.
+									const realTargetParent = await fs.realpath(
+										path.dirname(linkTarget),
+									);
+									const realLinkTarget = path.join(
+										realTargetParent,
+										path.basename(linkTarget),
+									);
+
+									// Check that the real path is within the destination directory.
+									validateBounds(
+										realLinkTarget,
+										destDir.real,
+										`Hardlink "${linkname}" points outside the extraction directory.`,
+									);
+
+									// A self-referential hardlink should be a noop.
+									if (linkTarget === outPath) return transformed.type;
+
+									// Wait for the target to be created if it is in the map.
+									const targetPromise = pathPromises.get(linkTarget);
+									if (targetPromise) await targetPromise;
+
+									await fs.link(linkTarget, outPath);
+									break;
+								}
+
+								default:
+									return transformed.type; // Unsupported type
+							}
+
+							// Set modification time if available.
+							if (transformed.mtime) {
+								const utimes =
+									transformed.type === "symlink" ? fs.lutimes : fs.utimes;
+								await utimes(
+									outPath,
+									transformed.mtime,
+									transformed.mtime,
+								).catch(() => {});
+							}
+
+							return transformed.type;
+						} finally {
+							// Ensure the entry stream is drained to avoid blocking.
+							if (!entryStream.readableEnded) entryStream.resume();
+						}
 					});
-					pathPromises.set(normalizedTarget, opPromise);
+
+					pathPromises.set(target, opPromise);
 				} catch (err) {
 					opPromise = Promise.reject(err);
 					abortController.abort(err as Error);
