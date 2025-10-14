@@ -230,7 +230,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 					}
 
 					// Normalize and resolve the target path.
-					const name = normalizeHeaderName(transformed.name);
+					let name = normalizeHeaderName(transformed.name);
 					const target = path.join(path.resolve(directoryPath), name);
 
 					// Chain onto any prior operation for this path.
@@ -258,11 +258,12 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 							if (maxDepth !== Infinity && name.split("/").length > maxDepth)
 								throw new Error("Tar exceeds max specified depth.");
 
-							// Prevent absolute paths and ensure within destDir.
-							if (path.isAbsolute(name))
-								throw new Error(
-									`Absolute path found in "${transformed.name}".`,
-								);
+							// Strip absolute path prefixes.
+							if (path.isAbsolute(name)) {
+								// On Windows, path.parse('C:/foo').root is 'C:/'.
+								// On POSIX, path.parse('/foo').root is '/'.
+								name = name.substring(path.parse(name).root.length);
+							}
 
 							const outPath = path.join(destDir.symbolic, name);
 							validateBounds(
