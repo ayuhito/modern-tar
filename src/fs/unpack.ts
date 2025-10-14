@@ -174,11 +174,15 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 
 		// If the directory is the destination directory, it already exists.
 		promise = (async (): Promise<TarHeader["type"]> => {
+			if (signal.aborted) throw signal.reason;
+
 			const destDir = await destDirPromise;
 			if (dirPath === destDir.symbolic) return "directory";
 
 			// Ensure parent directory exists first.
 			await ensureDirectoryExists(path.dirname(dirPath));
+
+			if (signal.aborted) throw signal.reason;
 
 			// Check if the directory exists.
 			try {
@@ -386,7 +390,6 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 				} catch (err) {
 					opPromise = Promise.reject(err);
 					abortController.abort(err as Error);
-					entryStream?.destroy(err as Error);
 				}
 
 				opPromise
@@ -412,7 +415,6 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 
 		onError(error: Error) {
 			abortController.abort(error);
-			activeEntryStream?.destroy(error);
 		},
 
 		async process() {
