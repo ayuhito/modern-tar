@@ -134,13 +134,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 			activeOps++;
 			const op = opQueue.shift();
 			if (!op) break;
-			try {
-				op();
-			} catch (error) {
-				abortController.abort(error as Error);
-				activeOps--;
-				break;
-			}
+			op();
 		}
 
 		if (processingEnded && activeOps === 0 && opQueue.length === 0) {
