@@ -8,6 +8,7 @@ import { Readable } from "node:stream";
 import { createTarPacker } from "../tar/packer";
 import type { TarHeader } from "../tar/types";
 import { normalizeBody } from "../tar/utils";
+import { normalizeName } from "./path";
 import type { PackOptionsFS, TarSource } from "./types";
 
 type FileBody =
@@ -230,7 +231,7 @@ export function packTar(
 			let jobResult: JobResult | null = null;
 
 			// Normalize target path to use forward slashes.
-			const target = job.target.replace(/\\/g, "/");
+			const target = normalizeName(job.target);
 
 			try {
 				if (job.type === "content" || job.type === "stream") {

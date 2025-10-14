@@ -786,4 +786,42 @@ describe("pack", () => {
 		expect(streamDirEntry?.header.mode).toBe(customDirMode);
 		expect(fileEntry?.header.mode).toBe(customFileMode);
 	});
+
+	it("strips absolute paths during packing", async () => {
+		const sources = [
+			{
+				type: "content" as const,
+				content: "file with absolute path",
+				target: "/tmp/absolute-file.txt",
+			},
+			{
+				type: "content" as const,
+				content: null,
+				target: "/absolute/directory/",
+			},
+			{
+				type: "content" as const,
+				content: "windows absolute path",
+				target: "C:/windows/file.txt",
+			},
+		];
+
+		const tarStream = packTar(sources);
+		const destDir = path.join(tmpDir, "extracted");
+
+		await pipeline(tarStream, unpackTar(destDir));
+
+		// Verify files are extracted with stripped absolute paths
+		const absoluteFile = path.join(destDir, "tmp", "absolute-file.txt");
+		const absoluteDir = path.join(destDir, "absolute", "directory");
+		const windowsFile = path.join(destDir, "windows", "file.txt");
+
+		expect(await fs.readFile(absoluteFile, "utf8")).toBe(
+			"file with absolute path",
+		);
+		expect((await fs.stat(absoluteDir)).isDirectory()).toBe(true);
+		expect(await fs.readFile(windowsFile, "utf8")).toBe(
+			"windows absolute path",
+		);
+	});
 });

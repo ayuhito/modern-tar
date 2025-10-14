@@ -171,7 +171,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Entry "../../malicious.txt" points outside the extraction directory.',
+					'../../malicious.txt points outside extraction directory',
 				);
 			});
 
@@ -184,7 +184,9 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				// Should succeed by stripping the absolute path prefix
-				await expect(pipeline(maliciousTar, unpackStream)).resolves.toBeUndefined();
+				await expect(
+					pipeline(maliciousTar, unpackStream),
+				).resolves.toBeUndefined();
 
 				// File should be extracted with stripped path: tmp/malicious.txt
 				const filePath = path.join(extractDir, "tmp", "malicious.txt");
@@ -202,7 +204,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Entry "./safe/../../../malicious.txt" points outside the extraction directory.',
+					'./safe/../../../malicious.txt points outside extraction directory',
 				);
 			});
 
@@ -220,7 +222,7 @@ describe("security", () => {
 				expect(fileContent).toBe("malicious data");
 			});
 
-			it("allows files with safe relative paths", async () => {
+			it("rejects paths with traversal patterns even if they resolve safely", async () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -229,11 +231,10 @@ describe("security", () => {
 				);
 				const unpackStream = unpackTar(extractDir);
 
-				await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
-
-				const filePath = path.join(extractDir, "safe.txt");
-				const fileContent = await fs.readFile(filePath, "utf8");
-				expect(fileContent).toBe("malicious data");
+				// Strict security: reject any path containing /../ even if it resolves safely
+				await expect(pipeline(safeTar, unpackStream)).rejects.toThrow(
+					'./subdir/../safe.txt points outside extraction directory',
+				);
 			});
 		});
 
@@ -247,7 +248,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Entry "../../malicious/" points outside the extraction directory.',
+					'../../malicious points outside extraction directory',
 				);
 			});
 
@@ -260,7 +261,9 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				// Should succeed by stripping the absolute path prefix
-				await expect(pipeline(maliciousTar, unpackStream)).resolves.toBeUndefined();
+				await expect(
+					pipeline(maliciousTar, unpackStream),
+				).resolves.toBeUndefined();
 
 				// Directory should be created with stripped path: tmp/malicious/
 				const dirPath = path.join(extractDir, "tmp", "malicious");
@@ -746,7 +749,7 @@ describe("security", () => {
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'Entry "../../malicious-file.txt" points outside the extraction directory.',
+				'../../malicious-file.txt points outside extraction directory',
 			);
 		});
 
@@ -809,15 +812,12 @@ describe("security", () => {
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'Entry "../../../malicious.txt" points outside the extraction directory.',
+				'../../../malicious.txt points outside extraction directory',
 			);
 
-			// Verify that safe files were created before the error
-			const safe1Path = path.join(extractDir, "safe1.txt");
-			const safe2Path = path.join(extractDir, "safe-dir", "safe2.txt");
-
-			expect(await fs.readFile(safe1Path, "utf8")).toBe("malicious data");
-			expect(await fs.readFile(safe2Path, "utf8")).toBe("malicious data");
+			// With strict security, no files should be created due to early rejection
+			const files = await fs.readdir(extractDir);
+			expect(files).toHaveLength(0);
 
 			// Verify malicious file was NOT created
 			const maliciousPath = path.resolve(tmpDir, "malicious.txt");
@@ -879,14 +879,16 @@ describe("security", () => {
 				);
 				const unpackStream = unpackTar(extractDir);
 
-				// On Unix, this should be treated as a filename with backslashes
-				await expect(
-					pipeline(maliciousTar, unpackStream),
-				).resolves.toBeUndefined();
+				// Backslashes are now normalized to forward slashes, making this a traversal attempt
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+					/points outside.*extraction directory/,
+				);
 
-				// The file should be created with the literal filename
-				const filePath = path.join(extractDir, "..\\..\\malicious.txt");
-				expect(await fs.readFile(filePath, "utf8")).toBe("malicious data");
+				// With strict security, no files should be created due to early rejection
+				const files = await fs.readdir(extractDir);
+				expect(files).toHaveLength(0);
+
+				// No safe file should exist due to strict security rejection
 			},
 		);
 	});
