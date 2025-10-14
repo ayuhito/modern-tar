@@ -175,7 +175,7 @@ describe("security", () => {
 				);
 			});
 
-			it("prevents files with absolute paths", async () => {
+			it("strips absolute paths from files", async () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -183,9 +183,13 @@ describe("security", () => {
 					await createTarWithMaliciousFile("/tmp/malicious.txt");
 				const unpackStream = unpackTar(extractDir);
 
-				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Absolute path found in "/tmp/malicious.txt".',
-				);
+				// Should succeed by stripping the absolute path prefix
+				await expect(pipeline(maliciousTar, unpackStream)).resolves.toBeUndefined();
+
+				// File should be extracted with stripped path: tmp/malicious.txt
+				const filePath = path.join(extractDir, "tmp", "malicious.txt");
+				const fileContent = await fs.readFile(filePath, "utf8");
+				expect(fileContent).toBe("malicious data");
 			});
 
 			it("prevents files with complex path traversal", async () => {
@@ -247,7 +251,7 @@ describe("security", () => {
 				);
 			});
 
-			it("prevents directories with absolute paths", async () => {
+			it("strips absolute paths from directories", async () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -255,9 +259,13 @@ describe("security", () => {
 					await createTarWithMaliciousDirectory("/tmp/malicious/");
 				const unpackStream = unpackTar(extractDir);
 
-				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'Absolute path found in "/tmp/malicious/".',
-				);
+				// Should succeed by stripping the absolute path prefix
+				await expect(pipeline(maliciousTar, unpackStream)).resolves.toBeUndefined();
+
+				// Directory should be created with stripped path: tmp/malicious/
+				const dirPath = path.join(extractDir, "tmp", "malicious");
+				const dirStat = await fs.stat(dirPath);
+				expect(dirStat.isDirectory()).toBe(true);
 			});
 
 			it("allows safe directory paths", async () => {

@@ -220,7 +220,7 @@ describe("extract", () => {
 		).rejects.toThrow("Tar exceeds max specified depth.");
 	});
 
-	it("handles absolute paths in entries", async () => {
+	it("strips absolute paths in entries", async () => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const entries = [
@@ -238,9 +238,15 @@ describe("extract", () => {
 		const tarBuffer = await packTarWeb(entries);
 		const unpackStream = unpackTar(destDir);
 
+		// Should succeed by stripping the absolute path prefix
 		await expect(
 			pipeline(Readable.from([tarBuffer]), unpackStream),
-		).rejects.toThrow('Absolute path found in "/absolute/path.txt".');
+		).resolves.toBeUndefined();
+
+		// File should be extracted with stripped path: absolute/path.txt
+		const filePath = path.join(destDir, "absolute", "path.txt");
+		const fileContent = await fs.readFile(filePath, "utf8");
+		expect(fileContent).toBe("hello world\n");
 	});
 
 	it("handles hardlink with absolute target", async () => {
