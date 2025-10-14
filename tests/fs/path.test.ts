@@ -81,18 +81,30 @@ describe("path utilities", () => {
 
 		it("handles security-relevant paths consistently", () => {
 			// Conservative security approach - reject any traversal patterns including bare ".."
-			expect(() => normalizeHeaderName("../")).toThrow(".. points outside extraction directory");
-			expect(() => normalizeHeaderName("../../")).toThrow("../.. points outside extraction directory");
+			expect(() => normalizeHeaderName("../")).toThrow(
+				".. points outside extraction directory",
+			);
+			expect(() => normalizeHeaderName("../../")).toThrow(
+				"../.. points outside extraction directory",
+			);
 			expect(normalizeHeaderName("./")).toBe(".");
 			expect(normalizeHeaderName("~/")).toBe("~");
 		});
 
 		it("rejects trailing .. traversal attempts (node-tar compatibility)", () => {
 			// Segment-based detection catches .. anywhere in the path
-			expect(() => normalizeHeaderName("foo/bar/..")).toThrow("foo/bar/.. points outside extraction directory");
-			expect(() => normalizeHeaderName("safe/path/..")).toThrow("safe/path/.. points outside extraction directory");
-			expect(() => normalizeHeaderName("a/b/c/..")).toThrow("a/b/c/.. points outside extraction directory");
-			expect(() => normalizeHeaderName("dir/..")).toThrow("dir/.. points outside extraction directory");
+			expect(() => normalizeHeaderName("foo/bar/..")).toThrow(
+				"foo/bar/.. points outside extraction directory",
+			);
+			expect(() => normalizeHeaderName("safe/path/..")).toThrow(
+				"safe/path/.. points outside extraction directory",
+			);
+			expect(() => normalizeHeaderName("a/b/c/..")).toThrow(
+				"a/b/c/.. points outside extraction directory",
+			);
+			expect(() => normalizeHeaderName("dir/..")).toThrow(
+				"dir/.. points outside extraction directory",
+			);
 		});
 
 		it("strips trailing slashes comprehensively", () => {

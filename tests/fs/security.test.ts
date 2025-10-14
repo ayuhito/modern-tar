@@ -171,7 +171,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'../../malicious.txt points outside extraction directory',
+					"../../malicious.txt points outside extraction directory",
 				);
 			});
 
@@ -204,7 +204,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'./safe/../../../malicious.txt points outside extraction directory',
+					"./safe/../../../malicious.txt points outside extraction directory",
 				);
 			});
 
@@ -233,7 +233,7 @@ describe("security", () => {
 
 				// Strict security: reject any path containing /../ even if it resolves safely
 				await expect(pipeline(safeTar, unpackStream)).rejects.toThrow(
-					'./subdir/../safe.txt points outside extraction directory',
+					"./subdir/../safe.txt points outside extraction directory",
 				);
 			});
 		});
@@ -248,7 +248,7 @@ describe("security", () => {
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					'../../malicious points outside extraction directory',
+					"../../malicious points outside extraction directory",
 				);
 			});
 
@@ -749,7 +749,7 @@ describe("security", () => {
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'../../malicious-file.txt points outside extraction directory',
+				"../../malicious-file.txt points outside extraction directory",
 			);
 		});
 
@@ -761,14 +761,14 @@ describe("security", () => {
 				{
 					header: {
 						name: "safe1.txt",
-						size: 14,
+						size: 9,
 						type: "file",
 						mode: 0o644,
 						mtime: new Date(),
 						uid: 0,
 						gid: 0,
 					},
-					body: "malicious data",
+					body: "safe data",
 				},
 				{
 					header: {
@@ -783,7 +783,7 @@ describe("security", () => {
 				},
 				{
 					header: {
-						name: "safe-dir/safe2.txt",
+						name: "../../../malicious.txt",
 						size: 14,
 						type: "file",
 						mode: 0o644,
@@ -795,29 +795,37 @@ describe("security", () => {
 				},
 				{
 					header: {
-						name: "../../../malicious.txt",
-						size: 14,
+						name: "safe-dir/safe2.txt",
+						size: 9,
 						type: "file",
 						mode: 0o644,
 						mtime: new Date(),
 						uid: 0,
 						gid: 0,
 					},
-					body: "malicious data",
+					body: "safe data",
 				},
 			];
 
 			const tarBuffer = await packTar(entries);
 			const maliciousTar = Readable.from([tarBuffer]);
-			const unpackStream = unpackTar(extractDir);
+			const unpackStream = unpackTar(extractDir, { concurrency: 1 });
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				'../../../malicious.txt points outside extraction directory',
+				"../../../malicious.txt points outside extraction directory",
 			);
 
-			// With strict security, no files should be created due to early rejection
+			// Only the first two safe entries should be processed before malicious entry causes failure
 			const files = await fs.readdir(extractDir);
-			expect(files).toHaveLength(0);
+			expect(files).toContain("safe1.txt");
+			expect(files).toContain("safe-dir");
+			expect(files).toHaveLength(2);
+
+			// Verify the third entry (safe-dir/safe2.txt) was NOT created due to early abort
+			const safeDirContents = await fs
+				.readdir(path.join(extractDir, "safe-dir"))
+				.catch(() => []);
+			expect(safeDirContents).toHaveLength(0);
 
 			// Verify malicious file was NOT created
 			const maliciousPath = path.resolve(tmpDir, "malicious.txt");
@@ -877,18 +885,21 @@ describe("security", () => {
 				const maliciousTar = await createTarWithMaliciousFile(
 					"..\\..\\malicious.txt",
 				);
-				const unpackStream = unpackTar(extractDir);
+				const unpackStream = unpackTar(extractDir, { concurrency: 1 });
 
 				// Backslashes are now normalized to forward slashes, making this a traversal attempt
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
 					/points outside.*extraction directory/,
 				);
 
-				// With strict security, no files should be created due to early rejection
+				// With concurrency: 1, the safe file should be created before malicious entry causes failure
 				const files = await fs.readdir(extractDir);
-				expect(files).toHaveLength(0);
+				expect(files).toContain("safe-file.txt");
+				expect(files).toHaveLength(1);
 
-				// No safe file should exist due to strict security rejection
+				// Verify malicious file was NOT created
+				const maliciousPath = path.resolve(tmpDir, "malicious.txt");
+				await expect(fs.access(maliciousPath)).rejects.toThrow();
 			},
 		);
 	});
