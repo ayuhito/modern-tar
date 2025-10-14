@@ -230,7 +230,7 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 					}
 
 					// Normalize and resolve the target path.
-					let name = normalizeHeaderName(transformed.name);
+					const name = normalizeHeaderName(transformed.name);
 					const target = path.join(path.resolve(directoryPath), name);
 
 					// Chain onto any prior operation for this path.
@@ -257,13 +257,6 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 							// Prevent ReDOS via deep paths.
 							if (maxDepth !== Infinity && name.split("/").length > maxDepth)
 								throw new Error("Tar exceeds max specified depth.");
-
-							// Strip absolute path prefixes.
-							if (path.isAbsolute(name)) {
-								// On Windows, path.parse('C:/foo').root is 'C:/'.
-								// On POSIX, path.parse('/foo').root is '/'.
-								name = name.substring(path.parse(name).root.length);
-							}
 
 							const outPath = path.join(destDir.symbolic, name);
 							validateBounds(
