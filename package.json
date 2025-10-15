@@ -11,8 +11,14 @@
 	"types": "./dist/web/index.d.ts",
 	"exports": {
 		"./package.json": "./package.json",
-		".": "./dist/web/index.js",
-		"./fs": "./dist/fs/index.js"
+		".": {
+			"types": "./dist/web/index.d.ts",
+			"import": "./dist/web/index.js"
+		},
+		"./fs": {
+			"types": "./dist/fs/index.d.ts",
+			"import": "./dist/fs/index.js"
+		}
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.2.5",
