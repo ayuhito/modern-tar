@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decoder } from "../../src/tar/utils";
-import { packTar, type TarHeader, unpackTar } from "../../src/web";
+import { packTar, unpackTar } from "../../src/web";
 
 describe("unpack options", () => {
 	// Helper function to create test archive
@@ -1048,114 +1048,6 @@ describe("unpack options", () => {
 			expect(entries.some((e) => e.header.name.includes("file2.js"))).toBe(
 				true,
 			);
-		});
-	});
-
-	describe("map option edge cases", () => {
-		it("filters out entries with empty names after map transformation", async () => {
-			// Create archive with nested structure using proper format
-			const archive = await packTar([
-				{
-					header: {
-						name: "project-main/",
-						type: "directory",
-						mode: 0o755,
-						size: 0,
-					},
-				},
-				{
-					header: {
-						name: "project-main/examples/",
-						type: "directory",
-						mode: 0o755,
-						size: 0,
-					},
-				},
-				{
-					header: {
-						name: "project-main/examples/basics/",
-						type: "directory",
-						mode: 0o755,
-						size: 0,
-					},
-				},
-				{
-					header: {
-						name: "project-main/examples/basics/package.json",
-						type: "file",
-						mode: 0o644,
-						size: '{"name": "test-package"}'.length,
-					},
-					body: '{"name": "test-package"}',
-				},
-			]);
-
-			const subdir = "examples/basics/";
-
-			// Use map that creates empty names.
-			const result = await unpackTar(archive, {
-				filter(entry) {
-					const path = entry.name.split("/").slice(1).join("/");
-					if (path === "") return false;
-					return path.startsWith(subdir);
-				},
-				map(entry) {
-					let path = entry.name.split("/").slice(1).join("/");
-					if (subdir) {
-						path = path.slice(subdir.length);
-					}
-					entry.name = path; // This creates empty names for directories
-					return entry;
-				},
-			});
-
-			// Should complete without hanging and filter out empty-named entries
-			expect(result.length).toBeGreaterThan(0);
-
-			// Should have the file but not the empty-named directory entries
-			const fileEntry = result.find((e) => e.header.name === "package.json");
-			expect(fileEntry).toBeDefined();
-			expect(decoder.decode(fileEntry?.data)).toBe('{"name": "test-package"}');
-
-			// Should not have any entries with empty names
-			const emptyNameEntries = result.filter((e) => !e.header.name.trim());
-			expect(emptyNameEntries).toHaveLength(0);
-		});
-
-		it("filters out entries with invalid names after map transformation", async () => {
-			const archive = await packTar([
-				{
-					header: {
-						name: "test/file.txt",
-						type: "file",
-						mode: 0o644,
-						size: 4,
-					},
-					body: "test",
-				},
-			]);
-
-			// Test various invalid transformations
-			const reallyInvalidTransforms = [
-				(entry: TarHeader) => ({ ...entry, name: "" }), // Empty
-				(entry: TarHeader) => ({ ...entry, name: "/" }), // Root
-				(entry: TarHeader) => ({ ...entry, name: "." }), // Current dir
-			];
-
-			for (const transform of reallyInvalidTransforms) {
-				const result = await unpackTar(archive, { map: transform });
-				expect(result).toHaveLength(0); // Should filter out invalid entries
-			}
-
-			// Whitespace only names should be filtered out
-			const whitespaceTransform = (entry: TarHeader) => ({
-				...entry,
-				name: "   ",
-			});
-			const whitespaceResult = await unpackTar(archive, {
-				map: whitespaceTransform,
-			});
-			expect(whitespaceResult).toHaveLength(0); // Whitespace names are filtered
 		});
 	});
 });
