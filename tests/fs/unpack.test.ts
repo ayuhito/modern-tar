@@ -826,7 +826,8 @@ describe("extract", () => {
 		await pipeline(readStream, unpackStream);
 		const files = await fs.readdir(extractDir, { recursive: true });
 		// Should have the file but not the problematic directory entry
-		expect(files).toContain("dir/file.txt");
+		const expectedFile = path.join("dir", "file.txt");
+		expect(files).toContain(expectedFile);
 	});
 
 	it("simple demo: map option bug fix", async () => {
