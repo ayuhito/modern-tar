@@ -607,5 +607,88 @@ describe("extract", () => {
 			const readContent = await fs.readFile(filePath, "utf-8");
 			expect(readContent).toBe(content);
 		});
+
+		it("map filters out empty directory names", async () => {
+			const sourceDir = path.join(tmpDir, "source");
+			await fs.mkdir(path.join(sourceDir, "dir"), { recursive: true });
+
+			const packStream = packTar(sourceDir);
+			const packData: Buffer[] = [];
+			for await (const chunk of packStream) {
+				packData.push(Buffer.from(chunk));
+			}
+
+			const extractDir = path.join(tmpDir, "extract");
+			const readStream = Readable.from([Buffer.concat(packData)]);
+
+			const unpackStream = unpackTar(extractDir, {
+				map(entry) {
+					if (entry.name === "dir/") entry.name = ""; // Creates empty name
+					return entry;
+				},
+			});
+
+			// Should complete without hanging (empty entries are filtered out)
+			await pipeline(readStream, unpackStream);
+
+			// Should have no files since the only directory entry was filtered out
+			try {
+				const files = await fs.readdir(extractDir);
+				expect(files).toHaveLength(0);
+			} catch (error) {
+				// If directory doesn't exist because no entries were extracted, that's fine
+				expect((error as NodeJS.ErrnoException).code).toBe("ENOENT");
+			}
+		}, 2000);
+
+		it("handles mapping with subdir extraction", async () => {
+			// Create a test archive that mimics GitHub tarball structure
+			const sourceDir = path.join(tmpDir, "source");
+			const rootDir = path.join(sourceDir, "withastro-starlight-abc123");
+			const examplesDir = path.join(rootDir, "examples");
+			const basicsDir = path.join(examplesDir, "basics");
+			const srcDir = path.join(basicsDir, "src");
+			const pagesDir = path.join(srcDir, "pages");
+
+			await fs.mkdir(pagesDir, { recursive: true });
+			await fs.writeFile(
+				path.join(basicsDir, "package.json"),
+				'{"name": "@example/basics", "type": "module"}',
+			);
+			await fs.writeFile(path.join(pagesDir, "index.mdx"), "# Welcome");
+
+			const packStream = packTar(sourceDir);
+			const packData: Buffer[] = [];
+			for await (const chunk of packStream) {
+				packData.push(Buffer.from(chunk));
+			}
+
+			// Reproduce exact giget-core extraction logic
+			const extractDir = path.join(tmpDir, "starlight-unpack");
+			const readStream = Readable.from([Buffer.concat(packData)]);
+			const subdir = "examples/basics/";
+
+			const unpackStream = unpackTar(extractDir, {
+				filter(entry) {
+					const path = entry.name.split("/").slice(1).join("/");
+					if (path === "") return false;
+					return path.startsWith(subdir);
+				},
+				map(entry) {
+					let path = entry.name.split("/").slice(1).join("/");
+					if (subdir) path = path.slice(subdir.length);
+					entry.name = path;
+					return entry;
+				},
+			});
+
+			// This should now work without hanging
+			await pipeline(readStream, unpackStream);
+
+			// Verify extraction worked correctly
+			const files = await fs.readdir(extractDir, { recursive: true });
+			expect(files).toContain("package.json");
+			expect(files.some((f) => f.includes("pages"))).toBe(true);
+		});
 	});
 });
