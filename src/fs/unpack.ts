@@ -180,11 +180,6 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 
 			// Check if the directory exists.
 			try {
-				await fs.mkdir(dirPath, { mode: dmode });
-				return "directory";
-			} catch (err: unknown) {
-				if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-
 				const stat = await fs.lstat(dirPath);
 				if (stat.isDirectory()) return "directory";
 
@@ -200,6 +195,12 @@ function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
 					if (realStat.isDirectory()) return "directory";
 				}
 				throw new Error(`"${dirPath}" is not a valid directory component.`);
+			} catch (err: unknown) {
+				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+					await fs.mkdir(dirPath, { mode: dmode });
+					return "directory";
+				}
+				throw err;
 			}
 		})();
 

@@ -49,9 +49,6 @@ export function transformHeader(
 			result.name === "." ||
 			result.name === "/")
 	) {
-		console.log(
-			`Skipping entry with invalid name: "${result.name}" : ${h.name}`,
-		);
 		return null;
 	}
 
