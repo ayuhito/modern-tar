@@ -39,5 +39,18 @@ export function transformHeader(
 		return null; // Skip filtered entry
 	}
 
-	return map ? map(h) : h;
+	const result = map ? map(h) : h;
+
+	// Skip entries with empty names, whitespace only names, or paths that would resolve to extraction root.
+	if (
+		result &&
+		(!result.name ||
+			!result.name.trim() ||
+			result.name === "." ||
+			result.name === "/")
+	) {
+		return null;
+	}
+
+	return result;
 }

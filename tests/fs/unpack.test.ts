@@ -608,4 +608,257 @@ describe("extract", () => {
 			expect(readContent).toBe(content);
 		});
 	});
+
+	it("map creates empty directory name (now filtered out)", async () => {
+		const sourceDir = path.join(tmpDir, "source");
+		await fs.mkdir(path.join(sourceDir, "dir"), { recursive: true });
+
+		const packStream = packTar(sourceDir);
+		const packData: Buffer[] = [];
+		for await (const chunk of packStream) {
+			packData.push(Buffer.from(chunk));
+		}
+
+		const extractDir = path.join(tmpDir, "extract");
+		const readStream = Readable.from([Buffer.concat(packData)]);
+
+		const unpackStream = unpackTar(extractDir, {
+			map(entry) {
+				if (entry.name === "dir/") entry.name = ""; // Creates empty name
+				return entry;
+			},
+		});
+
+		// Should complete without hanging (empty entries are filtered out)
+		await pipeline(readStream, unpackStream);
+
+		// Should have no files since the only directory entry was filtered out
+		// Check if extract directory was created; if not, that's acceptable behavior
+		try {
+			const files = await fs.readdir(extractDir);
+			expect(files).toHaveLength(0);
+		} catch (error) {
+			// If directory doesn't exist because no entries were extracted, that's fine
+			expect((error as NodeJS.ErrnoException).code).toBe("ENOENT");
+		}
+	}, 2000);
+
+	it("map creates whitespace-only name (now filtered out)", async () => {
+		const sourceDir = path.join(tmpDir, "source");
+		await fs.mkdir(path.join(sourceDir, "dir"), { recursive: true });
+
+		const packStream = packTar(sourceDir);
+		const packData: Buffer[] = [];
+		for await (const chunk of packStream) {
+			packData.push(Buffer.from(chunk));
+		}
+
+		const extractDir = path.join(tmpDir, "extract");
+		const readStream = Readable.from([Buffer.concat(packData)]);
+
+		const unpackStream = unpackTar(extractDir, {
+			map(entry) {
+				if (entry.name === "dir/") entry.name = "   "; // Whitespace-only
+				return entry;
+			},
+		});
+
+		// Should complete without hanging (whitespace entries are filtered out)
+		await pipeline(readStream, unpackStream);
+
+		// Should have no files since the directory entry was filtered out
+		const files = await fs.readdir(extractDir);
+		expect(files).toHaveLength(0);
+	}, 2000);
+
+	it("map creates dot path (now filtered out)", async () => {
+		const sourceDir = path.join(tmpDir, "source");
+		await fs.mkdir(path.join(sourceDir, "dir"), { recursive: true });
+
+		const packStream = packTar(sourceDir);
+		const packData: Buffer[] = [];
+		for await (const chunk of packStream) {
+			packData.push(Buffer.from(chunk));
+		}
+
+		const extractDir = path.join(tmpDir, "extract");
+		const readStream = Readable.from([Buffer.concat(packData)]);
+
+		const unpackStream = unpackTar(extractDir, {
+			map(entry) {
+				if (entry.name === "dir/") entry.name = "."; // Current directory
+				return entry;
+			},
+		});
+
+		// Should complete without hanging (dot paths are filtered out)
+		await pipeline(readStream, unpackStream);
+
+		// Should have no files since the directory entry was filtered out
+		const files = await fs.readdir(extractDir);
+		expect(files).toHaveLength(0);
+	}, 2000);
+
+	it("reproduces exact giget-core scenario with GitHub tarball structure", async () => {
+		// Create a test archive that mimics GitHub tarball structure
+		const sourceDir = path.join(tmpDir, "source");
+		const rootDir = path.join(sourceDir, "withastro-starlight-abc123");
+		const examplesDir = path.join(rootDir, "examples");
+		const basicsDir = path.join(examplesDir, "basics");
+		const srcDir = path.join(basicsDir, "src");
+		const pagesDir = path.join(srcDir, "pages");
+
+		await fs.mkdir(pagesDir, { recursive: true });
+		await fs.writeFile(
+			path.join(basicsDir, "package.json"),
+			'{"name": "@example/basics", "type": "module"}',
+		);
+		await fs.writeFile(
+			path.join(basicsDir, "astro.config.mjs"),
+			"export default {};",
+		);
+		await fs.writeFile(
+			path.join(basicsDir, "README.md"),
+			"# Starlight Basics Example",
+		);
+		await fs.writeFile(
+			path.join(srcDir, "env.d.ts"),
+			"/// <reference types='astro/client' />",
+		);
+		await fs.writeFile(path.join(pagesDir, "index.mdx"), "# Welcome");
+
+		// Pack the archive to buffer
+		const packStream = packTar(sourceDir);
+		const packData: Buffer[] = [];
+
+		for await (const chunk of packStream) {
+			packData.push(Buffer.from(chunk));
+		}
+
+		const tarBuffer = Buffer.concat(packData);
+
+		// Reproduce exact giget-core extraction logic
+		const extractDir = path.join(tmpDir, "starlight-unpack");
+		const readStream = Readable.from([tarBuffer]);
+		const subdir = "examples/basics/";
+
+		const unpackStream = unpackTar(extractDir, {
+			filter(entry) {
+				const path = entry.name.split("/").slice(1).join("/");
+
+				// Skip the root directory
+				if (path === "") {
+					return false;
+				}
+
+				if (!subdir) {
+					return true;
+				}
+
+				if (path.startsWith(subdir)) {
+					return true;
+				} else {
+					return false;
+				}
+			},
+
+			map(entry) {
+				let path = entry.name.split("/").slice(1).join("/");
+
+				if (subdir) {
+					path = path.slice(subdir.length);
+				}
+
+				entry.name = path; // This was causing the hang before the fix
+				return entry;
+			},
+		});
+
+		// This should now work without hanging
+		await pipeline(readStream, unpackStream);
+
+		// Verify extraction worked correctly with subdirectory structure
+		const files = await fs.readdir(extractDir, { recursive: true });
+		expect(files.length).toBeGreaterThan(0);
+
+		// Check that subdirectory prefix was properly removed
+		expect(files).toContain("package.json");
+		expect(files).toContain("astro.config.mjs");
+		expect(files).toContain("README.md");
+		expect(files.some((f) => f.includes("src"))).toBe(true);
+		expect(files.some((f) => f.includes("pages"))).toBe(true);
+
+		// Verify file contents were preserved
+		const packageContent = await fs.readFile(
+			path.join(extractDir, "package.json"),
+			"utf-8",
+		);
+		expect(packageContent).toContain("@example/basics");
+	});
+
+	it("handles edge cases with map transformations", async () => {
+		// Create simple test archive
+		const sourceDir = path.join(tmpDir, "source");
+		await fs.mkdir(path.join(sourceDir, "dir"), { recursive: true });
+		await fs.writeFile(path.join(sourceDir, "dir", "file.txt"), "content");
+
+		const packStream = packTar(sourceDir);
+		const packData: Buffer[] = [];
+		for await (const chunk of packStream) {
+			packData.push(Buffer.from(chunk));
+		}
+		const tarBuffer = Buffer.concat(packData);
+
+		// Test case: Map that creates invalid paths are filtered out
+		const extractDir = path.join(tmpDir, "extract");
+		const readStream = Readable.from([tarBuffer]);
+
+		const unpackStream = unpackTar(extractDir, {
+			map(entry) {
+				// Only modify directory entries to avoid conflicts
+				if (entry.type === "directory" && entry.name === "dir/") {
+					entry.name = ""; // Creates empty name that gets filtered
+				}
+				return entry;
+			},
+		});
+
+		await pipeline(readStream, unpackStream);
+		const files = await fs.readdir(extractDir, { recursive: true });
+		// Should have the file but not the problematic directory entry
+		expect(files).toContain("dir/file.txt");
+	});
+
+	it("simple demo: map option bug fix", async () => {
+		// Create minimal test case showing the bug and fix
+		const sourceDir = path.join(tmpDir, "source");
+		await fs.mkdir(path.join(sourceDir, "subdir"), { recursive: true });
+		await fs.writeFile(path.join(sourceDir, "subdir", "file.txt"), "content");
+
+		const packStream = packTar(sourceDir);
+		const packData: Buffer[] = [];
+		for await (const chunk of packStream) {
+			packData.push(Buffer.from(chunk));
+		}
+
+		const extractDir = path.join(tmpDir, "extract");
+		const readStream = Readable.from([Buffer.concat(packData)]);
+
+		// This map transformation used to cause hanging
+		const unpackStream = unpackTar(extractDir, {
+			map(entry) {
+				// Remove "subdir/" prefix from paths
+				if (entry.name.startsWith("subdir/")) {
+					entry.name = entry.name.slice("subdir/".length);
+				}
+				// This creates empty string for "subdir/" directory entry
+				return entry;
+			},
+		});
+
+		await pipeline(readStream, unpackStream);
+
+		const files = await fs.readdir(extractDir);
+		expect(files).toContain("file.txt"); // File extracted successfully
+	});
 });

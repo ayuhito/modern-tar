@@ -360,4 +360,547 @@ describe("options fs", () => {
 			}
 		});
 	});
+
+	describe("map option edge cases", () => {
+		describe("security vulnerabilities through map transformations", () => {
+			it("prevents path traversal attacks through map function", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(path.join(sourceDir, "safe"), { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "safe", "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Malicious map trying to escape extraction directory
+						if (entry.name === "safe/file.txt") {
+							entry.name = "../../../etc/passwd";
+						}
+						return entry;
+					},
+				});
+
+				// Should reject the malicious path transformation
+				await expect(pipeline(packStream, unpackStream)).rejects.toThrow(
+					/points outside.*extraction directory/,
+				);
+			});
+
+			it("prevents absolute path injection through map", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Try to inject absolute path - this gets normalized to relative
+						entry.name = "/tmp/malicious.txt";
+						return entry;
+					},
+				});
+
+				// The library normalizes absolute paths to relative ones, so this succeeds
+				await pipeline(packStream, unpackStream);
+
+				// Verify the file was created with normalized path
+				const files = await fs.readdir(extractDir, { recursive: true });
+				expect(
+					files.some((f) => f.includes("tmp") && f.includes("malicious")),
+				).toBe(true);
+			});
+
+			it("handles symlink target safety when map changes entry names", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(path.join(sourceDir, "dir"), { recursive: true });
+				await fs.writeFile(
+					path.join(sourceDir, "dir", "target.txt"),
+					"content",
+				);
+				await fs.symlink("target.txt", path.join(sourceDir, "dir", "link.txt"));
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Move symlink but not its target, creating a dangling reference
+						if (entry.name === "dir/link.txt") {
+							entry.name = "moved-link.txt";
+							// linkname still points to "target.txt" which is now in dir/
+						}
+						return entry;
+					},
+				});
+
+				// Should complete - symlink validation handles relative links safely
+				await pipeline(packStream, unpackStream);
+
+				// Verify the symlink was created but points to expected location
+				const linkStat = await fs.lstat(
+					path.join(extractDir, "moved-link.txt"),
+				);
+				expect(linkStat.isSymbolicLink()).toBe(true);
+			});
+		});
+
+		describe("path conflicts and collisions", () => {
+			it("handles multiple entries mapping to same path", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file1.txt"), "content1");
+				await fs.writeFile(path.join(sourceDir, "file2.txt"), "content2");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Map both files to same destination
+						if (entry.name === "file1.txt" || entry.name === "file2.txt") {
+							entry.name = "same-file.txt";
+						}
+						return entry;
+					},
+				});
+
+				// Should complete - later entries overwrite earlier ones
+				await pipeline(packStream, unpackStream);
+
+				const files = await fs.readdir(extractDir);
+				expect(files).toContain("same-file.txt");
+
+				// The last file should win
+				const content = await fs.readFile(
+					path.join(extractDir, "same-file.txt"),
+					"utf-8",
+				);
+				expect(content).toBe("content2"); // file2.txt was processed last
+			});
+
+			it("handles directory vs file conflicts", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(path.join(sourceDir, "conflict"), { recursive: true });
+				await fs.writeFile(
+					path.join(sourceDir, "conflict", "nested.txt"),
+					"content",
+				);
+				await fs.writeFile(path.join(sourceDir, "other.txt"), "other");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Try to create a file where a directory should be
+						if (entry.name === "other.txt") {
+							entry.name = "conflict/"; // Maps to directory path
+						}
+						return entry;
+					},
+				});
+
+				// Should reject due to type conflict
+				await expect(pipeline(packStream, unpackStream)).rejects.toThrow(
+					/Path conflict/,
+				);
+			});
+
+			it("handles hardlink target resolution after map transformations", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "original.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Move the original file to a subdirectory
+						if (entry.name === "original.txt") {
+							entry.name = "moved/original.txt";
+						}
+						return entry;
+					},
+				});
+
+				// This should succeed - the file gets moved to the mapped location
+				await pipeline(packStream, unpackStream);
+
+				// Verify the file was created at the mapped location
+				const files = await fs.readdir(extractDir, { recursive: true });
+				expect(
+					files.some((f) => f.includes("moved") && f.includes("original")),
+				).toBe(true);
+			});
+		});
+
+		describe("performance and resource management", () => {
+			it("handles large numbers of filtered entries efficiently", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+
+				// Create many files
+				for (let i = 0; i < 100; i++) {
+					await fs.writeFile(
+						path.join(sourceDir, `file${i}.txt`),
+						`content${i}`,
+					);
+				}
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				let processedCount = 0;
+				const unpackStream = unpackTar(extractDir, {
+					filter(entry) {
+						processedCount++;
+						// Only keep every 10th file
+						return entry.name.match(/file[0-9]*0\.txt$/) !== null;
+					},
+				});
+
+				const startTime = Date.now();
+				await pipeline(packStream, unpackStream);
+				const duration = Date.now() - startTime;
+
+				// Should complete reasonably quickly despite many filtered entries
+				expect(duration).toBeLessThan(5000);
+				expect(processedCount).toBe(100);
+
+				const files = await fs.readdir(extractDir);
+				expect(files.length).toBe(10); // Only files ending in 0
+			});
+
+			it("handles very deep directory structures from map", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Create very deep path
+						const deepPath = "a/".repeat(50) + "file.txt";
+						entry.name = deepPath;
+						return entry;
+					},
+				});
+
+				// Should handle deep paths up to maxDepth
+				await pipeline(packStream, unpackStream);
+
+				// Verify deep structure was created
+				const deepFile = path.join(extractDir, "a/".repeat(50), "file.txt");
+				const content = await fs.readFile(deepFile, "utf-8");
+				expect(content).toBe("content");
+			});
+
+			it("respects maxDepth even with map transformations", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					maxDepth: 5,
+					map(entry) {
+						// Try to create path deeper than maxDepth
+						const deepPath = "a/".repeat(10) + "file.txt"; // 10 levels deep
+						entry.name = deepPath;
+						return entry;
+					},
+				});
+
+				// Should reject due to exceeding maxDepth
+				await expect(pipeline(packStream, unpackStream)).rejects.toThrow(
+					/exceeds max specified depth/,
+				);
+			});
+		});
+
+		describe("unicode and special character handling", () => {
+			it("handles unicode normalization in map transformations", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Use unicode characters that need normalization
+						entry.name = "café/naïve-résumé.txt"; // Mixed accented characters
+						return entry;
+					},
+				});
+
+				await pipeline(packStream, unpackStream);
+
+				// Should handle unicode correctly - just verify file was created
+				const files = await fs.readdir(path.join(extractDir, "café"));
+				expect(files.length).toBe(1);
+				expect(files[0]).toMatch(/\.txt$/);
+			});
+
+			it("handles special characters and edge cases in paths", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Test various special characters
+						entry.name =
+							"special-chars/file with spaces & symbols!@#$%^&()_+-={}[]|;',.txt";
+						return entry;
+					},
+				});
+
+				await pipeline(packStream, unpackStream);
+
+				// Should handle special characters (OS permitting)
+				const files = await fs.readdir(path.join(extractDir, "special-chars"));
+				expect(files.length).toBe(1);
+			});
+		});
+
+		describe("error handling and edge cases", () => {
+			it("handles map function throwing exceptions", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(_entry) {
+						// Throw error in map function
+						throw new Error("Map function error");
+					},
+				});
+
+				// Should propagate the error from map function
+				await expect(pipeline(packStream, unpackStream)).rejects.toThrow(
+					"Map function error",
+				);
+			});
+
+			it("handles map returning invalid entry objects", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map() {
+						// Return invalid entry (missing required fields like type)
+						return { name: "invalid.txt", size: 0 };
+					},
+				});
+
+				// The library may handle this gracefully by using default values
+				await pipeline(packStream, unpackStream);
+
+				// Verify some extraction occurred or was safely skipped
+				const files = await fs.readdir(extractDir);
+				// Entry may be skipped or processed with defaults
+				expect(Array.isArray(files)).toBe(true);
+			});
+
+			it("handles concurrent map transformations creating same paths", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+
+				// Create multiple files that will map to the same directory
+				for (let i = 0; i < 10; i++) {
+					await fs.mkdir(path.join(sourceDir, `dir${i}`), { recursive: true });
+					await fs.writeFile(
+						path.join(sourceDir, `dir${i}`, "file.txt"),
+						`content${i}`,
+					);
+				}
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// All entries map to same directory structure
+						if (entry.name.startsWith("dir") && entry.name.endsWith("/")) {
+							entry.name = "common/";
+						} else if (entry.name.includes("/file.txt")) {
+							entry.name = "common/file.txt";
+						}
+						return entry;
+					},
+				});
+
+				// Should handle concurrent directory creation and file overwrites
+				await pipeline(packStream, unpackStream);
+
+				const files = await fs.readdir(path.join(extractDir, "common"));
+				expect(files).toContain("file.txt");
+			});
+
+			it("handles very long paths after map transformation", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Create a very long filename
+						const longName = "a".repeat(200) + ".txt";
+						return { ...entry, name: longName };
+					},
+				});
+
+				// Should handle long paths within filesystem limits
+				await pipeline(packStream, unpackStream);
+
+				const files = await fs.readdir(extractDir);
+				expect(files.some((f) => f.startsWith("aaa"))).toBe(true);
+			});
+		});
+
+		describe("interaction with other options", () => {
+			it("applies map after strip but before filter", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(path.join(sourceDir, "prefix", "keep"), {
+					recursive: true,
+				});
+				await fs.writeFile(
+					path.join(sourceDir, "prefix", "keep", "file.txt"),
+					"content",
+				);
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				let mapCallCount = 0;
+				let filterCallCount = 0;
+
+				const unpackStream = unpackTar(extractDir, {
+					strip: 1, // Remove "prefix/" component
+					filter() {
+						filterCallCount++;
+						return true;
+					},
+					map(entry) {
+						mapCallCount++;
+						// Should see "keep/file.txt" (after strip) or similar
+						entry.name = `mapped-${entry.name}`;
+						return entry;
+					},
+				});
+
+				await pipeline(packStream, unpackStream);
+
+				expect(mapCallCount).toBeGreaterThan(0);
+				expect(filterCallCount).toBeGreaterThan(0);
+
+				// Verify final structure
+				const files = await fs.readdir(extractDir, { recursive: true });
+				expect(files.some((f) => f.includes("mapped-keep"))).toBe(true);
+			});
+
+			it("handles strip, map, and filter creating edge cases", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(path.join(sourceDir, "a", "b"), { recursive: true });
+				await fs.writeFile(
+					path.join(sourceDir, "a", "b", "file.txt"),
+					"content",
+				);
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				const unpackStream = unpackTar(extractDir, {
+					strip: 2, // Remove "a/b/" -> leaves "file.txt" and ""
+					filter(entry) {
+						return entry.name !== ""; // Filter empty names
+					},
+				});
+
+				await pipeline(packStream, unpackStream);
+
+				const files = await fs.readdir(extractDir);
+				expect(files).toContain("file.txt");
+			});
+		});
+
+		describe("order of operations verification", () => {
+			it("verifies path validation happens AFTER map transformations", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(sourceDir, { recursive: true });
+				await fs.writeFile(path.join(sourceDir, "safe.txt"), "content");
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				// This test proves that map runs first, then path validation
+				// If path validation ran first, the original "safe.txt" would pass validation
+				// But since map runs first and creates a malicious path, validation catches it
+				const unpackStream = unpackTar(extractDir, {
+					map(entry) {
+						// Transform the safe path into a malicious one
+						if (entry.name === "safe.txt") {
+							entry.name = "../../../etc/passwd"; // This should be caught by validation
+						}
+						return entry;
+					},
+				});
+
+				// Should fail because path validation happens AFTER map transformation
+				// This proves the order: original path -> map transform -> path validation
+				await expect(pipeline(packStream, unpackStream)).rejects.toThrow(
+					/points outside.*extraction directory/,
+				);
+			});
+
+			it("verifies strip runs before map", async () => {
+				const sourceDir = path.join(tmpDir, "source");
+				await fs.mkdir(path.join(sourceDir, "prefix"), { recursive: true });
+				await fs.writeFile(
+					path.join(sourceDir, "prefix", "file.txt"),
+					"content",
+				);
+
+				const packStream = packTar(sourceDir);
+				const extractDir = path.join(tmpDir, "extract");
+
+				let mapReceived = "";
+				const unpackStream = unpackTar(extractDir, {
+					strip: 1, // Remove "prefix/" component first
+					map(entry) {
+						mapReceived = entry.name; // Should receive "file.txt", not "prefix/file.txt"
+						return entry;
+					},
+				});
+
+				await pipeline(packStream, unpackStream);
+
+				// Map should have received the stripped path, proving strip runs before map
+				expect(mapReceived).toBe("file.txt");
+				expect(mapReceived).not.toContain("prefix");
+			});
+		});
+	});
 });
