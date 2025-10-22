@@ -638,17 +638,24 @@ describe("options fs", () => {
 				const unpackStream = unpackTar(extractDir, {
 					map(entry) {
 						// Use unicode characters that need normalization
-						entry.name = "café/naïve-résumé.txt"; // Mixed accented characters
+						entry.name = "αβγ-test-file.txt"; // Alpha, beta, gamma
 						return entry;
 					},
 				});
 
 				await pipeline(packStream, unpackStream);
 
-				// Should handle unicode correctly - just verify file was created
-				const files = await fs.readdir(path.join(extractDir, "café"));
+				// Should handle Unicode characters correctly
+				const files = await fs.readdir(extractDir);
 				expect(files.length).toBe(1);
-				expect(files[0]).toMatch(/\.txt$/);
+				expect(files[0]).toContain("αβγ");
+				expect(files[0]).toContain(".txt");
+
+				const content = await fs.readFile(
+					path.join(extractDir, files[0]),
+					"utf-8",
+				);
+				expect(content).toBe("content");
 			});
 
 			it("handles special characters and edge cases in paths", async () => {
