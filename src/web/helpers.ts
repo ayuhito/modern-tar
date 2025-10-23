@@ -1,6 +1,6 @@
 import { transformHeader } from "../tar/options";
 import type { TarHeader, UnpackOptions } from "../tar/types";
-import { normalizeBody, streamToBuffer } from "../tar/utils";
+import { isBodyless, normalizeBody, streamToBuffer } from "../tar/utils";
 import { createTarPacker } from "./pack";
 import type { ParsedTarEntryWithData, TarEntry } from "./types";
 import { createTarDecoder } from "./unpack";
@@ -63,9 +63,13 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
 				// For all other types, normalize to a Uint8Array first.
 				try {
 					const chunk = await normalizeBody(body);
-					const writer = entryStream.getWriter();
-					await writer.write(chunk);
-					await writer.close();
+					if (chunk.length > 0) {
+						const writer = entryStream.getWriter();
+						await writer.write(chunk);
+						await writer.close();
+					} else {
+						await entryStream.close();
+					}
 				} catch {
 					throw new TypeError(
 						`Unsupported content type for entry "${entry.header.name}".`,
@@ -101,11 +105,12 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
  *
  * const entries = await unpackTar(tarBuffer);
  * for (const entry of entries) {
- *   console.log(`File: ${entry.header.name}, Size: ${entry.data.length} bytes`);
- *
- *   if (entry.header.type === 'file') {
+ *   if (entry.data) {
+ *     console.log(`File: ${entry.header.name}, Size: ${entry.data.length} bytes`);
  *     const content = new TextDecoder().decode(entry.data);
  *     console.log(`Content: ${content}`);
+ *   } else {
+ *     console.log(`${entry.header.type}: ${entry.header.name}`);
  *   }
  * }
  * ```
@@ -121,7 +126,9 @@ export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
  *
  * // Process filtered files
  * for (const file of entries) {
- *   console.log(new TextDecoder().decode(file.data));
+ *   if (file.data) {
+ *     console.log(new TextDecoder().decode(file.data));
+ *   }
  * }
  * ```
  */
@@ -175,11 +182,23 @@ export async function unpackTar(
 					continue;
 				}
 
-				// Fully buffer the entry body since this is a non streaming unpack.
-				results.push({
-					header: processedHeader,
-					data: await streamToBuffer(entry.body),
-				});
+				const bodyless = isBodyless(processedHeader);
+
+				// For bodyless entries, don't buffer data and return undefined.
+				if (bodyless) {
+					await entry.body.cancel();
+					results.push({
+						header: processedHeader,
+						data: undefined,
+					});
+				} else {
+					// Fully buffer the entry body for files.
+					results.push({
+						header: processedHeader,
+						data: await streamToBuffer(entry.body),
+					});
+				}
+
 				lastBodyStream = null;
 			}
 		} catch (error) {
@@ -188,9 +207,7 @@ export async function unpackTar(
 			if (lastBodyStream) {
 				try {
 					await lastBodyStream.cancel();
-				} catch {
-					// Stream might already be dead.
-				}
+				} catch {}
 			}
 			throw error;
 		} finally {

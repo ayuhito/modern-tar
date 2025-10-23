@@ -889,7 +889,7 @@ describe("unpack options", () => {
 			expect(entries).toHaveLength(1);
 			expect(entries[0].header.name).toBe("ROOT/LEVEL1/SUBDIR/");
 			expect(entries[0].header.type).toBe("directory");
-			expect(entries[0].data).toHaveLength(0);
+			expect(entries[0].data).toBeUndefined();
 		});
 	});
 

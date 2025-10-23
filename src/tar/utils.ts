@@ -1,4 +1,4 @@
-import type { TarEntryData } from "./types";
+import type { TarEntryData, TarHeader } from "./types";
 
 export const encoder = new TextEncoder();
 export const decoder = new TextDecoder();
@@ -137,3 +137,8 @@ export async function normalizeBody(body: TarEntryData): Promise<Uint8Array> {
 
 	throw new TypeError("Unsupported content type for entry body.");
 }
+
+export const isBodyless = (header: TarHeader) =>
+	header.type === "directory" ||
+	header.type === "symlink" ||
+	header.type === "link";

@@ -1,5 +1,6 @@
 import { createTarPacker as createPacker } from "../tar/packer";
 import type { TarHeader } from "../tar/types";
+import { isBodyless } from "../tar/utils";
 
 /**
  * Controls a streaming tar packing process.
@@ -127,17 +128,14 @@ export function createTarPacker(): {
 	const packController: TarPackController = {
 		add(header: TarHeader): WritableStream<Uint8Array> {
 			// Bodyless entries should have size 0.
-			const isBodyless =
-				header.type === "directory" ||
-				header.type === "symlink" ||
-				header.type === "link";
+			const bodyless = isBodyless(header);
 
 			// Shallow copy.
 			const h = { ...header };
-			if (isBodyless) h.size = 0;
+			if (bodyless) h.size = 0;
 
 			packer.add(h);
-			if (isBodyless) packer.endEntry();
+			if (bodyless) packer.endEntry();
 
 			return new WritableStream<Uint8Array>({
 				write(chunk) {
@@ -146,9 +144,7 @@ export function createTarPacker(): {
 
 				close() {
 					// Bodyless entries were already ended above.
-					if (!isBodyless) {
-						packer.endEntry();
-					}
+					if (!bodyless) packer.endEntry();
 				},
 
 				abort(reason) {

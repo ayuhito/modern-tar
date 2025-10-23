@@ -21,8 +21,11 @@ export interface ParsedTarEntry {
 
 /**
  * Represents an extracted entry with fully buffered content.
+ *
+ * For bodyless entries (directories, symlinks, hardlinks), `data` will be `undefined`.
+ * For files (including empty files), `data` will be a `Uint8Array`.
  */
 export interface ParsedTarEntryWithData {
 	header: TarHeader;
-	data: Uint8Array;
+	data?: Uint8Array;
 }
