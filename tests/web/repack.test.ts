@@ -1,10 +1,10 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: Tests */
 import { describe, expect, it } from "vitest";
-import { isBodyless } from "../../src/tar/utils";
+import { decoder, isBodyless } from "../../src/tar/utils";
 import { packTar, unpackTar } from "../../src/web/helpers";
 import type { TarEntry } from "../../src/web/types";
 
-describe("round-trip pack/unpack", () => {
+describe("repack", () => {
 	it("handles unpack then repack correctly", async () => {
 		// Create a test archive with various entry types
 		const originalEntries: TarEntry[] = [
@@ -45,9 +45,7 @@ describe("round-trip pack/unpack", () => {
 		expect(unpackedEntries[0].header.size).toBe(11);
 		expect(unpackedEntries[0].data).toBeDefined();
 		expect(unpackedEntries[0].data!.length).toBe(11);
-		expect(new TextDecoder().decode(unpackedEntries[0].data!)).toBe(
-			"hello world",
-		);
+		expect(decoder.decode(unpackedEntries[0].data!)).toBe("hello world");
 
 		expect(unpackedEntries[1].header.name).toBe("empty.txt");
 		expect(unpackedEntries[1].header.size).toBe(0);
@@ -63,20 +61,15 @@ describe("round-trip pack/unpack", () => {
 		expect(unpackedEntries[3].header.size).toBe(12);
 		expect(unpackedEntries[3].data).toBeDefined();
 		expect(unpackedEntries[3].data!.length).toBe(12);
-		expect(new TextDecoder().decode(unpackedEntries[3].data!)).toBe(
-			"nested file!",
-		);
+		expect(decoder.decode(unpackedEntries[3].data!)).toBe("nested file!");
 
 		expect(unpackedEntries[4].header.name).toBe("link");
 		expect(unpackedEntries[4].header.type).toBe("symlink");
 		expect(unpackedEntries[4].header.size).toBe(0);
 		expect(unpackedEntries[4].data).toBeUndefined();
 
-		// Convert unpacked entries back to TarEntry format for repacking
-		const entriesForRepack: TarEntry[] = unpackedEntries.map((entry) => ({
-			header: { ...entry.header },
-			body: entry.data,
-		}));
+		// With unified API, unpacked entries can be repacked directly
+		const entriesForRepack: TarEntry[] = unpackedEntries;
 
 		// This should not throw an error (this was the original bug)
 		const repackedArchive = await packTar(entriesForRepack);
@@ -101,7 +94,7 @@ describe("round-trip pack/unpack", () => {
 				expect(final.data).toBeDefined();
 				expect(final.data!.length).toBe(original.header.size);
 				if (original.body && typeof original.body === "string") {
-					expect(new TextDecoder().decode(final.data!)).toBe(original.body);
+					expect(decoder.decode(final.data!)).toBe(original.body);
 				}
 			}
 		}

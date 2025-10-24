@@ -40,14 +40,19 @@ import { createTarDecoder } from "./unpack";
  * });
  * ```
  */
-export async function packTar(entries: TarEntry[]): Promise<Uint8Array> {
+export async function packTar(
+	entries: (TarEntry | ParsedTarEntryWithData)[],
+): Promise<Uint8Array> {
 	const { readable, controller } = createTarPacker();
 
 	// This promise runs the packing process in the background.
 	const packingPromise = (async () => {
 		for (const entry of entries) {
 			const entryStream = controller.add(entry.header);
-			const { body } = entry;
+
+			// Handle both TarEntry and ParsedTarEntryWithData formats.
+			const body =
+				"body" in entry ? entry.body : (entry as ParsedTarEntryWithData).data;
 
 			if (!body) {
 				await entryStream.close();
