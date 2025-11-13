@@ -66,7 +66,7 @@ export function createTarDecoder(
 				// Look for the next header.
 				if (!bodyController) {
 					// Respect backpressure on the main stream.
-					if (!force && (controller.desiredSize ?? 1) <= 0) break;
+					if (!force && (controller.desiredSize ?? 0) < 0) break;
 
 					const header = unpacker.readHeader();
 					if (header === null) break; // Not enough data
@@ -126,16 +126,18 @@ export function createTarDecoder(
 					try {
 						// biome-ignore lint/style/noNonNullAssertion: body processing state.
 						bodyController!.enqueue(chunk);
+
 						// If the body stream's buffer is full, signal to pause the pump.
 						// biome-ignore lint/style/noNonNullAssertion: body processing state.
 						if ((bodyController!.desiredSize ?? 1) <= 0) shouldPause = true;
 					} catch {
 						return true; // Body errored or closed, discard
 					}
-					return true; // Continue processing unpacker's buffer
+
+					return true;
 				});
 
-				// No buffered data was available; wait for the next chunk to resume pumping.
+				// No buffered data is available. Wait for the next chunk to resume pumping.
 				if (fed === 0) break;
 
 				// Check again if the body is now complete after streaming.
@@ -160,46 +162,51 @@ export function createTarDecoder(
 		}
 	};
 
-	return new TransformStream<Uint8Array, ParsedTarEntry>({
-		transform(chunk, controller) {
-			try {
-				// In strict mode, ensure EOF blocks are all zeroes.
-				if (eofReached && options.strict && chunk.some((byte) => byte !== 0))
-					throw new Error("Invalid EOF.");
+	return new TransformStream<Uint8Array, ParsedTarEntry>(
+		{
+			transform(chunk, controller) {
+				try {
+					// In strict mode, ensure EOF blocks are all zeroes.
+					if (eofReached && options.strict && chunk.some((byte) => byte !== 0))
+						throw new Error("Invalid EOF.");
 
-				// Write incoming data to the unpacker.
-				unpacker.write(chunk);
-				pump(controller);
-			} catch (error) {
-				abortAll(error, controller);
-				throw error;
-			}
-		},
-
-		flush(controller) {
-			try {
-				unpacker.end();
-				pump(controller, true); // Force pump for remaining data
-
-				// If a bodyController still exists, the archive was truncated mid-file.
-				if (bodyController) {
-					if (options.strict) {
-						throw new Error("Tar archive is truncated.");
-					}
-					// In non-strict mode, just close the partial stream.
-					try {
-						bodyController.close();
-					} catch {}
-					bodyController = null;
+					// Write incoming data to the unpacker.
+					unpacker.write(chunk);
+					pump(controller);
+				} catch (error) {
+					abortAll(error, controller);
+					throw error;
 				}
+			},
 
-				unpacker.validateEOF();
+			flush(controller) {
+				try {
+					unpacker.end();
+					pump(controller, true); // Force pump for remaining data
 
-				if (!controllerTerminated) controller.terminate();
-			} catch (error) {
-				abortAll(error, controller);
-				throw error;
-			}
+					// If a bodyController still exists, the archive was truncated mid-file.
+					if (bodyController) {
+						if (options.strict) throw new Error("Tar archive is truncated.");
+
+						// In non-strict mode, just close the partial stream.
+						try {
+							bodyController.close();
+						} catch {}
+						bodyController = null;
+					}
+
+					unpacker.validateEOF();
+
+					if (!controllerTerminated) controller.terminate();
+				} catch (error) {
+					abortAll(error, controller);
+					throw error;
+				}
+			},
 		},
-	});
+		undefined,
+		{
+			highWaterMark: 1,
+		},
+	);
 }

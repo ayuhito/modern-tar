@@ -19,6 +19,7 @@ const createBaseArchive = (
 ): Promise<Uint8Array> => {
 	return packTar(entries);
 };
+
 describe("unpackTar", () => {
 	it("extracts a single file tar", async () => {
 		const buffer = await fs.readFile(ONE_FILE_TAR);
@@ -97,6 +98,60 @@ describe("unpackTar", () => {
 });
 
 describe("createTarDecoder", () => {
+	it("streams entries as data arrives", async () => {
+		const archive = await createBaseArchive([
+			{ header: { name: "file.txt", type: "file", size: 5 }, body: "hello" },
+			{ header: { name: "dir/", type: "directory", size: 0 } },
+			{
+				header: { name: "dir/nested.txt", type: "file", size: 3 },
+				body: new Uint8Array([97, 98, 99]),
+			},
+		]);
+
+		const decoder = createTarDecoder();
+		const reader = decoder.readable.getReader();
+		const writer = decoder.writable.getWriter();
+
+		const splitPoint = Math.floor((archive.length * 2) / 3);
+		const firstPart = archive.subarray(0, splitPoint);
+
+		const firstResultPromise = Promise.race([
+			reader.read(),
+			new Promise<never>((_, reject) =>
+				setTimeout(() => reject(new Error("Timed out waiting for first entry")), 100),
+			),
+		]);
+
+		await writer.write(firstPart);
+		const firstResult = await firstResultPromise;
+		expect(firstResult.done).toBe(false);
+		const firstEntry = firstResult.value;
+		if (!firstEntry) throw new Error("Expected first entry");
+		expect(firstEntry.header.name).toBe("file.txt");
+
+		await firstEntry.body.cancel();
+
+		const names = [firstEntry.header.name];
+
+		for (let i = 0; i < 2; i++) {
+			const nextResult = await Promise.race([
+				reader.read(),
+				new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new Error("Timed out waiting for next entry")), 100),
+				),
+			]);
+			expect(nextResult.done).toBe(false);
+			const entry = nextResult.value;
+			if (!entry) throw new Error("Expected streamed entry");
+
+			names.push(entry.header.name);
+
+			if (entry.header.size > 0) await entry.body.cancel();
+		}
+
+		expect(names).toEqual(["file.txt", "dir/", "dir/nested.txt"]);
+	});
+
 	it("rejects a stream with an invalid checksum in strict mode", async () => {
 		const archive = await createBaseArchive([
 			{ header: { name: "test.txt", type: "file", size: 0 }, body: "" },
