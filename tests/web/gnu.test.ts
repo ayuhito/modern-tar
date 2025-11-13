@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { writeChecksum } from "../../src/tar/checksum";
-import { decoder, encoder } from "../../src/tar/utils";
+import { decoder, encoder } from "../../src/tar/encoding";
 import { unpackTar } from "../../src/web";
 import { GNU_INCREMENTAL_TAR, GNU_LONG_PATH, GNU_TAR } from "./fixtures";
 

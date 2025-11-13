@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { decoder } from "../../src/tar/utils";
+import { decoder } from "../../src/tar/encoding";
 import { unpackTar } from "../../src/web";
 import { V7_TAR } from "./fixtures";
 

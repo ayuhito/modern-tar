@@ -1,5 +1,3 @@
-import type { TarEntryData, TarHeader } from "./types";
-
 export const encoder = new TextEncoder();
 export const decoder = new TextDecoder();
 
@@ -96,49 +94,3 @@ export function readNumeric(
 
 	return readOctal(view, offset, size);
 }
-
-export async function streamToBuffer(
-	stream: ReadableStream<Uint8Array>,
-): Promise<Uint8Array> {
-	const chunks: Uint8Array[] = [];
-	const reader = stream.getReader();
-	let totalLength = 0;
-
-	try {
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-
-			chunks.push(value);
-			totalLength += value.length;
-		}
-
-		// Pre-allocate the final buffer.
-		const result = new Uint8Array(totalLength);
-		let offset = 0;
-
-		for (const chunk of chunks) {
-			result.set(chunk, offset);
-			offset += chunk.length;
-		}
-
-		return result;
-	} finally {
-		reader.releaseLock();
-	}
-}
-
-export async function normalizeBody(body: TarEntryData): Promise<Uint8Array> {
-	if (body === null || body === undefined) return new Uint8Array(0);
-	if (body instanceof Uint8Array) return body;
-	if (typeof body === "string") return encoder.encode(body);
-	if (body instanceof ArrayBuffer) return new Uint8Array(body);
-	if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
-
-	throw new TypeError("Unsupported content type for entry body.");
-}
-
-export const isBodyless = (header: TarHeader) =>
-	header.type === "directory" ||
-	header.type === "symlink" ||
-	header.type === "link";

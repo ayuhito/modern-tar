@@ -5,10 +5,10 @@ import {
 	USTAR_NAME_SIZE,
 	USTAR_PREFIX_SIZE,
 	USTAR_UNAME_SIZE,
-} from "./constants.js";
-import { createTarHeader } from "./header.js";
-import type { TarHeader } from "./types.js";
-import { decoder, encoder } from "./utils.js";
+} from "./constants";
+import { decoder, encoder } from "./encoding";
+import { createTarHeader } from "./header";
+import type { TarHeader } from "./types";
 
 // Checks a tar header for fields that exceed USTAR limits and generates a PAX header entry if necessary.
 export function generatePax(header: TarHeader): {

@@ -1,6 +1,6 @@
+import { isBodyless } from "../tar/body";
 import { createTarPacker as createPacker } from "../tar/packer";
 import type { TarHeader } from "../tar/types";
-import { isBodyless } from "../tar/utils";
 
 /**
  * Controls a streaming tar packing process.

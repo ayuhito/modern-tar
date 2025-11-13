@@ -1,3 +1,4 @@
+import { createChunkQueue } from "./chunk-queue";
 import { BLOCK_SIZE, BLOCK_SIZE_MASK } from "./constants";
 import {
 	applyOverrides,
@@ -6,346 +7,229 @@ import {
 	type InternalTarHeader,
 	parseUstarHeader,
 } from "./header";
-import type { DecoderOptions, TarHeader, UnpackHandler } from "./types";
+import type { DecoderOptions, TarHeader } from "./types";
 
 // States for the unpacker state machine.
 const STATE_HEADER = 0;
 const STATE_BODY = 1;
-const STATE_PADDING = 2;
-const STATE_AWAIT_EOF = 3;
 
-type State =
-	| typeof STATE_HEADER
-	| typeof STATE_BODY
-	| typeof STATE_PADDING
-	| typeof STATE_AWAIT_EOF;
-
-interface ChunkNode {
-	data: Uint8Array;
-	consumed: number; // Bytes.
-}
-
-export function createTarUnpacker(
-	handler: UnpackHandler,
-	options: DecoderOptions = {},
-) {
+export function createUnpacker(options: DecoderOptions = {}) {
 	const strict = options.strict ?? false;
+	const { available, peek, push, discard, pull } = createChunkQueue();
 
-	const chunkQueue: ChunkNode[] = [];
-	let totalAvailable = 0;
-
-	let state: State = STATE_HEADER;
-	let waitingForData = false;
+	let state: 0 | 1 = STATE_HEADER;
+	let ended = false;
+	let eof = false;
 
 	let currentEntry: {
+		header: TarHeader;
 		remaining: number;
 		padding: number;
 	} | null = null;
+
 	const paxGlobals: HeaderOverrides = {};
 	let nextEntryOverrides: HeaderOverrides = {};
 
-	// Consumes up to `size` bytes from the chunk queue. Optionally triggers a callback
-	// with each consumed segment.
-	function consume(
-		size: number,
-		callback?: (data: Uint8Array) => void,
-	): number {
-		let remaining = Math.min(size, totalAvailable);
-		const initialRemaining = remaining;
-
-		// Consume chunks in FIFO order.
-		while (remaining > 0 && chunkQueue.length > 0) {
-			const chunkNode = chunkQueue[0];
-			const available = chunkNode.data.length - chunkNode.consumed;
-			const toProcess = Math.min(remaining, available);
-
-			// Callback with the segment if provided. Then update state.
-			if (callback) {
-				callback(
-					chunkNode.data.subarray(
-						chunkNode.consumed,
-						chunkNode.consumed + toProcess,
-					),
-				);
-			}
-
-			chunkNode.consumed += toProcess;
-			remaining -= toProcess;
-
-			// Remove the chunk if fully consumed.
-			if (chunkNode.consumed >= chunkNode.data.length) {
-				chunkQueue.shift();
-			}
-		}
-
-		totalAvailable -= initialRemaining - remaining;
-		return initialRemaining - remaining;
-	}
-
-	// Reads data into a single buffer. This should be only used for small header/meta blocks.
-	function read(size: number): Uint8Array | null {
-		const toRead = Math.min(size, totalAvailable);
-		if (toRead === 0) return null;
-
-		// If the entire read fits in this chunk, slice and return it.
-		const chunk = chunkQueue[0];
-		if (chunk) {
-			const dataLeft = chunk.data.length - chunk.consumed;
-
-			if (dataLeft >= toRead) {
-				const result = chunk.data.subarray(
-					chunk.consumed,
-					chunk.consumed + toRead,
-				);
-
-				chunk.consumed += toRead;
-				totalAvailable -= toRead;
-
-				// Remove the chunk if fully consumed.
-				if (chunk.consumed >= chunk.data.length) {
-					chunkQueue.shift();
-				}
-
-				return result;
-			}
-		}
-
-		// Otherwise, we need to copy from multiple chunks.
-		const result = new Uint8Array(toRead);
-		let offset = 0;
-		consume(toRead, (data) => {
-			result.set(data, offset);
-			offset += data.length;
-		});
-
-		return result;
-	}
-
-	// Main loop to process data.
-	function process(): void {
-		while (true) {
-			switch (state) {
-				case STATE_HEADER: {
-					// Wait for more chunks.
-					if (totalAvailable < BLOCK_SIZE) {
-						waitingForData = true;
-						return;
-					}
-
-					const headerBlock = read(BLOCK_SIZE);
-					if (!headerBlock) {
-						waitingForData = true;
-						return;
-					}
-
-					if (isZeroBlock(headerBlock)) {
-						state = STATE_AWAIT_EOF;
-						continue;
-					}
-
-					// Parse the header.
-					waitingForData = false;
-					try {
-						const internalHeader: InternalTarHeader = parseUstarHeader(
-							headerBlock,
-							strict,
-						);
-						const header: TarHeader = {
-							...internalHeader,
-							name: internalHeader.name,
-						};
-
-						// Handle special meta blocks (PAX/GNU) etc.
-						const metaParser = getMetaParser(header.type);
-						if (metaParser) {
-							const paddedSize =
-								(header.size + BLOCK_SIZE_MASK) & ~BLOCK_SIZE_MASK;
-
-							// If we don't have enough, unshift the header back and wait.
-							if (totalAvailable < paddedSize) {
-								waitingForData = true;
-								chunkQueue.unshift({ data: headerBlock, consumed: 0 });
-								totalAvailable += BLOCK_SIZE;
-								return;
-							}
-
-							const metaBlock = read(paddedSize);
-							if (!metaBlock) {
-								waitingForData = true;
-								return;
-							}
-
-							// Parse and store the overrides.
-							const overrides = metaParser(metaBlock.subarray(0, header.size));
-							if (header.type === "pax-global-header") {
-								Object.assign(paxGlobals, overrides);
-							} else {
-								Object.assign(nextEntryOverrides, overrides);
-							}
-							continue;
-						}
-
-						// Apply prefix and overrides if present.
-						if (internalHeader.prefix)
-							header.name = `${internalHeader.prefix}/${header.name}`;
-						applyOverrides(header, paxGlobals);
-						applyOverrides(header, nextEntryOverrides);
-						nextEntryOverrides = {};
-
-						// Trigger the header callback and move to next state.
-						handler.onHeader(header);
-
-						if (header.size > 0) {
-							currentEntry = {
-								remaining: header.size,
-								padding: -header.size & BLOCK_SIZE_MASK,
-							};
-
-							state = STATE_BODY;
-						} else {
-							handler.onEndEntry();
-						}
-					} catch (error) {
-						handler.onError(error as Error);
-						return;
-					}
-
-					continue;
-				}
-
-				case STATE_BODY: {
-					if (!currentEntry) throw new Error("No current entry for body");
-
-					// Consume data for the current entry.
-					const toForward = Math.min(currentEntry.remaining, totalAvailable);
-					if (toForward > 0) {
-						const consumed = consume(toForward, handler.onData);
-						currentEntry.remaining -= consumed;
-					}
-
-					// If entry is fully read, move to padding or next header.
-					if (currentEntry.remaining === 0) {
-						state = currentEntry.padding > 0 ? STATE_PADDING : STATE_HEADER;
-						if (state === STATE_HEADER) {
-							handler.onEndEntry();
-							currentEntry = null;
-						}
-					} else if (totalAvailable === 0) {
-						waitingForData = true;
-						return;
-					}
-
-					continue;
-				}
-
-				case STATE_PADDING:
-					if (!currentEntry) throw new Error("No current entry for padding");
-
-					if (totalAvailable < currentEntry.padding) {
-						waitingForData = true;
-						return;
-					}
-
-					// Consume padding and move to next header.
-					if (currentEntry.padding > 0) {
-						consume(currentEntry.padding);
-					}
-
-					handler.onEndEntry();
-					currentEntry = null;
-					state = STATE_HEADER;
-					continue;
-
-				case STATE_AWAIT_EOF: {
-					if (totalAvailable < BLOCK_SIZE) {
-						waitingForData = true;
-						return;
-					}
-
-					// Expecting a second zero block for valid EOF.
-					const secondBlock = read(BLOCK_SIZE);
-					if (!secondBlock) {
-						waitingForData = true;
-						return;
-					}
-
-					if (isZeroBlock(secondBlock)) {
-						// Valid EOF found, stop processing.
-						return;
-					}
-
-					if (strict) {
-						handler.onError(new Error("Invalid EOF"));
-						return;
-					}
-
-					// Not a real EOF, treat the second block as a header.
-					chunkQueue.unshift({ data: secondBlock, consumed: 0 });
-					totalAvailable += BLOCK_SIZE;
-					state = STATE_HEADER;
-					continue;
-				}
-
-				default:
-					throw new Error("Invalid state in tar unpacker.");
-			}
-		}
-	}
-
-	return {
+	const unpacker = {
+		/** Add data to the internal buffer. */
 		write(chunk: Uint8Array): void {
-			if (chunk.length === 0) return;
+			if (ended) throw new Error("Archive already ended.");
+			push(chunk);
+		},
 
-			// Append the chunk to the queue.
-			chunkQueue.push({ data: chunk, consumed: 0 });
-			totalAvailable += chunk.length;
+		/** Signal that no more data will be written. */
+		end(): void {
+			ended = true;
+		},
 
-			if (waitingForData) {
-				waitingForData = false;
-				try {
-					process();
-				} catch (error) {
-					handler.onError(error as Error);
+		/**
+		 * Tries to read and parse the next header from the queue.
+		 * Returns a TarHeader if successful, null if more data is needed,
+		 * or undefined if the stream has ended.
+		 */
+		readHeader(): TarHeader | null | undefined {
+			if (state !== STATE_HEADER)
+				throw new Error("Cannot read header while an entry is active");
+			if (eof) return undefined;
+
+			while (!eof) {
+				// Check if we have enough data for at least one header.
+				if (available() < BLOCK_SIZE) {
+					// If the stream has ended, any remaining data indicates a truncated archive.
+					if (ended) {
+						if (available() > 0 && strict)
+							throw new Error("Tar archive is truncated.");
+
+						eof = true;
+						return undefined;
+					}
+
+					return null;
 				}
+
+				// Peek at the next block since we know it is not null from above.
+				const headerBlock = peek(BLOCK_SIZE) as Uint8Array;
+
+				if (isZeroBlock(headerBlock)) {
+					// We need to check for a second zero block to confirm a valid EOF.
+					if (available() < BLOCK_SIZE * 2) {
+						// Not enough data to check for the second block.
+						if (ended) {
+							if (strict) throw new Error("Tar archive is truncated.");
+							eof = true;
+							return undefined;
+						}
+
+						return null; // Wait for more data.
+					}
+
+					// Check if the second block is also zeroed.
+					const eofBlock = peek(BLOCK_SIZE * 2) as Uint8Array;
+					if (isZeroBlock(eofBlock.subarray(BLOCK_SIZE))) {
+						discard(BLOCK_SIZE * 2); // Valid EOF.
+						eof = true;
+						return undefined;
+					}
+
+					if (strict) throw new Error("Invalid tar header.");
+					discard(BLOCK_SIZE); // Skip single zero block.
+					continue;
+				}
+
+				// It's not a zero block, so try to parse it as a header.
+				let internalHeader: InternalTarHeader;
+				try {
+					internalHeader = parseUstarHeader(headerBlock, strict);
+				} catch (err) {
+					if (strict) throw err;
+					// In non-strict mode, just consume the invalid block and continue.
+					discard(BLOCK_SIZE);
+					continue;
+				}
+
+				// Check if it's a meta-header (like PAX or GNU long names).
+				const metaParser = getMetaParser(internalHeader.type);
+				if (metaParser) {
+					const paddedSize =
+						(internalHeader.size + BLOCK_SIZE_MASK) & ~BLOCK_SIZE_MASK;
+
+					// Check if we have enough data for the meta entry's body using total size.
+					if (available() < BLOCK_SIZE + paddedSize) {
+						if (ended && strict) throw new Error("Tar archive is truncated.");
+						return null;
+					}
+
+					// Consume the meta header and its body, then apply the metadata.
+					discard(BLOCK_SIZE);
+					const metaBlock = pull(paddedSize) as Uint8Array;
+					const overrides = metaParser(
+						metaBlock.subarray(0, internalHeader.size),
+					);
+
+					// Store the overrides for the next entry or globally for PAX global headers.
+					const target =
+						internalHeader.type === "pax-global-header"
+							? paxGlobals
+							: nextEntryOverrides;
+
+					for (const key in overrides) target[key] = overrides[key];
+
+					continue;
+				}
+
+				discard(BLOCK_SIZE);
+
+				// Apply prefixes from USTAR and any overrides from meta-headers.
+				const header: TarHeader = internalHeader;
+				if (internalHeader.prefix)
+					header.name = `${internalHeader.prefix}/${header.name}`;
+
+				applyOverrides(header, paxGlobals);
+				applyOverrides(header, nextEntryOverrides);
+				nextEntryOverrides = {}; // Reset for the next entry.
+
+				// Set up state for body processing.
+				currentEntry = {
+					header,
+					remaining: header.size,
+					padding: -header.size & BLOCK_SIZE_MASK,
+				};
+
+				state = STATE_BODY;
+				return header;
 			}
 		},
 
-		end(): void {
-			try {
-				if (!waitingForData) process();
+		/** Streams the body of the current entry to a callback. */
+		streamBody(callback: (chunk: Uint8Array) => boolean): number {
+			if (state !== STATE_BODY || !currentEntry || currentEntry.remaining === 0)
+				return 0;
 
-				if (strict) {
-					if (currentEntry && currentEntry.remaining > 0) {
-						const error = new Error("Tar archive is truncated.");
-						handler.onError(error);
-						throw error;
-					}
+			const bytesToFeed = Math.min(currentEntry.remaining, available());
+			if (bytesToFeed === 0) return 0;
 
-					if (totalAvailable > 0) {
-						const remainingData = read(totalAvailable);
-						if (remainingData?.some((b) => b !== 0)) {
-							const error = new Error("Invalid EOF.");
-							handler.onError(error);
-							throw error;
-						}
-					}
+			const fed = pull(bytesToFeed, callback);
+			currentEntry.remaining -= fed;
+			return fed;
+		},
 
-					if (waitingForData) {
-						const error = new Error("Tar archive is truncated.");
-						handler.onError(error);
-						throw error;
-					}
-				} else {
-					if (currentEntry) {
-						handler.onEndEntry();
-						currentEntry = null;
-					}
-				}
-			} catch (error) {
-				handler.onError(error as Error);
+		/** Checks if the body of the current entry has been fully consumed. */
+		isBodyComplete(): boolean {
+			return !currentEntry || currentEntry.remaining === 0;
+		},
+
+		/**
+		 * Skips the remaining padding for the current entry.
+		 * Returns true if padding was fully skipped, false if more data is needed.
+		 */
+		skipPadding(): boolean {
+			if (state !== STATE_BODY || !currentEntry) return true;
+
+			if (currentEntry.remaining > 0)
+				throw new Error("Body not fully consumed");
+
+			// Not enough data for padding.
+			if (available() < currentEntry.padding) return false;
+
+			// Consume the padding.
+			discard(currentEntry.padding);
+
+			currentEntry = null;
+			state = STATE_HEADER;
+			return true;
+		},
+
+		hasEnded(): boolean {
+			return ended;
+		},
+
+		/** Check if unpacker likely has enough data to make progress without waiting. */
+		canContinueProcessing(): boolean {
+			// If we're waiting for a header, we need at least BLOCK_SIZE bytes
+			if (state === STATE_HEADER) return available() >= BLOCK_SIZE;
+
+			// If we're in body state, we can process if we have any data or need to skip padding
+			if (state === STATE_BODY && currentEntry) {
+				return currentEntry.remaining === 0
+					? // If body is complete, we just need to skip padding
+						available() >= currentEntry.padding
+					: // If body isn't complete, any data is useful
+						available() > 0;
+			}
+
+			return true;
+		},
+
+		validateEOF() {
+			if (strict && available() > 0) {
+				const remaining = pull(available()) as Uint8Array;
+				if (remaining.some((byte) => byte !== 0))
+					throw new Error("Invalid EOF.");
 			}
 		},
 	};
+
+	return unpacker;
 }
 
 // Instead of checking each byte individually (512 iterations), we can check

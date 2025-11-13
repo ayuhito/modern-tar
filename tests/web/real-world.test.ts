@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
-import { streamToBuffer } from "../../src/tar/utils";
 import {
 	createGzipDecoder,
 	type ParsedTarEntryWithData,
 	unpackTar,
 } from "../../src/web";
+import { streamToBuffer } from "../../src/web/stream-utils";
 import { ELECTRON_TGZ, LODASH_TGZ, NEXT_SWC_TGZ, SHARP_TGZ } from "./fixtures";
 
 async function extractTgz(filePath: string): Promise<ParsedTarEntryWithData[]> {

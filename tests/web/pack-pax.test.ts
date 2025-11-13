@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { decoder } from "../../src/tar/encoding";
 import { generatePax } from "../../src/tar/pax";
-import { decoder } from "../../src/tar/utils";
 import { packTar, type TarEntry, unpackTar } from "../../src/web";
 
 describe("PAX format support", () => {

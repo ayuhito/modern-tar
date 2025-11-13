@@ -1,6 +1,7 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: Tests */
 import { describe, expect, it } from "vitest";
-import { decoder, isBodyless } from "../../src/tar/utils";
+import { isBodyless } from "../../src/tar/body";
+import { decoder } from "../../src/tar/encoding";
 import { packTar, unpackTar } from "../../src/web/helpers";
 import type { TarEntry } from "../../src/web/types";
 

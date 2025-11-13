@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { createTarUnpacker } from "../../src/tar/unpacker";
+import { normalizeBody } from "../../src/tar/body";
 import {
 	decoder,
 	encoder,
-	normalizeBody,
 	readNumeric,
 	readOctal,
 	readString,
-	streamToBuffer,
 	writeOctal,
 	writeString,
-} from "../../src/tar/utils";
+} from "../../src/tar/encoding";
+import { createUnpacker } from "../../src/tar/unpacker";
+import { streamToBuffer } from "../../src/web/stream-utils";
 
 describe("tar utilities", () => {
 	describe("string utilities", () => {
@@ -423,18 +423,8 @@ describe("tar utilities", () => {
 	});
 
 	it("handles unaligned zero blocks without crashing", () => {
-		let errorOccurred = false;
-
-		const handler = {
-			onHeader: () => {},
-			onData: () => {},
-			onEndEntry: () => {},
-			onError: (_error: Error) => {
-				errorOccurred = true;
-			},
-		};
-
-		const unpacker = createTarUnpacker(handler);
+		const errorOccurred = false;
+		const unpacker = createUnpacker();
 
 		// Create a large buffer with unaligned offset that contains a zero block
 		// This ensures the read() function will use the subarray path that preserves

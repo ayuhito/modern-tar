@@ -4,10 +4,10 @@ import * as fs from "node:fs/promises";
 import { cpus } from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
-
+import { normalizeBody } from "../tar/body";
+import { DIRECTORY, FILE, LINK, SYMLINK } from "../tar/constants";
 import { createTarPacker } from "../tar/packer";
 import type { TarHeader } from "../tar/types";
-import { normalizeBody } from "../tar/utils";
 import { normalizeName } from "./path";
 import type { PackOptionsFS, TarSource } from "./types";
 
@@ -93,7 +93,7 @@ export function packTar(
 			? // biome-ignore lint/style/noNonNullAssertion: isDir matches this check.
 				(await fs.readdir(directoryPath!, { withFileTypes: true })).map(
 					(entry) => ({
-						type: entry.isDirectory() ? "directory" : "file",
+						type: entry.isDirectory() ? DIRECTORY : FILE,
 						// biome-ignore lint/style/noNonNullAssertion: Checked above.
 						source: path.join(directoryPath!, entry.name),
 						target: entry.name,
@@ -170,8 +170,7 @@ export function packTar(
 						// Select a 64KB or 512KB buffer based on file size > 1MB.
 						const readBuffer =
 							size > 1048576
-								? // biome-ignore lint/suspicious/noAssignInExpressions: Cleaner.
-									(readBufferLarge ??= Buffer.alloc(512 * 1024))
+								? (readBufferLarge ??= Buffer.alloc(512 * 1024))
 								: readBufferSmall;
 
 						try {
@@ -274,7 +273,7 @@ export function packTar(
 
 					let header: TarHeader = {
 						name: target,
-						type: isDir ? "directory" : "file",
+						type: isDir ? DIRECTORY : FILE,
 						size: isDir ? 0 : size,
 						mode: stat.mode,
 						mtime: stat.mtime,
@@ -326,12 +325,12 @@ export function packTar(
 					gid: job.gid ?? Number(stat.gid),
 					uname: job.uname,
 					gname: job.gname,
-					type: "file", // Default type
+					type: FILE, // Default type
 				};
 
 				let body: FileBody | undefined;
 				if (stat.isDirectory()) {
-					header.type = "directory";
+					header.type = DIRECTORY;
 					header.name = target.endsWith("/") ? target : `${target}/`;
 
 					// Enqueue children for processing.
@@ -340,7 +339,7 @@ export function packTar(
 							withFileTypes: true,
 						})) {
 							jobs.push({
-								type: d.isDirectory() ? "directory" : "file",
+								type: d.isDirectory() ? DIRECTORY : FILE,
 								source: path.join(job.source, d.name),
 								target: `${header.name}${d.name}`, // Reuse normalized parent path.
 							});
@@ -348,14 +347,14 @@ export function packTar(
 					} catch {}
 				} else if (stat.isSymbolicLink()) {
 					// Store the link itself, not the target file.
-					header.type = "symlink";
+					header.type = SYMLINK;
 					header.linkname = await fs.readlink(job.source);
 				} else if (stat.isFile()) {
 					header.size = Number(stat.size);
 
 					// Deduplicate hard links with inode number.
 					if (stat.nlink > 1 && seenInodes.has(stat.ino)) {
-						header.type = "link";
+						header.type = LINK;
 						// biome-ignore lint/style/noNonNullAssertion: .has check above.
 						header.linkname = seenInodes.get(stat.ino)!;
 						header.size = 0;

@@ -1,3 +1,4 @@
+import { isBodyless } from "./body";
 import { BLOCK_SIZE, BLOCK_SIZE_MASK } from "./constants";
 import { getHeaderBlocks } from "./header";
 import type { TarHeader } from "./types";
@@ -31,11 +32,7 @@ export function createTarPacker(
 
 			try {
 				// Entries without a data body have size 0.
-				const isBodyless =
-					header.type === "directory" ||
-					header.type === "symlink" ||
-					header.type === "link";
-				const size = isBodyless ? 0 : (header.size ?? 0);
+				const size = isBodyless(header) ? 0 : (header.size ?? 0);
 
 				const headerBlocks = getHeaderBlocks({ ...header, size });
 				for (const block of headerBlocks) {
@@ -101,10 +98,8 @@ export function createTarPacker(
 
 				// Add padding to reach 512-byte boundary.
 				const paddingSize = -currentHeader.size & BLOCK_SIZE_MASK;
-				if (paddingSize > 0) {
-					const paddingBuffer = new Uint8Array(paddingSize);
-					onData(paddingBuffer);
-				}
+				// Write padding buffer if needed.
+				if (paddingSize > 0) onData(new Uint8Array(paddingSize));
 
 				// Reset state.
 				currentHeader = null;

@@ -1,5 +1,5 @@
-import { USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE } from "./constants.js";
-import { readOctal } from "./utils.js";
+import { USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE } from "./constants";
+import { readOctal } from "./encoding";
 
 // ASCII code for a space character.
 const CHECKSUM_SPACE = 32; // ' '

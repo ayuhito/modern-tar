@@ -13,59 +13,45 @@ export const DEFAULT_DIR_MODE = 0o755;
 // Offsets and sizes of fields in a USTAR header block.
 // @see https://www.gnu.org/software/tar/manual/html_node/Standard.html
 
-// Name field
 export const USTAR_NAME_OFFSET = 0;
 export const USTAR_NAME_SIZE = 100;
 
-// Mode field
 export const USTAR_MODE_OFFSET = 100;
 export const USTAR_MODE_SIZE = 8;
 
-// UID field
 export const USTAR_UID_OFFSET = 108;
 export const USTAR_UID_SIZE = 8;
 
-// GID field
 export const USTAR_GID_OFFSET = 116;
 export const USTAR_GID_SIZE = 8;
 
-// Size field
 export const USTAR_SIZE_OFFSET = 124;
 export const USTAR_SIZE_SIZE = 12;
 
-// Mtime field
 export const USTAR_MTIME_OFFSET = 136;
 export const USTAR_MTIME_SIZE = 12;
 
-// Checksum field
 export const USTAR_CHECKSUM_OFFSET = 148;
 export const USTAR_CHECKSUM_SIZE = 8;
 
-// Typeflag field
 export const USTAR_TYPEFLAG_OFFSET = 156;
 export const USTAR_TYPEFLAG_SIZE = 1;
 
-// Linkname field
 export const USTAR_LINKNAME_OFFSET = 157;
 export const USTAR_LINKNAME_SIZE = 100;
 
-// Magic field
 export const USTAR_MAGIC_OFFSET = 257;
 export const USTAR_MAGIC_SIZE = 6;
 
-// Version field
 export const USTAR_VERSION_OFFSET = 263;
 export const USTAR_VERSION_SIZE = 2;
 
-// Uname field
 export const USTAR_UNAME_OFFSET = 265;
 export const USTAR_UNAME_SIZE = 32;
 
-// Gname field
 export const USTAR_GNAME_OFFSET = 297;
 export const USTAR_GNAME_SIZE = 32;
 
-// Prefix field
 export const USTAR_PREFIX_OFFSET = 345;
 export const USTAR_PREFIX_SIZE = 155;
 
@@ -77,6 +63,11 @@ export const USTAR_MAX_UID_GID = 0o7777777;
 
 /** USTAR max value in 12-byte octal field (~8GB). */
 export const USTAR_MAX_SIZE = 0o77777777777;
+
+export const FILE = "file";
+export const LINK = "link";
+export const SYMLINK = "symlink";
+export const DIRECTORY = "directory";
 
 /** Type flag constants for file types. */
 export const TYPEFLAG = {
@@ -97,12 +88,12 @@ export const TYPEFLAG = {
 
 /** Reverse mapping from flag characters to type names. */
 export const FLAGTYPE = {
-	"0": "file",
-	"1": "link",
-	"2": "symlink",
+	"0": FILE,
+	"1": LINK,
+	"2": SYMLINK,
 	"3": "character-device",
 	"4": "block-device",
-	"5": "directory",
+	"5": DIRECTORY,
 	"6": "fifo",
 	// POSIX.1-2001 extensions
 	x: "pax-header",
@@ -114,3 +105,5 @@ export const FLAGTYPE = {
 
 /** Pre-allocated zero block for padding and EOF. */
 export const ZERO_BLOCK = new Uint8Array(BLOCK_SIZE);
+
+export const EMPTY = new Uint8Array(0);

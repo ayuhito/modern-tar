@@ -7,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
-import { encoder } from "../../src/tar/utils";
+import { encoder } from "../../src/tar/encoding";
 
 const isWindows = process.platform === "win32";
 

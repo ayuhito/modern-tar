@@ -1,9 +1,12 @@
+import { isBodyless } from "./body";
 import { validateChecksum, writeChecksum } from "./checksum";
 import {
 	BLOCK_SIZE,
 	BLOCK_SIZE_MASK,
 	DEFAULT_DIR_MODE,
 	DEFAULT_FILE_MODE,
+	DIRECTORY,
+	FILE,
 	FLAGTYPE,
 	TYPEFLAG,
 	USTAR_GID_OFFSET,
@@ -35,15 +38,15 @@ import {
 	USTAR_VERSION_SIZE,
 	ZERO_BLOCK,
 } from "./constants";
-import { findUstarSplit, generatePax } from "./pax";
-import type { TarHeader } from "./types";
 import {
 	readNumeric,
 	readOctal,
 	readString,
 	writeOctal,
 	writeString,
-} from "./utils";
+} from "./encoding";
+import { findUstarSplit, generatePax } from "./pax";
+import type { TarHeader } from "./types";
 
 // Internal header with additional fields needed during parsing.
 export interface InternalTarHeader extends TarHeader {
@@ -54,6 +57,8 @@ export interface InternalTarHeader extends TarHeader {
 export type HeaderOverrides = Omit<Partial<TarHeader>, "mtime"> & {
 	// PAX mtime is a float, handle it as a number before converting to Date
 	mtime?: number;
+	// Allow string indexing for dynamic PAX attributes
+	[key: string]: string | number | Record<string, string> | undefined;
 };
 
 // Creates a USTAR format tar header from a TarHeader object.
@@ -61,11 +66,7 @@ export function createTarHeader(header: TarHeader): Uint8Array {
 	const view = new Uint8Array(BLOCK_SIZE);
 
 	// Entries without a data body (like directories) have a size of 0.
-	const isBodyless =
-		header.type === "directory" ||
-		header.type === "symlink" ||
-		header.type === "link";
-	const size = isBodyless ? 0 : (header.size ?? 0);
+	const size = isBodyless(header) ? 0 : (header.size ?? 0);
 
 	// If a filename is >100 chars, USTAR allows splitting it into a 155-char prefix and a 100-char name.
 	let name = header.name;
@@ -86,7 +87,7 @@ export function createTarHeader(header: TarHeader): Uint8Array {
 		USTAR_MODE_OFFSET,
 		USTAR_MODE_SIZE,
 		header.mode ??
-			(header.type === "directory" ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE),
+			(header.type === DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE),
 	);
 	writeOctal(view, USTAR_UID_OFFSET, USTAR_UID_SIZE, header.uid ?? 0);
 	writeOctal(view, USTAR_GID_OFFSET, USTAR_GID_SIZE, header.gid ?? 0);
@@ -101,7 +102,7 @@ export function createTarHeader(header: TarHeader): Uint8Array {
 		view,
 		USTAR_TYPEFLAG_OFFSET,
 		USTAR_TYPEFLAG_SIZE,
-		TYPEFLAG[header.type ?? "file"],
+		TYPEFLAG[header.type ?? FILE],
 	);
 	writeString(
 		view,
@@ -146,7 +147,7 @@ export function parseUstarHeader(
 		mtime: new Date(
 			readNumeric(block, USTAR_MTIME_OFFSET, USTAR_MTIME_SIZE) * 1000,
 		),
-		type: FLAGTYPE[typeflag] || "file",
+		type: FLAGTYPE[typeflag] || FILE,
 		linkname: readString(block, USTAR_LINKNAME_OFFSET, USTAR_LINKNAME_SIZE),
 	};
 

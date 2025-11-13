@@ -1,7 +1,8 @@
+import { isBodyless, normalizeBody } from "../tar/body";
 import { transformHeader } from "../tar/options";
 import type { TarHeader, UnpackOptions } from "../tar/types";
-import { isBodyless, normalizeBody, streamToBuffer } from "../tar/utils";
 import { createTarPacker } from "./pack";
+import { streamToBuffer } from "./stream-utils";
 import type { ParsedTarEntryWithData, TarEntry } from "./types";
 import { createTarDecoder } from "./unpack";
 
@@ -141,8 +142,6 @@ export async function unpackTar(
 	archive: ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>,
 	options: UnpackOptions = {},
 ): Promise<ParsedTarEntryWithData[]> {
-	const { streamTimeout = 5000, ...restOptions } = options;
-
 	const sourceStream: ReadableStream<Uint8Array> =
 		archive instanceof ReadableStream
 			? archive
@@ -156,85 +155,42 @@ export async function unpackTar(
 				});
 
 	const results: ParsedTarEntryWithData[] = [];
+	const entryStream = sourceStream.pipeThrough(createTarDecoder(options));
 
-	const processingPromise = (async () => {
-		const entryStream = sourceStream.pipeThrough(createTarDecoder(restOptions));
-		const reader = entryStream.getReader();
-
-		// Keep track of the last entry body stream to handle pipeline errors.
-		let lastBodyStream: ReadableStream<Uint8Array> | null = null;
-
+	for await (const entry of entryStream) {
+		let processedHeader: TarHeader | null;
 		try {
-			while (true) {
-				const { done, value: entry } = await reader.read();
-				if (done) break;
-
-				lastBodyStream = entry.body;
-
-				// Apply unpack options directly in the read loop.
-				let processedHeader: TarHeader | null;
-				try {
-					processedHeader = transformHeader(entry.header, restOptions);
-				} catch (error) {
-					// If filter/map functions throw, cancel the body stream.
-					await entry.body.cancel();
-					throw error;
-				}
-
-				// Entry is filtered out or stripped.
-				if (processedHeader === null) {
-					await entry.body.cancel();
-					continue;
-				}
-
-				const bodyless = isBodyless(processedHeader);
-
-				// For bodyless entries, don't buffer data and return undefined.
-				if (bodyless) {
-					await entry.body.cancel();
-					results.push({
-						header: processedHeader,
-						data: undefined,
-					});
-				} else {
-					// Fully buffer the entry body for files.
-					results.push({
-						header: processedHeader,
-						data: await streamToBuffer(entry.body),
-					});
-				}
-
-				lastBodyStream = null;
-			}
+			processedHeader = transformHeader(entry.header, options);
 		} catch (error) {
-			// If the pipeline errors (e.g., decompression failure), the tar decoder flush might
-			// not get called. Cancel the last known body stream to prevent hanging.
-			if (lastBodyStream) {
-				try {
-					await lastBodyStream.cancel();
-				} catch {}
-			}
+			// If filter/map functions throw, cancel the body stream and re-throw.
+			await entry.body.cancel();
 			throw error;
-		} finally {
-			try {
-				reader.releaseLock();
-			} catch {}
 		}
-		return results;
-	})();
 
-	// Race against timeout if specified to prevent hanging.
-	if (streamTimeout !== Infinity) {
-		const timeoutPromise = new Promise<never>((_, reject) => {
-			setTimeout(() => {
-				reject(
-					new Error(`Stream timed out after ${streamTimeout}ms of inactivity.`),
-				);
-			}, streamTimeout);
-		});
+		// Entry is filtered out or stripped, so we cancel its body stream.
+		if (processedHeader === null) {
+			await entry.body.cancel();
+			continue;
+		}
 
-		return Promise.race([processingPromise, timeoutPromise]);
+		// Check if this entry should have no body data
+		const bodyless = isBodyless(processedHeader);
+
+		if (bodyless) {
+			// For bodyless entries (directories, symlinks, links), cancel the body stream and use undefined
+			await entry.body.cancel();
+			results.push({
+				header: processedHeader,
+				data: undefined,
+			});
+		} else {
+			// Fully buffer the entry body for files
+			results.push({
+				header: processedHeader,
+				data: await streamToBuffer(entry.body),
+			});
+		}
 	}
 
-	return processingPromise;
+	return results;
 }

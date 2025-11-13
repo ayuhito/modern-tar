@@ -5,8 +5,9 @@ import {
 	USTAR_NAME_OFFSET,
 	USTAR_SIZE_OFFSET,
 } from "../../src/tar/constants";
-import { encoder, streamToBuffer } from "../../src/tar/utils";
+import { encoder } from "../../src/tar/encoding";
 import { createTarPacker, packTar, unpackTar } from "../../src/web";
+import { streamToBuffer } from "../../src/web/stream-utils";
 
 describe("checksum validation", () => {
 	it("should reject tar entries with corrupted checksums", async () => {

@@ -7,6 +7,7 @@ export default defineConfig([
 		dts: {
 			build: true,
 		},
+		fixedExtension: false,
 		plugins: [
 			{
 				name: "strip-tsdoc",

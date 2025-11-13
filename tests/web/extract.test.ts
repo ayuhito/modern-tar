@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { BLOCK_SIZE, USTAR_CHECKSUM_OFFSET } from "../../src/tar/constants";
-import { decoder, encoder } from "../../src/tar/utils";
+import { decoder, encoder } from "../../src/tar/encoding";
 
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
 import {

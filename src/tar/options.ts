@@ -1,3 +1,4 @@
+import { DIRECTORY } from "./constants";
 import type { TarHeader, UnpackOptions } from "./types";
 
 // Apply strip, filter, and map options to a header.
@@ -6,9 +7,7 @@ export function transformHeader(
 	options: UnpackOptions,
 ): TarHeader | null {
 	const { strip, filter, map } = options;
-	if (!strip && !filter && !map) {
-		return header;
-	}
+	if (!strip && !filter && !map) return header;
 
 	// Shallow copy.
 	const h = { ...header };
@@ -16,14 +15,13 @@ export function transformHeader(
 	// Strip path components.
 	if (strip && strip > 0) {
 		const components = h.name.split("/").filter(Boolean); // Filter empty strings.
-		if (strip >= components.length) {
-			return null; // Path is fully stripped
-		}
+
+		if (strip >= components.length) return null; // Path is fully stripped
+
+		// Rebuild name after stripping.
 		const newName = components.slice(strip).join("/");
 		h.name =
-			h.type === "directory" && !newName.endsWith("/")
-				? `${newName}/`
-				: newName;
+			h.type === DIRECTORY && !newName.endsWith("/") ? `${newName}/` : newName;
 
 		// Also strip absolute linknames.
 		if (h.linkname?.startsWith("/")) {
@@ -35,9 +33,7 @@ export function transformHeader(
 		}
 	}
 
-	if (filter?.(h) === false) {
-		return null; // Skip filtered entry
-	}
+	if (filter?.(h) === false) return null; // Skip filtered entry
 
 	const result = map ? map(h) : h;
 

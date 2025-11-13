@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { decoder } from "../../src/tar/utils";
+import { decoder } from "../../src/tar/encoding";
 import { createGzipDecoder, unpackTar } from "../../src/web";
 import {
 	BASE_256_SIZE,

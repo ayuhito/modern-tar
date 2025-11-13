@@ -1,8 +1,23 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { decoder } from "../../src/tar/utils";
-import { unpackTar } from "../../src/web";
+import { decoder } from "../../src/tar/encoding";
+import { packTar, unpackTar } from "../../src/web";
 import { UNKNOWN_FORMAT } from "./fixtures";
+
+const withTimeout = <T>(promise: Promise<T>, ms: number, message: string) =>
+	new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(message)), ms);
+		promise.then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			(error) => {
+				clearTimeout(timer);
+				reject(error);
+			},
+		);
+	});
 
 describe("unknown and non-standard tar formats", () => {
 	describe("unknown format archives", () => {
@@ -228,6 +243,42 @@ describe("unknown and non-standard tar formats", () => {
 
 			// Might have different results than original, but shouldn't crash
 		});
+	});
+
+	it("does not hang when file body arrives across async chunks", async () => {
+		const tarData = await packTar([
+			{
+				header: { name: "file.txt", size: 5, type: "file" },
+				body: "hello",
+			},
+		]);
+
+		const splitIndex = 514;
+		const firstChunk = tarData.subarray(0, splitIndex);
+		const secondChunk = tarData.subarray(splitIndex);
+		expect(secondChunk.length).toBeGreaterThan(0);
+
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(firstChunk);
+				setTimeout(() => {
+					controller.enqueue(secondChunk);
+					controller.close();
+				}, 10);
+			},
+		});
+
+		const entries = await withTimeout(
+			unpackTar(stream),
+			200,
+			"unpackTar timed out",
+		);
+
+		expect(entries).toHaveLength(1);
+		expect(entries[0].header.name).toBe("file.txt");
+		expect(entries[0].data).toBeInstanceOf(Uint8Array);
+		// biome-ignore lint/style/noNonNullAssertion: Asserted.
+		expect(decoder.decode(entries[0].data!)).toBe("hello");
 	});
 
 	describe("format detection robustness", () => {

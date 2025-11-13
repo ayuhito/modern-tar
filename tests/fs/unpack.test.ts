@@ -300,6 +300,172 @@ describe("extract", () => {
 		expect(linkTarget).toBe("target");
 	});
 
+	it("handles multiple files with different mtimes", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+		const mtime1 = new Date("2023-01-01T00:00:00Z");
+		const mtime2 = new Date("2023-06-15T12:00:00Z");
+		const mtime3 = new Date("2023-12-31T23:59:59Z");
+
+		const entries = [
+			{
+				header: {
+					name: "file1.txt",
+					size: 6,
+					type: "file" as const,
+					mode: 0o644,
+					mtime: mtime1,
+				},
+				body: "file 1",
+			},
+			{
+				header: {
+					name: "file2.txt",
+					size: 6,
+					type: "file" as const,
+					mode: 0o644,
+					mtime: mtime2,
+				},
+				body: "file 2",
+			},
+			{
+				header: {
+					name: "file3.txt",
+					size: 6,
+					type: "file" as const,
+					mode: 0o644,
+					mtime: mtime3,
+				},
+				body: "file 3",
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		// Verify each file has correct mtime
+		const file1Stats = await fs.stat(path.join(destDir, "file1.txt"));
+		const file2Stats = await fs.stat(path.join(destDir, "file2.txt"));
+		const file3Stats = await fs.stat(path.join(destDir, "file3.txt"));
+
+		expect(file1Stats.mtime.getTime()).toBe(mtime1.getTime());
+		expect(file2Stats.mtime.getTime()).toBe(mtime2.getTime());
+		expect(file3Stats.mtime.getTime()).toBe(mtime3.getTime());
+	});
+
+	it("handles empty files with mtime", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+		const testMtime = new Date("2023-07-20T10:15:30Z");
+
+		const entries = [
+			{
+				header: {
+					name: "empty-file.txt",
+					size: 0,
+					type: "file" as const,
+					mode: 0o644,
+					mtime: testMtime,
+				},
+				body: "",
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		// Verify empty file has correct mtime
+		const extractedPath = path.join(destDir, "empty-file.txt");
+		const stats = await fs.stat(extractedPath);
+		expect(stats.mtime.getTime()).toBe(testMtime.getTime());
+		expect(stats.size).toBe(0);
+	});
+
+	it("handles files with very old and very new timestamps", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+		const oldMtime = new Date("1990-01-01T00:00:00Z");
+		const newMtime = new Date("2030-12-31T23:59:59Z");
+
+		const entries = [
+			{
+				header: {
+					name: "old-file.txt",
+					size: 8,
+					type: "file" as const,
+					mode: 0o644,
+					mtime: oldMtime,
+				},
+				body: "old file",
+			},
+			{
+				header: {
+					name: "new-file.txt",
+					size: 8,
+					type: "file" as const,
+					mode: 0o644,
+					mtime: newMtime,
+				},
+				body: "new file",
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		// Verify timestamps
+		const oldStats = await fs.stat(path.join(destDir, "old-file.txt"));
+		const newStats = await fs.stat(path.join(destDir, "new-file.txt"));
+
+		expect(oldStats.mtime.getTime()).toBe(oldMtime.getTime());
+		expect(newStats.mtime.getTime()).toBe(newMtime.getTime());
+	});
+
+	it("handles nested directories with file mtimes", async () => {
+		const destDir = path.join(tmpDir, "extracted");
+		const dirMtime = new Date("2023-05-01T12:00:00Z");
+		const fileMtime = new Date("2023-05-02T14:30:00Z");
+
+		const entries = [
+			{
+				header: {
+					name: "nested/",
+					size: 0,
+					type: "directory" as const,
+					mode: 0o755,
+					mtime: dirMtime,
+				},
+			},
+			{
+				header: {
+					name: "nested/deep-file.txt",
+					size: 9,
+					type: "file" as const,
+					mode: 0o644,
+					mtime: fileMtime,
+				},
+				body: "deep file",
+			},
+		];
+
+		const tarBuffer = await packTarWeb(entries);
+		const unpackStream = unpackTar(destDir);
+		await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+		// Verify nested file has correct mtime
+		const fileStats = await fs.stat(
+			path.join(destDir, "nested", "deep-file.txt"),
+		);
+		expect(fileStats.mtime.getTime()).toBe(fileMtime.getTime());
+
+		// Verify content
+		const content = await fs.readFile(
+			path.join(destDir, "nested", "deep-file.txt"),
+			"utf8",
+		);
+		expect(content).toBe("deep file");
+	});
+
 	it("safely skips unsupported file types", async () => {
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -406,88 +572,6 @@ describe("extract", () => {
 				pipeline(Readable.from([tarBuffer]), unpackStream),
 			).rejects.toThrow("is not a valid directory component");
 		});
-
-		it("handles streamTimeout for stalled streams", async () => {
-			const destDir = path.join(tmpDir, "extracted");
-
-			// Create a readable stream that stalls after sending some data
-			let sentData = false;
-			const stallingStream = new Readable({
-				read() {
-					// Send a partial tar header then stall
-					if (!sentData) {
-						sentData = true;
-						// Send partial tar data that will cause the unpacker to wait for more
-						this.push(Buffer.alloc(256, 0)); // Partial header
-					}
-					// Don't push anything else - this will cause the stream to stall
-				},
-			});
-
-			const unpackStream = unpackTar(destDir, { streamTimeout: 100 }); // Very short timeout
-
-			await expect(pipeline(stallingStream, unpackStream)).rejects.toThrow(
-				"Stream timed out after 100ms of inactivity.",
-			);
-		});
-
-		it("allows disabling streamTimeout with Infinity", async () => {
-			const destDir = path.join(tmpDir, "extracted");
-
-			// Create a simple valid tar entry
-			const entries = [
-				{
-					header: {
-						name: "test.txt",
-						size: 5,
-						type: "file" as const,
-					},
-					body: "hello",
-				},
-			];
-
-			const tarBuffer = await packTarWeb(entries);
-
-			// Create a slow stream that sends data in small chunks with delays
-			let started = false;
-			let offset = 0;
-
-			const slowStream = new Readable({
-				objectMode: false,
-				read() {
-					if (!started) {
-						started = true;
-						offset = 0;
-						sendNext();
-					}
-				},
-			});
-
-			function sendNext() {
-				if (offset >= tarBuffer.length) {
-					slowStream.push(null);
-					return;
-				}
-
-				// Send 64 bytes at a time with a small delay
-				const chunkSize = Math.min(64, tarBuffer.length - offset);
-				const chunk = tarBuffer.slice(offset, offset + chunkSize);
-				slowStream.push(chunk);
-				offset += chunkSize;
-
-				// Add a small delay between chunks (longer than default timeout but not too long)
-				setTimeout(() => sendNext(), 10);
-			}
-
-			const unpackStream = unpackTar(destDir, { streamTimeout: Infinity });
-
-			// This should not timeout even though chunks arrive slowly
-			await pipeline(slowStream, unpackStream);
-
-			// Verify the file was extracted correctly
-			const content = await fs.readFile(path.join(destDir, "test.txt"), "utf8");
-			expect(content).toBe("hello");
-		}, 10000);
 	});
 
 	describe("malformed archive handling", () => {
@@ -689,6 +773,74 @@ describe("extract", () => {
 			const files = await fs.readdir(extractDir, { recursive: true });
 			expect(files).toContain("package.json");
 			expect(files.some((f) => f.includes("pages"))).toBe(true);
+		});
+	});
+
+	describe("error handling", () => {
+		it("handles file close errors gracefully without unhandled rejections", async () => {
+			// Test that file close/futimes errors don't cause unhandled rejections
+			// which would crash the process in Node.js >=15
+
+			const destDir = path.join(tmpDir, "extracted");
+			const unhandledRejections: Error[] = [];
+
+			// Set up listener for unhandled rejections
+			const listener = (reason: Error) => {
+				unhandledRejections.push(reason);
+			};
+			process.on("unhandledRejection", listener);
+
+			try {
+				// Create entries with mtime set (triggers futimes in close path)
+				const testTime = new Date("2020-01-01T00:00:00Z");
+				const entries = [
+					{
+						header: {
+							name: "file1.txt",
+							size: 5,
+							type: "file" as const,
+							mode: 0o644,
+							mtime: testTime,
+						},
+						body: "hello",
+					},
+					{
+						header: {
+							name: "file2.txt",
+							size: 5,
+							type: "file" as const,
+							mode: 0o644,
+							mtime: testTime,
+						},
+						body: "world",
+					},
+				];
+
+				const tarBuffer = await packTarWeb(entries);
+				const unpackStream = unpackTar(destDir);
+
+				await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+				// Wait a bit for any potential unhandled rejections to fire
+				await new Promise((resolve) => setTimeout(resolve, 100));
+
+				// Verify no unhandled rejections occurred
+				expect(unhandledRejections).toHaveLength(0);
+
+				// Verify files were extracted successfully
+				const file1 = await fs.readFile(
+					path.join(destDir, "file1.txt"),
+					"utf8",
+				);
+				const file2 = await fs.readFile(
+					path.join(destDir, "file2.txt"),
+					"utf8",
+				);
+				expect(file1).toBe("hello");
+				expect(file2).toBe("world");
+			} finally {
+				process.off("unhandledRejection", listener);
+			}
 		});
 	});
 });

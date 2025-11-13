@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { decoder } from "../../src/tar/utils";
+import { decoder } from "../../src/tar/encoding";
 import { packTar, unpackTar } from "../../src/web/helpers";
 
 describe("repack", () => {

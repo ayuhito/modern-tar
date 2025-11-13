@@ -6,7 +6,7 @@ import type { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { packTar, unpackTar } from "../../src/fs/index.js";
+import { packTar, unpackTar } from "../../src/fs";
 
 describe("stream coordination cases", () => {
 	let tmpDir: string;

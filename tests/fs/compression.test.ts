@@ -131,6 +131,8 @@ describe("fs compression", () => {
 				path.join(extractDir, "large.txt"),
 				"utf-8",
 			);
+			// Check length first to avoid massive diff output
+			expect(extractedLargeContent.length).toBe(largeContent.length);
 			expect(extractedLargeContent).toBe(largeContent);
 
 			// Verify all small files

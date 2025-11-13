@@ -1,14 +1,28 @@
-import { createWriteStream } from "node:fs";
-import * as fs from "node:fs/promises";
 import { cpus } from "node:os";
-import * as path from "node:path";
-import { PassThrough, Writable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { Writable } from "node:stream";
 import { transformHeader } from "../tar/options";
-import type { TarHeader } from "../tar/types";
-import { createTarUnpacker } from "../tar/unpacker";
-import { normalizeHeaderName, normalizeUnicode, validateBounds } from "./path";
+import { createUnpacker } from "../tar/unpacker";
+import { createOperationQueue } from "./concurrency";
+import type { FileSink } from "./file-sink";
+import { createFileSink } from "./file-sink";
+import { createPathCache } from "./path-cache";
 import type { UnpackOptionsFS } from "./types";
+
+/**
+ * Helper to discard body data for filtered entries.
+ * Returns true if complete, false if more data is needed.
+ */
+function discardBody(unpacker: ReturnType<typeof createUnpacker>): boolean {
+	while (!unpacker.isBodyComplete()) {
+		// Callback always returns true to discard data.
+		unpacker.streamBody(() => true);
+		if (!unpacker.isBodyComplete()) return false;
+	}
+
+	while (!unpacker.skipPadding()) return false;
+
+	return true;
+}
 
 /**
  * Extract a tar archive to a directory.
@@ -45,374 +59,192 @@ export function unpackTar(
 	directoryPath: string,
 	options: UnpackOptionsFS = {},
 ): Writable {
-	const { streamTimeout = 5000, ...fsOptions } = options;
-	let timeoutId: NodeJS.Timeout | null = null;
+	const unpacker = createUnpacker(options);
+	const opQueue = createOperationQueue(
+		options.concurrency || cpus().length || 8,
+	);
+	const pathCache = createPathCache(directoryPath, options);
 
-	const { handler, signal } = createFSHandler(directoryPath, fsOptions);
-	const unpacker = createTarUnpacker(handler, fsOptions);
+	// Track current file stream across write() calls for handling backpressure
+	let currentFileStream: FileSink | null = null;
+	let currentWriteCallback: ((chunk: Uint8Array) => boolean) | null = null;
+	let needsDiscardBody = false; // Track if we're in the middle of discarding
 
-	let stream: Writable;
-
-	function resetTimeout() {
-		if (timeoutId) clearTimeout(timeoutId);
-		if (streamTimeout !== Infinity && streamTimeout > 0) {
-			timeoutId = setTimeout(() => {
-				const err = new Error(
-					`Stream timed out after ${streamTimeout}ms of inactivity.`,
-				);
-				stream.destroy(err);
-			}, streamTimeout);
-		}
-	}
-
-	stream = new Writable({
-		write(chunk, _, callback) {
-			resetTimeout(); // Reset timer on every chunk
-			if (signal.aborted) return callback(signal.reason as Error);
+	return new Writable({
+		async write(chunk, _, cb) {
 			try {
 				unpacker.write(chunk);
-				callback();
-			} catch (writeErr) {
-				callback(writeErr as Error);
-			}
-		},
 
-		async final(callback) {
-			if (timeoutId) clearTimeout(timeoutId); // Clean up timer on success
-			try {
-				if (signal.aborted) return callback(signal.reason as Error);
-				unpacker.end();
-				await handler.process();
-				callback();
-			} catch (finalErr) {
-				callback(finalErr as Error);
-			}
-		},
-	});
-
-	stream.on("close", () => {
-		if (timeoutId) clearTimeout(timeoutId);
-	});
-
-	resetTimeout(); // Start the initial timer.
-
-	return stream;
-}
-
-function createFSHandler(directoryPath: string, options: UnpackOptionsFS) {
-	const {
-		maxDepth = 1024,
-		dmode,
-		fmode,
-		concurrency = cpus().length || 8,
-	} = options;
-
-	const abortController = new AbortController();
-	const { signal } = abortController;
-
-	// Queue for managing concurrency.
-	const opQueue: (() => void)[] = [];
-	let activeOps = 0;
-
-	// Build a dependency graph of promise paths to ensure tars on the same path are processed
-	// sequentially while still allowing concurrency for different paths.
-	const pathPromises = new Map<string, Promise<TarHeader["type"]>>();
-	let activeEntryStream: PassThrough | null = null;
-
-	let processingEnded = false;
-	let resolveDrain: () => void;
-	const drainPromise = new Promise<void>((resolve) => {
-		resolveDrain = resolve;
-	});
-
-	const processQueue = () => {
-		// Clear the queue if aborted.
-		if (signal.aborted) opQueue.length = 0;
-
-		// Start new operations while under the concurrency limit.
-		while (activeOps < concurrency && opQueue.length > 0) {
-			activeOps++;
-			const op = opQueue.shift();
-			if (!op) break;
-			op();
-		}
-
-		if (processingEnded && activeOps === 0 && opQueue.length === 0) {
-			resolveDrain();
-		}
-	};
-
-	// Create the destination directory promise first.
-	const destDirPromise = (async () => {
-		const symbolic = normalizeUnicode(path.resolve(directoryPath));
-		await fs.mkdir(symbolic, { recursive: true });
-		try {
-			const real = await fs.realpath(symbolic);
-			return { symbolic, real };
-		} catch (err) {
-			if (signal.aborted) throw signal.reason;
-			throw err;
-		}
-	})();
-	destDirPromise.catch((err) => {
-		if (!signal.aborted) abortController.abort(err);
-	});
-
-	// Recursively ensure all parent directories exist.
-	const ensureDirectoryExists = (
-		dirPath: string,
-	): Promise<TarHeader["type"]> => {
-		// Check cache first.
-		let promise = pathPromises.get(dirPath);
-		if (promise) return promise;
-
-		// If the directory is the destination directory, it already exists.
-		promise = (async (): Promise<TarHeader["type"]> => {
-			if (signal.aborted) throw signal.reason;
-
-			const destDir = await destDirPromise;
-			if (dirPath === destDir.symbolic) return "directory";
-
-			// Ensure parent directory exists first.
-			await ensureDirectoryExists(path.dirname(dirPath));
-
-			if (signal.aborted) throw signal.reason;
-
-			// Check if the directory exists.
-			try {
-				const stat = await fs.lstat(dirPath);
-				if (stat.isDirectory()) return "directory";
-
-				// If it's a symlink, ensure it points to a directory within bounds.
-				if (stat.isSymbolicLink()) {
-					const realPath = await fs.realpath(dirPath);
-					validateBounds(
-						realPath,
-						destDir.real,
-						`Symlink "${dirPath}" points outside the extraction directory.`,
-					);
-					const realStat = await fs.stat(realPath);
-					if (realStat.isDirectory()) return "directory";
-				}
-				throw new Error(`"${dirPath}" is not a valid directory component.`);
-			} catch (err: unknown) {
-				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-					await fs.mkdir(dirPath, { mode: dmode });
-					return "directory";
-				}
-				throw err;
-			}
-		})();
-
-		pathPromises.set(dirPath, promise);
-		return promise;
-	};
-
-	const handler = {
-		onHeader(header: TarHeader) {
-			if (signal.aborted) return;
-
-			activeEntryStream = new PassThrough({
-				// Use 512KB buffer for files > 1MB.
-				highWaterMark: header.size > 1048576 ? 524288 : undefined,
-			});
-			const entryStream = activeEntryStream;
-
-			// Queue the operation.
-			const startOperation = () => {
-				let opPromise: Promise<TarHeader["type"]>;
-				try {
-					const transformed = transformHeader(header, options);
-					if (!transformed) {
-						entryStream.resume();
-						activeOps--;
-						processQueue();
+				// If we're in the middle of discarding a body, continue it
+				if (needsDiscardBody) {
+					if (!discardBody(unpacker)) {
+						// Still need more data
+						cb();
 						return;
 					}
 
-					// Normalize and resolve the target path.
-					const name = normalizeHeaderName(transformed.name);
-					const target = path.join(path.resolve(directoryPath), name);
-
-					// Chain onto any prior operation for this path.
-					const priorOpPromise =
-						pathPromises.get(target) || Promise.resolve(undefined);
-
-					// Start the operation promise chain.
-					opPromise = priorOpPromise.then(async (priorOp) => {
-						if (signal.aborted) throw signal.reason;
-						if (priorOp) {
-							const isConflict =
-								(priorOp === "directory" && transformed.type !== "directory") ||
-								(priorOp !== "directory" && transformed.type === "directory");
-
-							if (isConflict)
-								throw new Error(
-									`Path conflict ${transformed.type} over existing ${priorOp} at "${transformed.name}"`,
-								);
-						}
-
-						try {
-							const destDir = await destDirPromise;
-
-							// Prevent ReDOS via deep paths.
-							if (maxDepth !== Infinity && name.split("/").length > maxDepth)
-								throw new Error("Tar exceeds max specified depth.");
-
-							const outPath = path.join(destDir.symbolic, name);
-							validateBounds(
-								outPath,
-								destDir.symbolic,
-								`Entry "${transformed.name}" points outside the extraction directory.`,
-							);
-
-							// Ensure parent directory exists.
-							const parentDir = path.dirname(outPath);
-							await ensureDirectoryExists(parentDir);
-
-							switch (transformed.type) {
-								case "directory":
-									await fs.mkdir(outPath, {
-										recursive: true,
-										mode: dmode ?? transformed.mode,
-									});
-									break;
-
-								case "file": {
-									const fileStream = createWriteStream(outPath, {
-										mode: fmode ?? transformed.mode,
-										// Use 512KB buffer for files > 1MB.
-										highWaterMark:
-											transformed.size > 1048576 ? 524288 : undefined,
-									});
-									await pipeline(entryStream, fileStream);
-									break;
-								}
-
-								case "symlink": {
-									const { linkname } = transformed;
-									if (!linkname) return transformed.type;
-									const target = path.resolve(parentDir, linkname);
-									validateBounds(
-										target,
-										destDir.symbolic,
-										`Symlink "${linkname}" points outside the extraction directory.`,
-									);
-									await fs.symlink(linkname, outPath);
-									break;
-								}
-
-								case "link": {
-									const { linkname } = transformed;
-									if (!linkname) return transformed.type;
-
-									// Resolve the hardlink target path and ensure it's within destDir.
-									const normalizedLink = normalizeUnicode(linkname);
-									if (path.isAbsolute(normalizedLink)) {
-										throw new Error(
-											`Hardlink "${linkname}" points outside the extraction directory.`,
-										);
-									}
-
-									// This is the symbolic path to the link's target inside the extraction dir.
-									const linkTarget = path.join(
-										destDir.symbolic,
-										normalizedLink,
-									);
-									validateBounds(
-										linkTarget,
-										destDir.symbolic,
-										`Hardlink "${linkname}" points outside the extraction directory.`,
-									);
-									await ensureDirectoryExists(path.dirname(linkTarget));
-
-									// Resolve the real path of the parent directory which follows symlinks.
-									const realTargetParent = await fs.realpath(
-										path.dirname(linkTarget),
-									);
-									const realLinkTarget = path.join(
-										realTargetParent,
-										path.basename(linkTarget),
-									);
-
-									// Check that the real path is within the destination directory.
-									validateBounds(
-										realLinkTarget,
-										destDir.real,
-										`Hardlink "${linkname}" points outside the extraction directory.`,
-									);
-
-									// A self-referential hardlink should be a noop.
-									if (linkTarget === outPath) return transformed.type;
-
-									// Wait for the target to be created if it is in the map.
-									const targetPromise = pathPromises.get(linkTarget);
-									if (targetPromise) await targetPromise;
-
-									await fs.link(linkTarget, outPath);
-									break;
-								}
-
-								default:
-									return transformed.type; // Unsupported type
-							}
-
-							// Set modification time if available.
-							if (transformed.mtime) {
-								const utimes =
-									transformed.type === "symlink" ? fs.lutimes : fs.utimes;
-								await utimes(
-									outPath,
-									transformed.mtime,
-									transformed.mtime,
-								).catch(() => {});
-							}
-
-							return transformed.type;
-						} finally {
-							// Ensure the entry stream is drained to avoid blocking.
-							if (!entryStream.readableEnded) entryStream.resume();
-						}
-					});
-
-					pathPromises.set(target, opPromise);
-				} catch (err) {
-					opPromise = Promise.reject(err);
-					abortController.abort(err as Error);
+					needsDiscardBody = false;
 				}
 
-				opPromise
-					.catch((err) => abortController.abort(err))
-					.finally(() => {
-						activeOps--;
-						processQueue();
-					});
-			};
+				// If we're in the middle of streaming a file body, continue it
+				if (currentFileStream && currentWriteCallback) {
+					let needsDrain = false;
+					const writeCallback = currentWriteCallback;
 
-			opQueue.push(startOperation);
-			processQueue();
+					while (!unpacker.isBodyComplete()) {
+						needsDrain = false;
+						const fed = unpacker.streamBody(writeCallback);
+
+						if (fed === 0) {
+							if (needsDrain) {
+								await currentFileStream.waitDrain();
+							} else {
+								cb(); // Need more data.
+								return;
+							}
+						}
+					}
+
+					// Body complete, skip padding.
+					while (!unpacker.skipPadding()) {
+						cb();
+						return;
+					}
+
+					// Padding complete, close file.
+					const streamToClose = currentFileStream;
+					if (streamToClose) opQueue.add(() => streamToClose.end());
+
+					currentFileStream = null;
+					currentWriteCallback = null;
+				}
+
+				// Process all available headers.
+				while (true) {
+					const header = unpacker.readHeader();
+
+					// EOF shouldn't happen in write(), but handle it.
+					if (header === undefined) {
+						cb();
+						return;
+					}
+
+					// Need more data for header.
+					if (header === null) {
+						cb();
+						return;
+					}
+
+					// Transform header with options.
+					const transformedHeader = transformHeader(header, options);
+					// Filtered out.
+					if (!transformedHeader) {
+						if (!discardBody(unpacker)) {
+							needsDiscardBody = true;
+							cb();
+							return;
+						}
+
+						continue;
+					}
+
+					// Prepare filesystem path before writing body.
+					const prep = await opQueue.add(() =>
+						pathCache.preparePath(transformedHeader),
+					);
+
+					// Handle body based on entry type
+					if (prep.type === "file") {
+						const fileStream = createFileSink(prep.outPath, {
+							mode: options.fmode ?? transformedHeader.mode ?? undefined,
+							mtime: transformedHeader.mtime ?? undefined,
+						});
+
+						// Stream body from unpacker to file.
+						let needsDrain = false;
+						const writeCallback = (chunk: Uint8Array): boolean => {
+							const writeOk = fileStream.write(chunk);
+							if (!writeOk) needsDrain = true;
+							return writeOk;
+						};
+
+						while (!unpacker.isBodyComplete()) {
+							needsDrain = false;
+							const fed = unpacker.streamBody(writeCallback);
+
+							if (fed === 0) {
+								if (needsDrain) {
+									await fileStream.waitDrain();
+								} else {
+									// Need more data, so save state for continuation.
+									currentFileStream = fileStream;
+									currentWriteCallback = writeCallback;
+									cb();
+									return;
+								}
+							}
+						}
+
+						// Skip padding.
+						while (!unpacker.skipPadding()) {
+							// Need more data, so save state for padding continuation.
+							currentFileStream = fileStream;
+							currentWriteCallback = writeCallback;
+							cb();
+							return;
+						}
+
+						// Close without await.
+						opQueue.add(() => fileStream.end());
+					} else {
+						// No body data or already handled.
+						if (!discardBody(unpacker)) {
+							needsDiscardBody = true;
+							cb();
+							return;
+						}
+					}
+				}
+			} catch (err) {
+				cb(err as Error);
+			}
 		},
 
-		onData(chunk: Uint8Array) {
-			if (!signal.aborted) activeEntryStream?.write(chunk);
+		async final(cb) {
+			try {
+				// Close out remaining buffered data and flush the async operation queue.
+				unpacker.end();
+				unpacker.validateEOF();
+				// Wait for all file ops to complete.
+				await opQueue.onIdle();
+				// Now that all files are written, create the hardlinks.
+				await pathCache.applyLinks();
+				cb();
+			} catch (err) {
+				cb(err as Error);
+			}
 		},
 
-		onEndEntry() {
-			activeEntryStream?.end();
-			activeEntryStream = null;
-		},
+		destroy(error, callback) {
+			// Handle stream destruction asynchronously to prevent blocking
+			(async () => {
+				// Clean up any active file stream and reset state.
+				if (currentFileStream) {
+					currentFileStream.destroy(error ?? undefined);
+					currentFileStream = null;
+					currentWriteCallback = null;
+				}
 
-		onError(error: Error) {
-			abortController.abort(error);
+				// Drain active file operations.
+				await opQueue.onIdle();
+			})().then(
+				() => callback(error ?? null),
+				// If there is an error during cleanup, pass it to the callback instead.
+				(e) =>
+					callback(
+						error ?? (e instanceof Error ? e : new Error("Stream destroyed")),
+					),
+			);
 		},
-
-		async process() {
-			processingEnded = true;
-			processQueue();
-			await drainPromise;
-			if (signal.aborted) throw signal.reason;
-		},
-	};
-
-	return { handler, signal };
+	});
 }

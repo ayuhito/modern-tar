@@ -65,9 +65,12 @@ export async function runUnpackingBenchmarks() {
 			.add(
 				`modern-tar: Unpack ${testCase.name}`,
 				async () => {
-					const readStream = fs.createReadStream(tarballPath);
-					const extractStream = unpackTar(extractDir);
-					await pipeline(readStream, extractStream);
+					const readStream = fs.createReadStream(tarballPath, {
+						// Recommended tuning params for large files.
+						highWaterMark: 256 * 1024, // 256 KB
+					});
+					const unpackStream = unpackTar(extractDir);
+					await pipeline(readStream, unpackStream);
 				},
 				{
 					async beforeEach() {

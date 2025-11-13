@@ -156,7 +156,9 @@ const fileStream = createWriteStream('./project.tar');
 await pipeline(tarStream, fileStream);
 
 // Extract a tar file to a directory
-const tarReadStream = createReadStream('./project.tar');
+const tarReadStream = createReadStream('./project.tar', {
+	highWaterMark: 256 * 1024 // 256 KB for optimal performance
+});
 const extractStream = unpackTar('./output/directory');
 await pipeline(tarReadStream, extractStream);
 ```
@@ -176,7 +178,9 @@ const packStream = packTar('./my/project', {
 });
 
 // Unpack with advanced options
-const sourceStream = createReadStream('./archive.tar');
+const sourceStream = createReadStream('./archive.tar', {
+	highWaterMark: 256 * 1024 // 256 KB for optimal performance
+});
 const extractStream = unpackTar('./output', {
 	// Core options
 	strip: 1, // Remove first directory level
@@ -187,8 +191,7 @@ const extractStream = unpackTar('./output', {
 	fmode: 0o644, // Override file permissions
 	dmode: 0o755, // Override directory permissions
 	maxDepth: 50,  // Limit extraction depth for security (default: 1024)
-	concurrency: 8, // Limit concurrent filesystem operations (default: CPU cores)
-	streamTimeout: 10000 // Timeout after 10 seconds of inactivity (default: 5000ms)
+	concurrency: 8 // Limit concurrent filesystem operations (default: CPU cores)
 });
 
 await pipeline(sourceStream, extractStream);
@@ -205,7 +208,6 @@ import { pipeline } from 'node:stream/promises';
 const sources: TarSource[] = [
   { type: 'file', source: './package.json', target: 'project/package.json' },
   { type: 'directory', source: './src', target: 'project/src' },
-  
   { type: 'content', content: 'Hello World!', target: 'project/hello.txt' },
   { type: 'content', content: '#!/bin/bash\necho "Executable"', target: 'bin/script.sh', mode: 0o755 },
   { type: 'stream', content: createReadStream('./large-file.bin'), target: 'project/data.bin', size: 1048576 },
@@ -229,13 +231,21 @@ const tarStream = packTar('./my/project');
 await pipeline(tarStream, createGzip(), createWriteStream('./project.tar.gz'));
 
 // Decompress and extract .tar.gz
-const gzipStream = createReadStream('./project.tar.gz');
+const gzipStream = createReadStream('./project.tar.gz', {
+	highWaterMark: 256 * 1024 // 256 KB for optimal performance
+});
 await pipeline(gzipStream, createGunzip(), unpackTar('./output'));
 ```
 
 ## API Reference
 
 See the [API Reference](./REFERENCE.md).
+
+# Benchmarks
+
+Current benchmarks indicate we're much faster than other popular tar libraries for small file archives (packing and unpacking). On the other hand, larger files hit an I/O bottleneck resulting in similar performance between libraries.
+
+See the [Results](./benchmarks/README.md).
 
 ## Compatibility
 

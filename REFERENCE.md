@@ -149,12 +149,13 @@ import { unpackTar } from 'modern-tar/fs';
 import { createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 
-const tarStream = createReadStream('backup.tar');
+const tarStream = createReadStream('backup.tar', {
+  highWaterMark: 256 * 1024 // 256 KB for optimal performance
+});
 const extractStream = unpackTar('/restore/location', {
   strip: 1,
   fmode: 0o644, // Set consistent file permissions
   strict: true, // Enable strict validation
-  streamTimeout: 10000, // Timeout after 10 seconds of inactivity
 });
 await pipeline(tarStream, extractStream);
 ```
@@ -215,12 +216,6 @@ interface UnpackOptions extends DecoderOptions {
   filter?: (header: TarHeader) => boolean;
   /** Transform function to modify tar headers before extraction */
   map?: (header: TarHeader) => TarHeader;
-  /**
-   * The number of milliseconds of inactivity before a stream is considered stalled.
-   * Prevents hangs when processing corrupted or incomplete archives.
-   * @default 5000
-   */
-  streamTimeout?: number;
 }
 ```
 
@@ -291,8 +286,7 @@ interface UnpackOptionsFS extends UnpackOptions {
   filter?: (header: TarHeader) => boolean;
   /** Transform function to modify headers before extraction */
   map?: (header: TarHeader) => TarHeader;
-  /** Stream timeout in milliseconds for detecting stalled streams */
-  streamTimeout?: number;
+
 
   // Filesystem-specific options:
   /** Default mode for created directories (e.g., 0o755). Overrides tar header mode */
