@@ -118,7 +118,10 @@ describe("createTarDecoder", () => {
 		const firstResultPromise = Promise.race([
 			reader.read(),
 			new Promise<never>((_, reject) =>
-				setTimeout(() => reject(new Error("Timed out waiting for first entry")), 100),
+				setTimeout(
+					() => reject(new Error("Timed out waiting for first entry")),
+					100,
+				),
 			),
 		]);
 
@@ -137,7 +140,10 @@ describe("createTarDecoder", () => {
 			const nextResult = await Promise.race([
 				reader.read(),
 				new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new Error("Timed out waiting for next entry")), 100),
+					setTimeout(
+						() => reject(new Error("Timed out waiting for next entry")),
+						100,
+					),
 				),
 			]);
 			expect(nextResult.done).toBe(false);
