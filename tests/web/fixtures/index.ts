@@ -38,3 +38,7 @@ export const LODASH_TGZ = join(__dirname, "lodash-4.17.21.tgz");
 export const NEXT_SWC_TGZ = join(__dirname, "next-swc-linux-14.2.15.tgz");
 export const SHARP_TGZ = join(__dirname, "sharp-0.33.5.tgz");
 export const ELECTRON_TGZ = join(__dirname, "electron-33.0.2.tgz");
+export const NODE_V25_DARWIN_ARM64_TAR_GZ = join(
+	__dirname,
+	"node-v25.2.0-darwin-arm64.tar.gz",
+);

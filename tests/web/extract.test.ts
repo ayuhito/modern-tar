@@ -158,6 +158,38 @@ describe("createTarDecoder", () => {
 		expect(names).toEqual(["file.txt", "dir/", "dir/nested.txt"]);
 	});
 
+	it("iterate over headers by cancelling", async () => {
+		const archive = await createBaseArchive([
+			{ header: { name: "dir/", type: "directory", size: 0 } },
+			{
+				header: { name: "dir/file.txt", type: "file", size: 5 },
+				body: "hello",
+			},
+			{
+				header: { name: "dir/empty.txt", type: "file", size: 0 },
+				body: new Uint8Array(),
+			},
+		]);
+
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(archive);
+				controller.close();
+			},
+		});
+
+		const decoder = createTarDecoder();
+		const entryStream = stream.pipeThrough(decoder);
+
+		const names: string[] = [];
+		for await (const entry of entryStream) {
+			names.push(entry.header.name);
+			await entry.body?.cancel();
+		}
+
+		expect(names).toEqual(["dir/", "dir/file.txt", "dir/empty.txt"]);
+	});
+
 	it("rejects a stream with an invalid checksum in strict mode", async () => {
 		const archive = await createBaseArchive([
 			{ header: { name: "test.txt", type: "file", size: 0 }, body: "" },

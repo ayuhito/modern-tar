@@ -9,22 +9,6 @@ import { createPathCache } from "./path-cache";
 import type { UnpackOptionsFS } from "./types";
 
 /**
- * Helper to discard body data for filtered entries.
- * Returns true if complete, false if more data is needed.
- */
-function discardBody(unpacker: ReturnType<typeof createUnpacker>): boolean {
-	while (!unpacker.isBodyComplete()) {
-		// Callback always returns true to discard data.
-		unpacker.streamBody(() => true);
-		if (!unpacker.isBodyComplete()) return false;
-	}
-
-	while (!unpacker.skipPadding()) return false;
-
-	return true;
-}
-
-/**
  * Extract a tar archive to a directory.
  *
  * Returns a Node.js [`Writable`](https://nodejs.org/api/stream.html#class-streamwritable)
@@ -77,7 +61,7 @@ export function unpackTar(
 
 				// If we're in the middle of discarding a body, continue it
 				if (needsDiscardBody) {
-					if (!discardBody(unpacker)) {
+					if (!unpacker.skipEntry()) {
 						// Still need more data
 						cb();
 						return;
@@ -139,7 +123,7 @@ export function unpackTar(
 					const transformedHeader = transformHeader(header, options);
 					// Filtered out.
 					if (!transformedHeader) {
-						if (!discardBody(unpacker)) {
+						if (!unpacker.skipEntry()) {
 							needsDiscardBody = true;
 							cb();
 							return;
@@ -198,7 +182,7 @@ export function unpackTar(
 						opQueue.add(() => fileStream.end());
 					} else {
 						// No body data or already handled.
-						if (!discardBody(unpacker)) {
+						if (!unpacker.skipEntry()) {
 							needsDiscardBody = true;
 							cb();
 							return;

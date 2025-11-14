@@ -76,15 +76,25 @@ await writer.close();
 // When done adding entries, finalize the archive
 controller.finalize();
 
-// `readable` now contains the complete tar archive which can be piped or processed
-const tarStream = readable;
-
-// Create a tar decoder
-const decoder = createTarDecoder();
-const decodedStream = tarStream.pipeThrough(decoder);
+// Pipe the archive right into a decoder
+const decodedStream = readable.pipeThrough(createTarDecoder());
 for await (const entry of decodedStream) {
 	console.log(`Decoded: ${entry.header.name}`);
-	// Process `entry.body` stream as needed
+
+	const shouldSkip = entry.header.name.endsWith(".md");
+	if (shouldSkip) {
+		// You MUST drain the body with cancel() to proceed to the next entry or read it fully,
+		// otherwise the stream will stall.
+		await entry.body.cancel();
+		continue;
+	}
+
+	const reader = entry.body.getReader();
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		processChunk(value);
+	}
 }
 ```
 

@@ -16,7 +16,21 @@ import type { ParsedTarEntry } from "./types";
  *
  * for await (const entry of entriesStream) {
  *  console.log(`Entry: ${entry.header.name}`);
- *  // Process entry.body stream as needed
+ *
+ *  const shouldSkip = entry.header.name.endsWith('.md');
+ *  if (shouldSkip) {
+ *   // You MUST drain the body with cancel() to proceed to the next entry or read it fully,
+ * 	 // otherwise the stream will stall.
+ *   await entry.body.cancel();
+ *   continue;
+ *  }
+ *
+ *  const reader = entry.body.getReader();
+ *  while (true) {
+ * 	 const { done, value } = await reader.read();
+ * 	 if (done) break;
+ * 	 processChunk(value);
+ *  }
  * }
  */
 export function createTarDecoder(
@@ -65,6 +79,8 @@ export function createTarDecoder(
 			while (!controllerTerminated) {
 				// Look for the next header.
 				if (!bodyController) {
+					if (!unpacker.skipEntry()) break;
+
 					// Respect backpressure on the main stream.
 					if (!force && (controller.desiredSize ?? 0) < 0) break;
 
@@ -83,6 +99,7 @@ export function createTarDecoder(
 						// If the consumer cancels this body stream, clear the controller.
 						cancel: () => {
 							bodyController = null;
+							pump(controller);
 						},
 					});
 

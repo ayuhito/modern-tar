@@ -199,25 +199,21 @@ export function createUnpacker(options: DecoderOptions = {}) {
 			return true;
 		},
 
-		hasEnded(): boolean {
-			return ended;
-		},
+		/**
+		 * Discards the current entry's body and its padding.
+		 *
+		 * Returns true when the full entry has been skipped, false if more
+		 * data is required.
+		 */
+		skipEntry(): boolean {
+			if (state !== STATE_BODY || !currentEntry) return true;
 
-		/** Check if unpacker likely has enough data to make progress without waiting. */
-		canContinueProcessing(): boolean {
-			// If we're waiting for a header, we need at least BLOCK_SIZE bytes
-			if (state === STATE_HEADER) return available() >= BLOCK_SIZE;
-
-			// If we're in body state, we can process if we have any data or need to skip padding
-			if (state === STATE_BODY && currentEntry) {
-				return currentEntry.remaining === 0
-					? // If body is complete, we just need to skip padding
-						available() >= currentEntry.padding
-					: // If body isn't complete, any data is useful
-						available() > 0;
+			while (!unpacker.isBodyComplete()) {
+				const fed = unpacker.streamBody(() => true);
+				if (fed === 0) return false;
 			}
 
-			return true;
+			return unpacker.skipPadding();
 		},
 
 		validateEOF() {
