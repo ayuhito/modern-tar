@@ -7,9 +7,20 @@ export const normalizeUnicode = (s: string): string => {
 	let result = unicodeCache.get(s);
 
 	// On a cache hit, delete the entry so it can be re-added at the end.
-	if (result !== undefined) unicodeCache.delete(s);
+	if (result !== undefined) {
+		unicodeCache.delete(s);
+	} else {
+		// On a cache miss, perform normalization if necessary.
+		result = s;
 
-	result = result ?? s.normalize("NFD");
+		// Loop over the string and check for non-ASCII characters.
+		// This is faster than calling normalize on every string.
+		for (let i = 0; i < s.length; i++)
+			if (s.charCodeAt(i) & 0x80) {
+				result = s.normalize("NFD");
+				break;
+			}
+	}
 	unicodeCache.set(s, result);
 
 	// Delete the oldest entry if we exceed the max size.
