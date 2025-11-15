@@ -108,13 +108,7 @@ export function unpackTar(
 					const header = unpacker.readHeader();
 
 					// EOF shouldn't happen in write(), but handle it.
-					if (header === undefined) {
-						cb();
-						return;
-					}
-
-					// Need more data for header.
-					if (header === null) {
+					if (header === undefined || header === null) {
 						cb();
 						return;
 					}
@@ -133,13 +127,13 @@ export function unpackTar(
 					}
 
 					// Prepare filesystem path before writing body.
-					const prep = await opQueue.add(() =>
+					const outPath = await opQueue.add(() =>
 						pathCache.preparePath(transformedHeader),
 					);
 
-					// Handle body based on entry type
-					if (prep.type === "file") {
-						const fileStream = createFileSink(prep.outPath, {
+					// If output path is provided, write the file.
+					if (outPath) {
+						const fileStream = createFileSink(outPath, {
 							mode: options.fmode ?? transformedHeader.mode ?? undefined,
 							mtime: transformedHeader.mtime ?? undefined,
 						});

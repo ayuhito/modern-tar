@@ -5,6 +5,8 @@ import type { TarHeader } from "../tar/types";
 import { normalizeHeaderName, normalizeUnicode, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
+const ENOENT = "ENOENT";
+
 /**
  * Creates a path validation, security check, and directory creation manager,
  * ensuring all filesystem writes are safe.
@@ -31,7 +33,7 @@ export const createPathCache = (
 		try {
 			await fs.mkdir(symbolic, { recursive: true });
 		} catch (err: unknown) {
-			if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+			if ((err as NodeJS.ErrnoException).code === ENOENT) {
 				// Handle race condition where parent directory was removed between resolve and mkdir.
 				const parentDir = path.dirname(symbolic);
 				if (parentDir === symbolic) throw err;
@@ -50,7 +52,7 @@ export const createPathCache = (
 			return { symbolic, real };
 		} catch (err: unknown) {
 			// Handle race condition where directory was deleted after mkdir.
-			if ((err as NodeJS.ErrnoException).code === "ENOENT")
+			if ((err as NodeJS.ErrnoException).code === ENOENT)
 				return { symbolic, real: symbolic };
 
 			throw err;
@@ -130,7 +132,7 @@ export const createPathCache = (
 						// If the symlink points to a directory, return early.
 						if (realStat.isDirectory()) return;
 					} catch (err) {
-						if ((err as NodeJS.ErrnoException).code === "ENOENT")
+						if ((err as NodeJS.ErrnoException).code === ENOENT)
 							throw new Error(
 								`Symlink "${dirPath}" points outside the extraction directory.`,
 							);
@@ -142,7 +144,7 @@ export const createPathCache = (
 				// Path exists but is not a directory.
 				throw new Error(`"${dirPath}" is not a valid directory component.`);
 			} catch (err: unknown) {
-				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+				if ((err as NodeJS.ErrnoException).code === ENOENT) {
 					// Path does not exist.
 					await fs.mkdir(dirPath, { mode: mode ?? options.dmode });
 					return;
@@ -161,11 +163,10 @@ export const createPathCache = (
 		/**
 		 * Prepares a filesystem path for extraction based on TAR header.
 		 * Handles security validation, conflict detection, and path preparation.
+		 *
+		 * @returns The output path if the entry is a file that needs to be streamed.
 		 */
-		async preparePath(header: TarHeader): Promise<{
-			outPath: string;
-			type: "file" | "link" | "symlink" | "dir" | "skip";
-		}> {
+		async preparePath(header: TarHeader): Promise<string | undefined> {
 			const { name, linkname, type, mode, mtime } = header;
 			const { maxDepth = 1024, dmode } = options;
 
@@ -201,7 +202,7 @@ export const createPathCache = (
 					);
 
 				// Soft conflict (same type), skip duplicate entry.
-				return { outPath, type: "skip" as const };
+				return;
 			}
 
 			const parentDir = path.dirname(outPath);
@@ -218,20 +219,20 @@ export const createPathCache = (
 							// Skip errors.
 						});
 
-					return { outPath, type: "dir" as const };
+					return;
 				}
 
 				case FILE: {
 					pathConflicts.set(normalizedName, FILE);
 					await prepareDirectory(parentDir);
-					return { outPath, type: "file" as const };
+					return outPath;
 				}
 
 				case SYMLINK: {
 					pathConflicts.set(normalizedName, SYMLINK);
 
 					// Handle empty linkname.
-					if (!linkname) return { outPath, type: "symlink" as const };
+					if (!linkname) return;
 
 					await prepareDirectory(parentDir);
 
@@ -252,14 +253,14 @@ export const createPathCache = (
 							// Skip errors.
 						});
 
-					return { outPath, type: "symlink" as const };
+					return;
 				}
 
 				case LINK: {
 					pathConflicts.set(normalizedName, LINK);
 
 					// Handle empty linkname.
-					if (!linkname) return { outPath, type: "link" as const };
+					if (!linkname) return;
 
 					// Hardlinks must be relative paths.
 					const normalizedLink = normalizeUnicode(linkname);
@@ -302,12 +303,12 @@ export const createPathCache = (
 						deferredLinks.push({ linkTarget, outPath });
 					}
 
-					return { outPath, type: "link" as const };
+					return;
 				}
 
 				default:
 					// Unknown entry type.
-					return { outPath, type: "skip" as const };
+					return;
 			}
 		},
 
@@ -320,7 +321,7 @@ export const createPathCache = (
 				try {
 					await fs.link(linkTarget, outPath);
 				} catch (err: unknown) {
-					if ((err as NodeJS.ErrnoException).code === "ENOENT")
+					if ((err as NodeJS.ErrnoException).code === ENOENT)
 						throw new Error(
 							`Hardlink target "${linkTarget}" does not exist for link at "${outPath}".`,
 						);
