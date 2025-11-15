@@ -131,7 +131,7 @@ export function unpackTar(
 						pathCache.preparePath(transformedHeader),
 					);
 
-					// If output path is provided, write the file.
+					// Only file entries return a path for streaming.
 					if (outPath) {
 						const fileStream = createFileSink(outPath, {
 							mode: options.fmode ?? transformedHeader.mode ?? undefined,
