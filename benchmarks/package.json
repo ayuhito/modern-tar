@@ -4,17 +4,17 @@
 	"version": "0.0.0",
 	"type": "module",
 	"scripts": {
-		"bench": "node --experimental-strip-types run.bench.ts",
-		"bench:pack": "node --experimental-strip-types run.pack.ts",
-		"bench:unpack": "node --experimental-strip-types run.unpack.ts",
-		"deopt": "dexnode run.unpack.ts -- --experimental-strip-types ",
+		"bench": "node --expose-gc --experimental-strip-types run.bench.ts",
+		"bench:pack": "node --expose-gc --experimental-strip-types run.pack.ts",
+		"bench:unpack": "node --expose-gc --experimental-strip-types run.unpack.ts",
+		"deopt": "dexnode run.unpack.ts -- --expose-gc --experimental-strip-types ",
 		"fixtures": "node --experimental-strip-types fixtures/generate.ts"
 	},
 	"dependencies": {
+		"mitata": "^1.0.34",
 		"modern-tar": "file:..",
 		"tar": "^7.5.1",
-		"tar-fs": "^3.1.1",
-		"tinybench": "^5.0.1"
+		"tar-fs": "^3.1.1"
 	},
 	"devDependencies": {
 		"@types/node": "^24.5.2",

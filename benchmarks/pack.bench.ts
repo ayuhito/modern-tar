@@ -3,11 +3,10 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { barplot, bench, group, run, summary } from "mitata";
 import { packTar } from "modern-tar/fs";
 import * as tar from "tar";
 import * as tarfs from "tar-fs";
-
-import { Bench } from "tinybench";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,6 +16,7 @@ const TARBALLS_DIR = path.join(TMP_DIR, "tarballs");
 const SMALL_FILES_DIR = path.resolve(__dirname, "data/small-files");
 const LARGE_FILES_DIR = path.resolve(__dirname, "data/large-files");
 const NESTED_FILES_DIR = path.resolve(__dirname, "data/nested-files");
+const GIGANTIC_FILES_DIR = path.resolve(__dirname, "data/gigantic-files");
 
 async function setup() {
 	await fsp.rm(TMP_DIR, { recursive: true, force: true });
@@ -34,6 +34,17 @@ function createUniqueTarballPath(): string {
 	);
 }
 
+async function withTemporaryTarball(
+	fn: (tarballPath: string) => Promise<void>,
+): Promise<void> {
+	const tarballPath = createUniqueTarballPath();
+	try {
+		await fn(tarballPath);
+	} finally {
+		await fsp.rm(tarballPath, { force: true });
+	}
+}
+
 export async function runPackingBenchmarks() {
 	await setup();
 	console.log("\nPacking benchmarks...");
@@ -42,72 +53,45 @@ export async function runPackingBenchmarks() {
 		{ name: "Many Small Files (2500 x 1KB)", dir: SMALL_FILES_DIR },
 		{ name: "Many Small Nested Files (2500 x 1KB)", dir: NESTED_FILES_DIR },
 		{ name: "Few Large Files (5 x 20MB)", dir: LARGE_FILES_DIR },
+		{ name: "Huge Files (2 x 1GB)", dir: GIGANTIC_FILES_DIR },
 	]) {
-		const bench = new Bench({
-			time: 15000,
-			iterations: 30,
-			warmupTime: 5000,
-			warmupIterations: 10,
+		group(testCase.name, () => {
+			const registerBench = (
+				label: string,
+				fn: (tarballPath: string) => Promise<void>,
+			) =>
+				bench(label, async () => {
+					await withTemporaryTarball(async (tarballPath) => {
+						await fn(tarballPath);
+					});
+				}).gc("inner");
+
+			barplot(() => {
+				summary(() => {
+					registerBench(`modern-tar: ${testCase.name}`, async (tarballPath) => {
+						const writeStream = fs.createWriteStream(tarballPath);
+						await pipeline(packTar(testCase.dir), writeStream);
+					});
+
+					registerBench(`node-tar: ${testCase.name}`, async (tarballPath) => {
+						await tar.c(
+							{
+								file: tarballPath,
+								C: path.dirname(testCase.dir),
+							},
+							[path.basename(testCase.dir)],
+						);
+					});
+
+					registerBench(`tar-fs: ${testCase.name}`, async (tarballPath) => {
+						const writeStream = fs.createWriteStream(tarballPath);
+						await pipeline(tarfs.pack(testCase.dir), writeStream);
+					});
+				});
+			});
 		});
-
-		let uniqueTarballPath: string;
-
-		bench
-			.add(
-				`modern-tar: Pack ${testCase.name}`,
-				async () => {
-					const writeStream = fs.createWriteStream(uniqueTarballPath);
-					await pipeline(packTar(testCase.dir), writeStream);
-				},
-				{
-					beforeEach() {
-						uniqueTarballPath = createUniqueTarballPath();
-					},
-					async afterEach() {
-						await fsp.rm(uniqueTarballPath, { force: true });
-					},
-				},
-			)
-			.add(
-				`node-tar: Pack ${testCase.name}`,
-				async () => {
-					await tar.c(
-						{
-							file: uniqueTarballPath,
-							C: path.dirname(testCase.dir),
-						},
-						[path.basename(testCase.dir)],
-					);
-				},
-				{
-					beforeEach() {
-						uniqueTarballPath = createUniqueTarballPath();
-					},
-					async afterEach() {
-						await fsp.rm(uniqueTarballPath, { force: true });
-					},
-				},
-			)
-			.add(
-				`tar-fs: Pack ${testCase.name}`,
-				async () => {
-					const writeStream = fs.createWriteStream(uniqueTarballPath);
-					await pipeline(tarfs.pack(testCase.dir), writeStream);
-				},
-				{
-					beforeEach() {
-						uniqueTarballPath = createUniqueTarballPath();
-					},
-					async afterEach() {
-						await fsp.rm(uniqueTarballPath, { force: true });
-					},
-				},
-			);
-
-		await bench.run();
-		console.log(`\n--- ${testCase.name} ---`);
-		console.table(bench.table());
 	}
 
+	await run({ format: { mitata: { name: "fixed" } } });
 	await teardown();
 }
