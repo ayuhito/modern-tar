@@ -16,7 +16,7 @@ export const normalizeUnicode = (s: string): string => {
 		// Loop over the string and check for non-ASCII characters.
 		// This is faster than calling normalize on every string.
 		for (let i = 0; i < s.length; i++)
-			if (s.charCodeAt(i) & 0x80) {
+			if (s.charCodeAt(i) >= 128) {
 				result = s.normalize("NFD");
 				break;
 			}
