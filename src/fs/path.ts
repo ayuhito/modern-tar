@@ -2,34 +2,34 @@ import * as path from "node:path";
 
 const unicodeCache = new Map<string, string>();
 
-// This implements a simple LRU cache for normalized strings.
+// This implements a simple LRU cache for normalized non-ASCII strings.
 export const normalizeUnicode = (s: string): string => {
-	let result = unicodeCache.get(s);
-
-	// On a cache hit, delete the entry so it can be re-added at the end.
-	if (result !== undefined) {
-		unicodeCache.delete(s);
-	} else {
-		// On a cache miss, perform normalization if necessary.
-		result = s;
-
-		// Loop over the string and check for non-ASCII characters.
-		// This is faster than calling normalize on every string.
-		for (let i = 0; i < s.length; i++)
-			if (s.charCodeAt(i) >= 128) {
-				result = s.normalize("NFD");
-				break;
+	// Iterate through the string to check for non-ASCII characters.
+	for (let i = 0; i < s.length; i++)
+		// Only if a non-ASCII character is found, then we rely on caching.
+		if (s.charCodeAt(i) >= 128) {
+			const cached = unicodeCache.get(s);
+			if (cached !== undefined) {
+				// Move it to most recently used.
+				unicodeCache.delete(s);
+				unicodeCache.set(s, cached);
+				return cached;
 			}
-	}
-	unicodeCache.set(s, result);
 
-	// Delete the oldest entry if we exceed the max size.
-	if (unicodeCache.size > 10000) {
-		// biome-ignore lint/style/noNonNullAssertion: At minimum one entry exists here.
-		unicodeCache.delete(unicodeCache.keys().next().value!);
-	}
+			const normalized = s.normalize("NFD");
+			unicodeCache.set(s, normalized);
 
-	return result;
+			// Delete the oldest entry if we exceed the max size.
+			if (unicodeCache.size > 10000) {
+				// biome-ignore lint/style/noNonNullAssertion: At minimum one entry exists here.
+				unicodeCache.delete(unicodeCache.keys().next().value!);
+			}
+
+			return normalized;
+		}
+
+	// Otherwise, fast path for ASCII-only strings.
+	return s;
 };
 
 // Validates that the given target path is within the destination directory and does not escape.
