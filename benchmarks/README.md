@@ -151,128 +151,128 @@ benchmark                   avg (min … max) p75 / p99    (min … top 1%)
 ------------------------------------------- -------------------------------
 • Many Small Files (2500 x 1KB)
 ------------------------------------------- -------------------------------
-modern-tar: Many Small Fil.. 224.94 ms/iter 231.64 ms     █  █
-                    (205.25 ms … 262.98 ms) 251.75 ms ██▁██▁▁██▁▁██▁▁▁▁▁▁▁█
-                  gc(  1.26 ms …   2.14 ms)  35.80 mb ( 34.91 mb… 37.48 mb)
+modern-tar: Many Small Fil.. 225.38 ms/iter 230.68 ms ██  ███  █ █  ███   █
+                    (210.50 ms … 250.29 ms) 238.07 ms ██▁▁███▁▁█▁█▁▁███▁▁▁█
+                  gc(  1.28 ms …   2.76 ms)  36.11 mb ( 35.05 mb… 37.85 mb)
 
-node-tar: Many Small Files.. 309.20 ms/iter 323.41 ms           █         ▃
-                    (274.66 ms … 376.22 ms) 327.51 ms ▆▁▁▆▁▆▁▆▁▁█▁▁▁▆▁▁▁▆▁█
-                  gc(  1.40 ms …   3.07 ms)  42.10 mb ( 41.43 mb… 43.26 mb)
+node-tar: Many Small Files.. 304.50 ms/iter 314.08 ms              █
+                    (267.66 ms … 361.91 ms) 341.64 ms █▁█▁▁█████▁▁██▁▁▁▁▁▁█
+                  gc(  1.40 ms …   4.19 ms)  42.15 mb ( 41.49 mb… 43.35 mb)
 
-tar-fs: Many Small Files (.. 576.95 ms/iter 603.21 ms        █            █
-                    (531.99 ms … 617.60 ms) 609.23 ms █▁▁██▁▁█▁▁██▁▁▁▁▁██▁█
-                  gc(  1.36 ms …   2.00 ms)   6.14 mb (  4.91 mb…  7.34 mb)
+tar-fs: Many Small Files (.. 611.48 ms/iter 614.12 ms        █
+                    (545.24 ms … 746.16 ms) 662.45 ms █▁▁▁██▁█▁████▁▁▁▁█▁▁█
+                  gc(  1.38 ms …   2.55 ms)   6.14 mb (  4.92 mb…  7.33 mb)
 
                              ┌                                            ┐
-modern-tar: Many Small Fil.. ┤ 224.94 ms
-node-tar: Many Small Files.. ┤■■■■■■■■ 309.20 ms
-tar-fs: Many Small Files (.. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 576.95 ms
+modern-tar: Many Small Fil.. ┤ 225.38 ms
+node-tar: Many Small Files.. ┤■■■■■■■ 304.50 ms
+tar-fs: Many Small Files (.. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 611.48 ms
                              └                                            ┘
 
 summary
   modern-tar: Many Small Files (2500 x 1KB)
-   1.37x faster than node-tar: Many Small Files (2500 x 1KB)
-   2.56x faster than tar-fs: Many Small Files (2500 x 1KB)
+   1.35x faster than node-tar: Many Small Files (2500 x 1KB)
+   2.71x faster than tar-fs: Many Small Files (2500 x 1KB)
 
 • Many Small Nested Files (2500 x 1KB)
 ------------------------------------------- -------------------------------
-modern-tar: Many Small Nes.. 246.66 ms/iter 247.60 ms █     █      █
-                    (238.85 ms … 262.44 ms) 252.07 ms █▁▁▁▁▁█▁▁█▁███▁▁█▁▁▁█
-                  gc(  1.43 ms …   4.44 ms)  41.81 mb ( 41.76 mb… 41.89 mb)
+modern-tar: Many Small Nes.. 242.93 ms/iter 246.41 ms   █
+                    (230.07 ms … 271.55 ms) 263.11 ms ▆▁█▆▆▁▆▆▁▁▆▆▁▁▁▁▁▁▁▁▆
+                  gc(  1.61 ms …   2.78 ms)  41.91 mb ( 41.86 mb… 42.02 mb)
 
-node-tar: Many Small Neste.. 455.29 ms/iter 449.31 ms      ██ █           █
-                    (423.73 ms … 553.38 ms) 484.76 ms ███▁▁██▁█▁▁▁▁▁▁▁▁▁▁▁█
-                  gc(  1.48 ms …   2.13 ms)  28.82 mb ( 28.50 mb… 29.48 mb)
+node-tar: Many Small Neste.. 487.35 ms/iter 524.99 ms ██ █  ████  █   █ █ █
+                    (418.30 ms … 593.05 ms) 552.16 ms ██▁█▁▁████▁▁█▁▁▁█▁█▁█
+                  gc(  1.47 ms …   2.08 ms)  28.74 mb ( 28.35 mb… 29.36 mb)
 
-tar-fs: Many Small Nested .. 672.93 ms/iter 710.12 ms                 █
-                    (594.31 ms … 764.43 ms) 740.80 ms ██▁█▁▁██▁▁▁██▁█▁█▁▁▁█
-                  gc(  1.46 ms …   2.30 ms)  23.83 mb ( 22.83 mb… 24.35 mb)
+tar-fs: Many Small Nested .. 678.64 ms/iter 705.91 ms        █
+                    (608.13 ms … 743.04 ms) 732.11 ms █▁█▁▁▁▁█▁███▁▁█▁█▁▁██
+                  gc(  1.49 ms …   2.42 ms)  23.77 mb ( 22.83 mb… 24.39 mb)
 
                              ┌                                            ┐
-modern-tar: Many Small Nes.. ┤ 246.66 ms
-node-tar: Many Small Neste.. ┤■■■■■■■■■■■■■■■■■ 455.29 ms
-tar-fs: Many Small Nested .. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 672.93 ms
+modern-tar: Many Small Nes.. ┤ 242.93 ms
+node-tar: Many Small Neste.. ┤■■■■■■■■■■■■■■■■■■■ 487.35 ms
+tar-fs: Many Small Nested .. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 678.64 ms
                              └                                            ┘
 
 summary
   modern-tar: Many Small Nested Files (2500 x 1KB)
-   1.85x faster than node-tar: Many Small Nested Files (2500 x 1KB)
-   2.73x faster than tar-fs: Many Small Nested Files (2500 x 1KB)
+   2.01x faster than node-tar: Many Small Nested Files (2500 x 1KB)
+   2.79x faster than tar-fs: Many Small Nested Files (2500 x 1KB)
 
 • Few Large Files (5 x 20MB)
 ------------------------------------------- -------------------------------
-modern-tar: Few Large File..  24.48 ms/iter  25.17 ms  ▆█▆ ▆█▆
-                      (19.64 ms … 55.91 ms)  36.48 ms ████████▆▄▁▁▄▁▁▁▁▄▁▁▄
-                  gc(  1.15 ms …   2.26 ms) 418.67 kb ( 34.72 kb…  1.28 mb)
+modern-tar: Few Large File..  25.47 ms/iter  26.23 ms  ▂█▂▅▂▅▅▂▂
+                      (22.51 ms … 33.04 ms)  31.11 ms ▇█████████▇▁▄▄▄▄▁▁▁▁▇
+                  gc(  1.18 ms …   4.33 ms) 359.89 kb ( 21.45 kb…  1.25 mb)
 
-node-tar: Few Large Files ..  33.18 ms/iter  32.55 ms   █  ▂
-                     (24.77 ms … 120.19 ms)  41.96 ms ▅▃█▃▅█▃▅▅▃▁▃▅▃▃▁▁▁▃▁▃
-                  gc(  1.17 ms …   2.35 ms) 336.17 kb ( 16.00 kb…967.75 kb)
+node-tar: Few Large Files ..  27.63 ms/iter  28.17 ms    ▆▄█▆ ▆
+                      (24.64 ms … 34.87 ms)  34.53 ms ▃▅▇████▃█▃▁▁▁▃▁▁▁▃▁▁▃
+                  gc(  1.16 ms …   3.77 ms) 300.43 kb ( 38.74 kb…  1.19 mb)
 
-tar-fs: Few Large Files (5..  37.47 ms/iter  37.21 ms ▄▄█ ▄
-                     (26.39 ms … 128.21 ms)  54.22 ms ███▅█▁▁▅▅▅▁▁▅▅▁▁▁▁▁▁▅
-                  gc(  1.18 ms …   2.66 ms) 390.72 kb ( 53.30 kb…  0.99 mb)
+tar-fs: Few Large Files (5..  30.55 ms/iter  31.28 ms    ▂▅ █▂▅▅
+                      (27.58 ms … 36.98 ms)  35.82 ms ▄▇▇██▇████▄▇▇▁▄▁▁▁▁▁▄
+                  gc(  1.21 ms …   2.30 ms) 418.37 kb ( 50.11 kb…  2.10 mb)
 
                              ┌                                            ┐
-modern-tar: Few Large File.. ┤ 24.48 ms
-node-tar: Few Large Files .. ┤■■■■■■■■■■■■■■■■■■■■■■■ 33.18 ms
-tar-fs: Few Large Files (5.. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 37.47 ms
+modern-tar: Few Large File.. ┤ 25.47 ms
+node-tar: Few Large Files .. ┤■■■■■■■■■■■■■■ 27.63 ms
+tar-fs: Few Large Files (5.. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 30.55 ms
                              └                                            ┘
 
 summary
   modern-tar: Few Large Files (5 x 20MB)
-   1.36x faster than node-tar: Few Large Files (5 x 20MB)
-   1.53x faster than tar-fs: Few Large Files (5 x 20MB)
+   1.08x faster than node-tar: Few Large Files (5 x 20MB)
+   1.2x faster than tar-fs: Few Large Files (5 x 20MB)
 
 • Huge Files (2 x 1GB)
 ------------------------------------------- -------------------------------
-modern-tar: Huge Files (2 .. 747.24 ms/iter 752.26 ms ███  ██  ████ █     █
-                    (718.49 ms … 806.17 ms) 776.98 ms ███▁▁██▁▁████▁█▁▁▁▁▁█
-                  gc(  2.00 ms …   3.42 ms) 587.62 kb ( 58.54 kb…  1.50 mb)
+modern-tar: Huge Files (2 .. 751.08 ms/iter 760.03 ms                  █
+                    (650.23 ms … 797.17 ms) 778.76 ms ▄▁▁▁▁▁▁▁▁▁▁▁▁▄▁▄▇█▁▁▄
+                  gc(  1.73 ms …   2.80 ms) 440.46 kb ( 54.47 kb…  1.28 mb)
 
-node-tar: Huge Files (2 x .. 784.60 ms/iter 786.11 ms              █
-                    (752.83 ms … 871.87 ms) 794.01 ms █▁▁▁▁▁██▁▁██▁█▁███▁▁█
-                  gc(  1.63 ms …   4.82 ms) 189.04 kb (118.23 kb…668.97 kb)
+node-tar: Huge Files (2 x ..    1.19 s/iter    1.67 s █▃  ▃
+                       (756.69 ms … 2.10 s)    1.85 s ██▁▁█▁▆▁▁▁▁▁▁▁▁▁▁▆▁▆▆
+                  gc(  2.09 ms …   8.31 ms) 163.66 kb ( 97.74 kb…235.93 kb)
 
-tar-fs: Huge Files (2 x 1GB) 777.01 ms/iter 783.46 ms          █  ▃       ▃
-                    (738.88 ms … 871.27 ms) 787.81 ms ▆▁▁▁▁▁▁▁▁█▆▁█▁▁▆▁▁▆▁█
-                  gc(  1.91 ms …   5.78 ms) 187.93 kb (145.30 kb…307.59 kb)
+tar-fs: Huge Files (2 x 1GB)    1.43 s/iter    1.80 s               █
+                       (745.41 ms … 2.23 s)    2.22 s ██████▁▁▁▁▁▁▁██▁█▁▁▁█
+                  gc(  2.02 ms …   8.61 ms) 201.95 kb (150.86 kb…360.47 kb)
 
                              ┌                                            ┐
-modern-tar: Huge Files (2 .. ┤ 747.24 ms
-node-tar: Huge Files (2 x .. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 784.60 ms
-tar-fs: Huge Files (2 x 1GB) ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■ 777.01 ms
+modern-tar: Huge Files (2 .. ┤ 751.08 ms
+node-tar: Huge Files (2 x .. ┤■■■■■■■■■■■■■■■■■■■■■■ 1.19 s
+tar-fs: Huge Files (2 x 1GB) ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 1.43 s
                              └                                            ┘
 
 summary
   modern-tar: Huge Files (2 x 1GB)
-   1.04x faster than tar-fs: Huge Files (2 x 1GB)
-   1.05x faster than node-tar: Huge Files (2 x 1GB)
+   1.59x faster than node-tar: Huge Files (2 x 1GB)
+   1.91x faster than tar-fs: Huge Files (2 x 1GB)
 
 • Linked Small Files (500 packages, symlinks + hardlinks)
 ------------------------------------------- -------------------------------
-modern-tar: Linked Small F..    1.35 s/iter    1.42 s   █                 █
-                          (1.25 s … 1.44 s)    1.43 s █▁█▁▁██▁▁█▁▁█▁▁▁▁█▁██
-                  gc(  1.49 ms …   2.87 ms)  37.18 mb ( 37.02 mb… 37.94 mb)
+modern-tar: Linked Small F..    1.33 s/iter    1.35 s        ▃     █
+                          (1.22 s … 1.44 s)    1.39 s ▆▁▁▁▁▁▆█▁▁▁▁▁█▆▆▆▁▁▁▆
+                  gc(  1.54 ms …   4.76 ms)  24.20 mb (  4.33 mb… 37.58 mb)
 
-node-tar: Linked Small Fil..    1.83 s/iter    1.90 s     █        █
-                          (1.63 s … 2.03 s)    1.93 s █▁▁▁█▁▁▁▁▁▁▁██▁█▁████
-                  gc(  1.67 ms …   2.32 ms)  32.89 mb (744.70 kb… 64.73 mb)
+node-tar: Linked Small Fil..    1.89 s/iter    1.97 s            █   █
+                          (1.60 s … 2.05 s)    2.04 s █▁▁▁█▁▁▁▁▁▁█▁███▁█▁██
+                  gc(  1.79 ms …   2.73 ms)  27.57 mb (458.35 kb… 64.71 mb)
 
-tar-fs: Linked Small Files..    2.13 s/iter    2.18 s            █
-                          (1.94 s … 2.30 s)    2.28 s ▆▁▁▁▆▁▆▁▁▁▆█▆▁▁▆▁▁▁▆▆
-                  gc(  1.66 ms …   3.18 ms)  26.19 mb ( 25.16 mb… 27.36 mb)
+tar-fs: Linked Small Files..    2.14 s/iter    2.17 s                  █  █
+                          (1.97 s … 2.18 s)    2.18 s █▁▁▁▁▁▁▁▁▁▁█▁▁███████
+                  gc(  1.68 ms …   2.78 ms)  26.20 mb ( 25.20 mb… 27.34 mb)
 
                              ┌                                            ┐
-modern-tar: Linked Small F.. ┤ 1.35 s
-node-tar: Linked Small Fil.. ┤■■■■■■■■■■■■■■■■■■■■■ 1.83 s
-tar-fs: Linked Small Files.. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 2.13 s
+modern-tar: Linked Small F.. ┤ 1.33 s
+node-tar: Linked Small Fil.. ┤■■■■■■■■■■■■■■■■■■■■■■■■ 1.89 s
+tar-fs: Linked Small Files.. ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ 2.14 s
                              └                                            ┘
 
 summary
   modern-tar: Linked Small Files (500 packages, symlinks + hardlinks)
-   1.36x faster than node-tar: Linked Small Files (500 packages, symlinks + hardlinks)
-   1.58x faster than tar-fs: Linked Small Files (500 packages, symlinks + hardlinks)
+   1.43x faster than node-tar: Linked Small Files (500 packages, symlinks + hardlinks)
+   1.61x faster than tar-fs: Linked Small Files (500 packages, symlinks + hardlinks)
 ```
 
 For large files `modern-tar` and `node-tar` are very similar in performance since at this point the bottleneck is I/O. However, for many small files, `modern-tar` shows significantly better results than other libraries.

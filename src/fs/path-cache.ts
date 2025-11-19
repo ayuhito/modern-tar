@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { DIRECTORY, FILE, LINK, SYMLINK } from "../tar/constants";
 import type { TarHeader } from "../tar/types";
+import { createCache } from "./cache";
 import { normalizeHeaderName, normalizeUnicode, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
@@ -19,13 +20,13 @@ export const createPathCache = (
 	options: UnpackOptionsFS,
 ) => {
 	// Serializes directory creation operations within the same directory tree.
-	const dirPromises = new Map<string, Promise<void>>();
+	const dirPromises = createCache<Promise<void>>();
 	// Tracks path conflicts to prevent file/directory type mismatches.
-	const pathConflicts = new Map<string, TarHeader["type"]>();
+	const pathConflicts = createCache<TarHeader["type"]>();
 	// Stores hardlinks to be created after all files are written.
 	const deferredLinks: Array<{ linkTarget: string; outPath: string }> = [];
 	// Caches resolved real paths for symlinked directories.
-	const realDirCache = new Map<string, Promise<string>>();
+	const realDirCache = createCache<Promise<string>>();
 
 	// Initializes the destination directory.
 	const initializeDestDir = async (destDirPath: string) => {

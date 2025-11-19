@@ -1,6 +1,7 @@
 import * as path from "node:path";
+import { createCache } from "./cache";
 
-const unicodeCache = new Map<string, string>();
+const unicodeCache = createCache<string>();
 
 // This implements a simple LRU cache for normalized non-ASCII strings.
 export const normalizeUnicode = (s: string): string => {
@@ -9,22 +10,10 @@ export const normalizeUnicode = (s: string): string => {
 		// Only if a non-ASCII character is found, then we rely on caching.
 		if (s.charCodeAt(i) >= 128) {
 			const cached = unicodeCache.get(s);
-			if (cached !== undefined) {
-				// Move it to most recently used.
-				unicodeCache.delete(s);
-				unicodeCache.set(s, cached);
-				return cached;
-			}
+			if (cached !== undefined) return cached;
 
 			const normalized = s.normalize("NFD");
 			unicodeCache.set(s, normalized);
-
-			// Delete the oldest entry if we exceed the max size.
-			if (unicodeCache.size > 10000) {
-				// biome-ignore lint/style/noNonNullAssertion: At minimum one entry exists here.
-				unicodeCache.delete(unicodeCache.keys().next().value!);
-			}
-
 			return normalized;
 		}
 
