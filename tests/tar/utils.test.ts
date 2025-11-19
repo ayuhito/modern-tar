@@ -190,6 +190,16 @@ describe("tar utilities", () => {
 
 				expect(result).toBe(0o7777777);
 			});
+
+			it("parses values larger than 2GB without overflowing", () => {
+				const largeSize = 0o20000000000; // 2 GiB boundary
+				const buffer = encoder.encode(`${largeSize.toString(8)}\x00`);
+
+				const result = readOctal(buffer, 0, buffer.length);
+
+				expect(result).toBe(largeSize);
+				expect(result).toBeGreaterThanOrEqual(2 ** 31);
+			});
 		});
 	});
 
