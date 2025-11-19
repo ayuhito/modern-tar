@@ -193,6 +193,8 @@ export function unpackTar(
 				// Close out remaining buffered data and flush the async operation queue.
 				unpacker.end();
 				unpacker.validateEOF();
+				// Ensure all paths are prepared before cleanup.
+				await pathCache.ready();
 				// Wait for all file ops to complete.
 				await opQueue.onIdle();
 				// Now that all files are written, create the hardlinks.

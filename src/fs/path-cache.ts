@@ -161,6 +161,13 @@ export const createPathCache = (
 
 	return {
 		/**
+		 * Resolves once the destination directory has been initialized.
+		 * Allows callers to wait for the mkdir to finish even if no entries are extracted.
+		 */
+		async ready(): Promise<void> {
+			await destDirPromise;
+		},
+		/**
 		 * Prepares a filesystem path for extraction based on TAR header.
 		 * Handles security validation, conflict detection, and path preparation.
 		 *

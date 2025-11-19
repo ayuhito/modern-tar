@@ -1,10 +1,44 @@
-import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock fs/promises to introduce delay in mkdir for specific test case.
+const originalFs =
+	await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+let mkdirDelay: Promise<void> | null = null;
+let releaseMkdir: (() => void) | null = null;
+
+vi.mock("node:fs/promises", async () => {
+	const actual =
+		await vi.importActual<typeof import("node:fs/promises")>(
+			"node:fs/promises",
+		);
+	return {
+		...actual,
+		mkdir: vi
+			.fn()
+			.mockImplementation(
+				async (
+					target: string,
+					options?: Parameters<typeof actual.mkdir>[1],
+				) => {
+					if (
+						mkdirDelay &&
+						typeof target === "string" &&
+						target.includes("delayed-extracted")
+					) {
+						await mkdirDelay;
+					}
+					return actual.mkdir(target, options);
+				},
+			),
+	};
+});
+
+import * as fs from "node:fs/promises";
 import { packTar, unpackTar } from "../../src/fs";
 import { packTar as packTarWeb } from "../../src/web";
 
@@ -68,6 +102,53 @@ describe("extract", () => {
 
 		const files = await fs.readdir(destDir);
 		expect(files.includes(".gitignore")).toBe(false);
+	});
+
+	it("waits for destination directory creation when all entries are filtered", async () => {
+		const destDir = path.join(tmpDir, "delayed-extracted");
+
+		// Set up the delay for mkdir
+		mkdirDelay = new Promise<void>((resolve) => {
+			releaseMkdir = resolve;
+		});
+
+		try {
+			const entries = [
+				{
+					header: {
+						name: "ignored.txt",
+						size: 0,
+						type: "file" as const,
+					},
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const packStream = Readable.from([tarBuffer]);
+			const unpackStream = unpackTar(destDir, { filter: () => false });
+
+			const pipelinePromise = pipeline(packStream, unpackStream);
+
+			// Test that pipeline doesn't complete immediately due to race condition
+			const result = await Promise.race([
+				pipelinePromise.then(() => "finished"),
+				new Promise<string>((resolve) =>
+					setTimeout(() => resolve("timeout"), 200),
+				),
+			]);
+
+			expect(result).toBe("timeout");
+
+			// Release the mkdir and let the pipeline complete
+			releaseMkdir?.();
+			await pipelinePromise;
+
+			// Verify the destination directory was created and no files were extracted
+			await expect(originalFs.readdir(destDir)).resolves.toEqual([]);
+		} finally {
+			mkdirDelay = null;
+			releaseMkdir = null;
+		}
 	});
 
 	it("extracts files with correct permissions", async () => {
