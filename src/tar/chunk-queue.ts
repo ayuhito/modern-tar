@@ -9,6 +9,8 @@ interface ChunkQueue {
 	pull(bytes: number, callback: (chunk: Uint8Array) => boolean): number;
 }
 
+const INITIAL_CAPACITY = 256;
+
 /**
  * Creates a circular buffer for streaming TAR archive parsing.
  *
@@ -19,7 +21,7 @@ interface ChunkQueue {
 export function createChunkQueue(): ChunkQueue {
 	// - 8 bytes chunk reference
 	// = 256 * 8 = 2kb initial memory overhead
-	let chunks = new Array<Uint8Array>(256);
+	let chunks = new Array<Uint8Array>(INITIAL_CAPACITY);
 	// Each slot stores the remaining portion of a chunk, so offsets are implicit.
 	let capacityMask = chunks.length - 1; // For bitwise wrapping (length is power of 2).
 
@@ -39,6 +41,14 @@ export function createChunkQueue(): ChunkQueue {
 		}
 
 		totalAvailable -= count;
+
+		// Forcefully resetting lets the GC reclaim memory for large queues.
+		if (totalAvailable === 0 && chunks.length > INITIAL_CAPACITY) {
+			chunks = new Array<Uint8Array>(INITIAL_CAPACITY);
+			capacityMask = INITIAL_CAPACITY - 1;
+			head = 0;
+			tail = 0;
+		}
 	};
 
 	/**
