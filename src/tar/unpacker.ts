@@ -31,6 +31,10 @@ export function createUnpacker(options: DecoderOptions = {}) {
 	let nextEntryOverrides: HeaderOverrides = {};
 
 	const unpacker = {
+		isEntryActive(): boolean {
+			return state === STATE_BODY;
+		},
+
 		/** Add data to the internal buffer. */
 		write(chunk: Uint8Array): void {
 			if (ended) throw new Error("Archive already ended.");

@@ -52,55 +52,52 @@ export function unpackTar(
 	// Track current file stream across write() calls for handling backpressure
 	let currentFileStream: FileSink | null = null;
 	let currentWriteCallback: ((chunk: Uint8Array) => boolean) | null = null;
-	let needsDiscardBody = false; // Track if we're in the middle of discarding
 
 	return new Writable({
 		async write(chunk, _, cb) {
 			try {
 				unpacker.write(chunk);
 
-				// If we're in the middle of discarding a body, continue it
-				if (needsDiscardBody) {
-					if (!unpacker.skipEntry()) {
-						// Still need more data
-						cb();
-						return;
-					}
+				if (unpacker.isEntryActive()) {
+					// State was saved from previous write call, so continue processing.
+					if (currentFileStream && currentWriteCallback) {
+						let needsDrain = false;
+						const writeCallback = currentWriteCallback;
 
-					needsDiscardBody = false;
-				}
+						// Handle if body is not yet processed.
+						while (!unpacker.isBodyComplete()) {
+							needsDrain = false;
+							const fed = unpacker.streamBody(writeCallback);
 
-				// If we're in the middle of streaming a file body, continue it
-				if (currentFileStream && currentWriteCallback) {
-					let needsDrain = false;
-					const writeCallback = currentWriteCallback;
-
-					while (!unpacker.isBodyComplete()) {
-						needsDrain = false;
-						const fed = unpacker.streamBody(writeCallback);
-
-						if (fed === 0) {
-							if (needsDrain) {
-								await currentFileStream.waitDrain();
-							} else {
-								cb(); // Need more data.
-								return;
+							if (fed === 0) {
+								if (needsDrain) {
+									await currentFileStream.waitDrain();
+								} else {
+									cb(); // Need more data.
+									return;
+								}
 							}
 						}
+
+						// Body complete, skip padding.
+						while (!unpacker.skipPadding()) {
+							cb();
+							return;
+						}
+
+						// Padding complete, close file.
+						const streamToClose = currentFileStream;
+						if (streamToClose) opQueue.add(() => streamToClose.end());
+
+						currentFileStream = null;
+						currentWriteCallback = null;
+					} else {
+						// Otherwise, just discard the entry body.
+						if (!unpacker.skipEntry()) {
+							cb(); // Need more data
+							return;
+						}
 					}
-
-					// Body complete, skip padding.
-					while (!unpacker.skipPadding()) {
-						cb();
-						return;
-					}
-
-					// Padding complete, close file.
-					const streamToClose = currentFileStream;
-					if (streamToClose) opQueue.add(() => streamToClose.end());
-
-					currentFileStream = null;
-					currentWriteCallback = null;
 				}
 
 				// Process all available headers.
@@ -118,7 +115,6 @@ export function unpackTar(
 					// Filtered out.
 					if (!transformedHeader) {
 						if (!unpacker.skipEntry()) {
-							needsDiscardBody = true;
 							cb();
 							return;
 						}
@@ -154,7 +150,7 @@ export function unpackTar(
 								if (needsDrain) {
 									await fileStream.waitDrain();
 								} else {
-									// Need more data, so save state for continuation.
+									// Need more data, so save state to continue later.
 									currentFileStream = fileStream;
 									currentWriteCallback = writeCallback;
 									cb();
@@ -165,7 +161,7 @@ export function unpackTar(
 
 						// Skip padding.
 						while (!unpacker.skipPadding()) {
-							// Need more data, so save state for padding continuation.
+							// Need more data, so save state to continue later.
 							currentFileStream = fileStream;
 							currentWriteCallback = writeCallback;
 							cb();
@@ -177,7 +173,6 @@ export function unpackTar(
 					} else {
 						// No body data or already handled.
 						if (!unpacker.skipEntry()) {
-							needsDiscardBody = true;
 							cb();
 							return;
 						}
