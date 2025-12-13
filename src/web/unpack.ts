@@ -201,18 +201,8 @@ export function createTarDecoder(
 					unpacker.end();
 					pump(controller, true); // Force pump for remaining data
 
-					// If a bodyController still exists, the archive was truncated mid-file.
-					if (bodyController) {
-						if (options.strict) throw new Error("Tar archive is truncated.");
-
-						// In non-strict mode, just close the partial stream.
-						try {
-							bodyController.close();
-						} catch {}
-						bodyController = null;
-					}
-
 					unpacker.validateEOF();
+					bodyController?.close();
 
 					if (!controllerTerminated) controller.terminate();
 				} catch (error) {
