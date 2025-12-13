@@ -13,6 +13,8 @@ import type { DecoderOptions, TarHeader } from "./types";
 const STATE_HEADER = 0;
 const STATE_BODY = 1;
 
+const truncateErr = new Error("Tar archive is truncated.");
+
 export function createUnpacker(options: DecoderOptions = {}) {
 	const strict = options.strict ?? false;
 	const { available, peek, push, discard, pull } = createChunkQueue();
@@ -64,8 +66,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				if (available() < BLOCK_SIZE) {
 					// If the stream has ended, any remaining data indicates a truncated archive.
 					if (ended) {
-						if (available() > 0 && strict)
-							throw new Error("Tar archive is truncated.");
+						if (available() > 0 && strict) throw truncateErr;
 
 						done = true;
 						return undefined;
@@ -82,7 +83,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 					if (available() < BLOCK_SIZE * 2) {
 						// Not enough data to check for the second block.
 						if (ended) {
-							if (strict) throw new Error("Tar archive is truncated.");
+							if (strict) throw truncateErr;
 							done = true;
 							return undefined;
 						}
@@ -123,7 +124,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 
 					// Check if we have enough data for the meta entry's body using total size.
 					if (available() < BLOCK_SIZE + paddedSize) {
-						if (ended && strict) throw new Error("Tar archive is truncated.");
+						if (ended && strict) throw truncateErr;
 						return null;
 					}
 
@@ -223,7 +224,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 
 		validateEOF() {
 			if (strict) {
-				if (!eof) throw new Error("Tar archive is truncated.");
+				if (!eof) throw truncateErr;
 				if (available() > 0) {
 					const remaining = pull(available()) as Uint8Array;
 					if (remaining.some((byte) => byte !== 0))
