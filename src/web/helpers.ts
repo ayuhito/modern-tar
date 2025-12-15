@@ -2,7 +2,7 @@ import { isBodyless, normalizeBody } from "../tar/body";
 import { transformHeader } from "../tar/options";
 import type { TarHeader, UnpackOptions } from "../tar/types";
 import { createTarPacker } from "./pack";
-import { streamToBuffer } from "./stream-utils";
+import { drain, streamToBuffer } from "./stream-utils";
 import type { ParsedTarEntryWithData, TarEntry } from "./types";
 import { createTarDecoder } from "./unpack";
 
@@ -167,22 +167,19 @@ export async function unpackTar(
 			throw error;
 		}
 
-		// Entry is filtered out or stripped, so we cancel its body stream.
+		// Entry is filtered out or stripped, so we drain its body stream.
 		if (processedHeader === null) {
-			await entry.body.cancel();
+			await drain(entry.body);
 			continue;
 		}
 
 		// Check if this entry should have no body data
 		const bodyless = isBodyless(processedHeader);
 
+		// For bodyless entries (directories, symlinks, links), drain the body stream and use undefined.
 		if (bodyless) {
-			// For bodyless entries (directories, symlinks, links), cancel the body stream and use undefined
-			await entry.body.cancel();
-			results.push({
-				header: processedHeader,
-				data: undefined,
-			});
+			await drain(entry.body);
+			results.push({ header: processedHeader });
 		} else {
 			// Fully buffer the entry body for files
 			results.push({

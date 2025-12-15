@@ -28,3 +28,6 @@ export async function streamToBuffer(
 		reader.releaseLock();
 	}
 }
+
+export const drain = (stream: ReadableStream<Uint8Array>): Promise<void> =>
+	stream.pipeTo(new WritableStream());
