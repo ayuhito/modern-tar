@@ -40,7 +40,7 @@
 		"coverage": "vitest run --coverage",
 		"check": "biome check --write",
 		"typecheck": "tsc --noEmit",
-		"test:browser": "bunx vitest --config=vitest.browser.config.ts --browser"
+		"test:browser": "vitest --config=vitest.browser.config.ts --browser"
 	},
 	"files": [
 		"dist",

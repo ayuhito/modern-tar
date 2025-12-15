@@ -65,3 +65,27 @@ jobs:
 
       - name: Test
         run: bun run test --run
+
+  test-browser:
+    name: Browser Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Build
+        run: npm run build
+
+      - name: Test Browser
+        run: npm run test:browser
