@@ -42,3 +42,7 @@ export const NODE_V25_DARWIN_ARM64_TAR_GZ = join(
 	__dirname,
 	"node-v25.2.0-darwin-arm64.tar.gz",
 );
+export const TSGO_WASM_TGZ = join(
+	__dirname,
+	"tsgo-wasm-2025.12.7.tgz",
+);

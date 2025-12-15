@@ -1,3 +1,4 @@
+import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { decoder } from "../../src/tar/encoding";
@@ -10,6 +11,7 @@ import {
 	LATIN1_TAR,
 	NAME_IS_100_TAR,
 	SPACE_TAR_GZ,
+	TSGO_WASM_TGZ,
 	UNICODE_BSD_TAR,
 	UNKNOWN_FORMAT,
 	V7_TAR,
@@ -155,6 +157,22 @@ describe("tar format fixtures", () => {
 	});
 
 	describe("error handling", () => {
+		it("streams wasm package with filtering without hanging", async () => {
+			// @ts-expect-error ReadableStream.from is available in Node tests
+			const fileStream = ReadableStream.from(createReadStream(TSGO_WASM_TGZ));
+			const tarStream = fileStream.pipeThrough(createGzipDecoder());
+
+			const [wasm] = await unpackTar(tarStream, {
+				strip: 1,
+				filter: (header) => header.name === "tsgo.wasm",
+			});
+
+			expect(wasm).toBeDefined();
+			expect(wasm?.header.name).toBe("tsgo.wasm");
+			expect(wasm?.data).toBeInstanceOf(Uint8Array);
+			expect(wasm?.data?.length).toBeGreaterThan(0);
+		});
+
 		it("handles invalid gzip data gracefully", async () => {
 			// Create truly invalid gzip data (not just a misnamed valid archive)
 			const invalidGzipData = new Uint8Array([
