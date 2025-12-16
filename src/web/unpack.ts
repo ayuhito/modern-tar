@@ -40,140 +40,67 @@ export function createTarDecoder(
 
 	let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null;
 	let pumping = false;
-	let controllerTerminated = false;
-	let eofReached = false;
-
-	const abortAll = (
-		reason: unknown,
-		controller?: TransformStreamDefaultController<ParsedTarEntry>,
-	) => {
-		if (controllerTerminated) return;
-		controllerTerminated = true;
-
-		const error =
-			reason instanceof Error ? reason : new Error(String(reason ?? ""));
-
-		if (bodyController) {
-			try {
-				bodyController.error(error);
-			} catch {}
-			bodyController = null;
-		}
-
-		if (controller) {
-			try {
-				controller.error(error);
-			} catch {}
-		}
-	};
 
 	// Pull from the unpacker and push to the appropriate streams.
 	const pump = (
 		controller: TransformStreamDefaultController<ParsedTarEntry>,
-		force = false,
 	) => {
-		if (pumping || controllerTerminated || eofReached) return;
+		if (pumping) return;
 		pumping = true;
 
 		try {
-			while (!controllerTerminated) {
-				// Look for the next header.
-				if (!bodyController) {
-					if (!unpacker.skipEntry()) break;
+			while (true) {
+				if (unpacker.isEntryActive()) {
+					if (bodyController) {
+						const fed = unpacker.streamBody(
+							// biome-ignore lint/style/noNonNullAssertion: Checked above.
+							// biome-ignore lint/complexity/noCommaOperator: Smaller callback.
+							(c) => (bodyController!.enqueue(c), true),
+						);
 
-					// Respect backpressure on the main stream.
-					if (!force && (controller.desiredSize ?? 0) < 0) break;
-
-					const header = unpacker.readHeader();
-					if (header === null) break; // Not enough data
-					if (header === undefined) {
-						eofReached = true;
+						// Rxeturns 0 if no data is available OR if body is complete.
+						if (fed === 0 && !unpacker.isBodyComplete()) break;
+					} else if (!unpacker.skipEntry()) {
 						break;
 					}
 
-					const body = new ReadableStream<Uint8Array>({
-						start: (c) => (bodyController = c),
-						// When the consumer of this body stream pulls, it re-triggers the pump
-						// to continue processing data for this entry.
-						pull: () => pump(controller),
-						// If the consumer cancels this body stream, clear the controller.
-						cancel: () => {
-							bodyController = null;
-							pump(controller);
-						},
-					});
-
-					// Enqueue the new entry object for the consumer.
-					controller.enqueue({ header, body });
-
-					// For zero-size entries (like directories), close the body stream
-					// immediately and try to process the next header.
-					if (header.size === 0) {
-						// Immediately close zero-size entries and check for next header
+					// Cleanup.
+					if (unpacker.isBodyComplete()) {
 						try {
-							// biome-ignore lint/style/noNonNullAssertion: body processing state.
-							bodyController!.close();
+							bodyController?.close();
 						} catch {}
 						bodyController = null;
+
 						if (!unpacker.skipPadding()) break;
-						continue;
 					}
+				} else {
+					// If entry is not active, try to read the next header.
+					const header = unpacker.readHeader();
+					if (header === null || header === undefined) break;
+
+					// Start a new entry.
+					controller.enqueue({
+						header,
+						body: new ReadableStream({
+							start(c) {
+								if (header.size === 0) c.close();
+								else bodyController = c;
+							},
+							pull: () => pump(controller),
+							cancel() {
+								bodyController = null;
+								pump(controller);
+							},
+						}),
+					});
 				}
-
-				// Stream the current entry body.
-				if (unpacker.isBodyComplete()) {
-					if (unpacker.skipPadding()) {
-						try {
-							// biome-ignore lint/style/noNonNullAssertion: body processing state.
-							bodyController!.close();
-						} catch {}
-						bodyController = null;
-						continue; // Done with entry, look for next header
-					}
-					break; // Not enough data for padding
-				}
-
-				// Respect backpressure.
-				// biome-ignore lint/style/noNonNullAssertion: body processing state.
-				if ((bodyController!.desiredSize ?? 1) <= 0) break;
-
-				let shouldPause = false;
-				const fed = unpacker.streamBody((chunk) => {
-					if (!bodyController) return true; // Body cancelled
-					try {
-						// biome-ignore lint/style/noNonNullAssertion: body processing state.
-						bodyController!.enqueue(chunk);
-
-						// If the body stream's buffer is full, signal to pause the pump.
-						// biome-ignore lint/style/noNonNullAssertion: body processing state.
-						if ((bodyController!.desiredSize ?? 1) <= 0) shouldPause = true;
-					} catch {
-						return true; // Body errored or closed, discard
-					}
-
-					return true;
-				});
-
-				// No buffered data is available. Wait for the next chunk to resume pumping.
-				if (fed === 0) break;
-
-				// Check again if the body is now complete after streaming.
-				if (unpacker.isBodyComplete()) {
-					if (unpacker.skipPadding()) {
-						try {
-							// biome-ignore lint/style/noNonNullAssertion: body processing state.
-							bodyController!.close();
-						} catch {}
-						bodyController = null;
-						continue; // Loop to read the next header
-					}
-					break; // Not enough data for padding
-				}
-
-				if (shouldPause) break;
 			}
 		} catch (error) {
-			abortAll(error, controller);
+			try {
+				bodyController?.error(error);
+			} catch {}
+			bodyController = null;
+			throw error;
 		} finally {
 			pumping = false;
 		}
@@ -183,15 +110,13 @@ export function createTarDecoder(
 		{
 			transform(chunk, controller) {
 				try {
-					// In strict mode, ensure EOF blocks are all zeroes.
-					if (eofReached && options.strict && chunk.some((byte) => byte !== 0))
-						throw new Error("Invalid EOF.");
-
 					// Write incoming data to the unpacker.
 					unpacker.write(chunk);
 					pump(controller);
 				} catch (error) {
-					abortAll(error, controller);
+					try {
+						bodyController?.error(error);
+					} catch {}
 					throw error;
 				}
 			},
@@ -199,21 +124,23 @@ export function createTarDecoder(
 			flush(controller) {
 				try {
 					unpacker.end();
-					pump(controller, true); // Force pump for remaining data
-
+					pump(controller);
 					unpacker.validateEOF();
-					bodyController?.close();
 
-					if (!controllerTerminated) controller.terminate();
+					if (unpacker.isEntryActive() && !unpacker.isBodyComplete()) {
+						try {
+							bodyController?.close();
+						} catch {}
+					}
 				} catch (error) {
-					abortAll(error, controller);
+					try {
+						bodyController?.error(error);
+					} catch {}
 					throw error;
 				}
 			},
 		},
 		undefined,
-		{
-			highWaterMark: 1,
-		},
+		{ highWaterMark: 1 },
 	);
 }
