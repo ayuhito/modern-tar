@@ -2075,7 +2075,7 @@ describe("security", () => {
 				},
 				{
 					header: {
-						name: "folder//", // Double slash should normalize to same path
+						name: "folder", // No trailing slash should still normalize to same path but remain a file
 						size: 4,
 						type: "file",
 						mode: 0o644,

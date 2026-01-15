@@ -151,9 +151,6 @@ export function parseUstarHeader(
 		linkname: readString(block, USTAR_LINKNAME_OFFSET, USTAR_LINKNAME_SIZE),
 	};
 
-	if(header.name.endsWith("/") && header.type === FILE)
-		header.type = DIRECTORY;
-
 	const magic = readString(block, USTAR_MAGIC_OFFSET, USTAR_MAGIC_SIZE);
 
 	// Both GNU and USTAR formats have uname and gname.

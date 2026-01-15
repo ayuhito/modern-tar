@@ -682,11 +682,8 @@ describe("extract", () => {
 			const createdPath = path.join(destDir, "my-file.txt");
 
 			const stats = await fs.stat(createdPath);
-			expect(stats.isFile()).toBe(true);
-			expect(stats.isDirectory()).toBe(false);
-
-			const content = await fs.readFile(createdPath, "utf-8");
-			expect(content).toBe("content");
+			expect(stats.isDirectory()).toBe(true);
+			expect(stats.isFile()).toBe(false);
 		});
 
 		it("should handle multiple trailing slashes on files", async () => {
@@ -709,13 +706,10 @@ describe("extract", () => {
 
 			await pipeline(Readable.from([tarBuffer]), unpackStream);
 
-			// Should create file without trailing slashes
+			// Should create directory without trailing slashes
 			const filePath = path.join(destDir, "document.pdf");
 			const stats = await fs.stat(filePath);
-			expect(stats.isFile()).toBe(true);
-
-			const content = await fs.readFile(filePath, "utf-8");
-			expect(content).toBe("PDF content\n");
+			expect(stats.isDirectory()).toBe(true);
 		});
 
 		it("should handle trailing slashes on directories (which is valid)", async () => {
@@ -764,13 +758,108 @@ describe("extract", () => {
 
 			await pipeline(Readable.from([tarBuffer]), unpackStream);
 
-			// Should create the nested file structure correctly
+			// Should create the nested directory structure correctly
 			const filePath = path.join(destDir, "nested", "path", "file.txt");
 			const stats = await fs.stat(filePath);
-			expect(stats.isFile()).toBe(true);
+			expect(stats.isDirectory()).toBe(true);
+		});
 
-			const readContent = await fs.readFile(filePath, "utf-8");
-			expect(readContent).toBe(content);
+		it("converts to directory when PAX header overrides name with trailing slash", async () => {
+			const destDir = path.join(tmpDir, "pax-override");
+			await fs.mkdir(destDir, { recursive: true });
+
+			const entries = [
+				{
+					header: {
+						name: "original-name", // No slash in standard header
+						type: "file" as const,
+						size: 0,
+						pax: {
+							path: "overridden-name/", // Slash in PAX override
+						},
+					},
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const unpackStream = unpackTar(destDir);
+			await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+			const createdPath = path.join(destDir, "overridden-name");
+			const stats = await fs.stat(createdPath);
+			expect(stats.isDirectory()).toBe(true);
+		});
+
+		it("does NOT convert symlinks to directories even with trailing slash", async () => {
+			const destDir = path.join(tmpDir, "symlink-slash");
+			await fs.mkdir(destDir, { recursive: true });
+
+			// Create a target for the symlink
+			await fs.writeFile(path.join(destDir, "target"), "target content");
+
+			const entries = [
+				{
+					header: {
+						name: "mylink/", // Trailing slash
+						type: "symlink" as const, // But type is SYMLINK
+						linkname: "target",
+						size: 0,
+					},
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const unpackStream = unpackTar(destDir);
+			await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+			const createdPath = path.join(destDir, "mylink");
+			const stats = await fs.lstat(createdPath);
+
+			expect(stats.isSymbolicLink()).toBe(true);
+			expect(stats.isDirectory()).toBe(false);
+		});
+
+		it("discards body content when a FILE is converted to a DIRECTORY", async () => {
+			const destDir = path.join(tmpDir, "content-discard");
+			await fs.mkdir(destDir, { recursive: true });
+
+			const bodyContent = "this content should be discarded";
+			const entries = [
+				{
+					header: {
+						name: "weird-dir/",
+						type: "file" as const,
+						size: bodyContent.length, // Header claims it has size
+					},
+					body: bodyContent,
+				},
+				{
+					header: {
+						name: "next-file.txt",
+						type: "file" as const,
+						size: 5,
+					},
+					body: "hello",
+				},
+			];
+
+			const tarBuffer = await packTarWeb(entries);
+			const unpackStream = unpackTar(destDir);
+			await pipeline(Readable.from([tarBuffer]), unpackStream);
+
+			// Check weird-dir is a directory
+			const dirPath = path.join(destDir, "weird-dir");
+			const dirStats = await fs.stat(dirPath);
+			expect(dirStats.isDirectory()).toBe(true);
+
+			// Verify no file was created inside (content was discarded, not treated as file-in-dir)
+			const dirContents = await fs.readdir(dirPath);
+			expect(dirContents).toHaveLength(0);
+
+			// Verify stream continued correctly to next file
+			const nextFilePath = path.join(destDir, "next-file.txt");
+			const nextFileContent = await fs.readFile(nextFilePath, "utf-8");
+			expect(nextFileContent).toBe("hello");
 		});
 
 		it("map filters out empty directory names", async () => {

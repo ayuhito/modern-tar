@@ -1,5 +1,5 @@
 import { createChunkQueue } from "./chunk-queue";
-import { BLOCK_SIZE, BLOCK_SIZE_MASK } from "./constants";
+import { BLOCK_SIZE, BLOCK_SIZE_MASK, DIRECTORY, FILE } from "./constants";
 import {
 	applyOverrides,
 	getMetaParser,
@@ -155,6 +155,11 @@ export function createUnpacker(options: DecoderOptions = {}) {
 
 				applyOverrides(header, paxGlobals);
 				applyOverrides(header, nextEntryOverrides);
+
+				if (header.name.endsWith("/") && header.type === FILE) {
+					header.type = DIRECTORY;
+				}
+
 				nextEntryOverrides = {}; // Reset for the next entry.
 
 				// Set up state for body processing.
