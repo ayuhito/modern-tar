@@ -3,7 +3,12 @@ import { encoder } from "./encoding";
 import type { TarEntryData, TarHeader } from "./types";
 
 export const isBodyless = (header: TarHeader) =>
-	header.type === DIRECTORY || header.type === SYMLINK || header.type === LINK;
+	header.type === DIRECTORY ||
+	header.type === SYMLINK ||
+	header.type === LINK ||
+	header.type === "character-device" ||
+	header.type === "block-device" ||
+	header.type === "fifo";
 
 export async function normalizeBody(body: TarEntryData): Promise<Uint8Array> {
 	if (body === null || body === undefined) return EMPTY;
