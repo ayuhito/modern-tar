@@ -1,6 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { decoder } from "../../src/tar/encoding";
+import {
+	BLOCK_SIZE,
+	FILE,
+	LINK,
+	USTAR_SIZE_OFFSET,
+	USTAR_SIZE_SIZE,
+} from "../../src/tar/constants";
+import { decoder, writeOctal } from "../../src/tar/encoding";
+import { createTarHeader } from "../../src/tar/header";
 import { unpackTar } from "../../src/web";
 import { V7_TAR } from "./fixtures";
 
@@ -190,6 +198,55 @@ describe("V7 tar format support", () => {
 
 			expect(entries).toHaveLength(1);
 			expect(entries[0].header.type).toBe("file");
+		});
+	});
+
+	describe("V7 format edge cases", () => {
+		it("ignores size field for link entries (V7 compatibility)", async () => {
+			const linkHeader = createTarHeader({
+				name: "link-entry",
+				type: LINK,
+				linkname: "target",
+				size: 0,
+				mode: 0o644,
+				uid: 1000,
+				gid: 1000,
+				mtime: new Date(),
+			});
+
+			// Simulate V7 behavior where links might have a non-zero size
+			writeOctal(linkHeader, USTAR_SIZE_OFFSET, USTAR_SIZE_SIZE, 512);
+
+			const fileHeader = createTarHeader({
+				name: "next-file.txt",
+				type: FILE,
+				size: 11,
+				mode: 0o644,
+				uid: 1000,
+				gid: 1000,
+				mtime: new Date(),
+			});
+
+			const fileData = new Uint8Array(BLOCK_SIZE);
+			fileData.set(new TextEncoder().encode("Hello World"));
+
+			// archive: [Link Header (bad size)] [File Header] [File Body] [EOF]
+			const archive = new Uint8Array(BLOCK_SIZE * 5);
+			archive.set(linkHeader, 0);
+			archive.set(fileHeader, BLOCK_SIZE);
+			archive.set(fileData, BLOCK_SIZE * 2);
+
+			const entries = await unpackTar(archive);
+
+			expect(entries).toHaveLength(2);
+			const [linkEntry, fileEntry] = entries;
+
+			expect(linkEntry.header.name).toBe("link-entry");
+			expect(linkEntry.header.type).toBe(LINK);
+			expect(linkEntry.header.size).toBe(0);
+
+			expect(fileEntry.header.name).toBe("next-file.txt");
+			expect(new TextDecoder().decode(fileEntry.data).trim()).toBe("Hello World");
 		});
 	});
 });
