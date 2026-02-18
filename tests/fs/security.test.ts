@@ -2473,7 +2473,6 @@ describe("security", () => {
 			await fs.mkdir(destDir, { recursive: true });
 
 			// Manually construct a malicious PAX header
-			// "20 __proto__=polluted\n"
 			const paxBody = encoder.encode("21 __proto__=polluted\n");
 			const headerBlock = new Uint8Array(512);
 
