@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar as packTarFS, type TarSource, unpackTar } from "../../src/fs";
-
+import { encoder } from "../../src/tar/encoding";
 import { packTar, type TarEntry } from "../../src/web";
 import { INVALID_TAR } from "../web/fixtures";
 
@@ -2474,15 +2474,9 @@ describe("security", () => {
 
 			// Manually construct a malicious PAX header
 			// "20 __proto__=polluted\n"
-			const paxBody = new TextEncoder().encode("21 __proto__=polluted\n");
-			
-			// We need to manually construct the tar block because our packer might be too safe
-			// to generate this specific attack vector easily.
-			
-			// Simple header construction for test purposes
+			const paxBody = encoder.encode("21 __proto__=polluted\n");
 			const headerBlock = new Uint8Array(512);
-			const encoder = new TextEncoder();
-			
+
 			// Write name "pax-header"
 			headerBlock.set(encoder.encode("pax-header"), 0);
 			// Write mode 644
@@ -2492,7 +2486,7 @@ describe("security", () => {
 			// Write gid 0
 			headerBlock.set(encoder.encode("0000000\0"), 116);
 			// Write size (octal)
-			const sizeStr = paxBody.length.toString(8).padStart(11, "0") + "\0";
+			const sizeStr = `${paxBody.length.toString(8).padStart(11, "0")}\0`;
 			headerBlock.set(encoder.encode(sizeStr), 124);
 			// Write mtime
 			headerBlock.set(encoder.encode("00000000000\0"), 136);
@@ -2508,7 +2502,7 @@ describe("security", () => {
 			// Calculate checksum
 			let checksum = 0;
 			for (let i = 0; i < 512; i++) checksum += headerBlock[i];
-			const checksumStr = checksum.toString(8).padStart(6, "0") + "\0 ";
+			const checksumStr = `${checksum.toString(8).padStart(6, "0")}\0 `;
 			headerBlock.set(encoder.encode(checksumStr), 148);
 
 			// Pad body to 512 bytes
@@ -2516,14 +2510,14 @@ describe("security", () => {
 			paddedBody.set(paxBody);
 
 			const tarBuffer = Buffer.concat([headerBlock, paddedBody]);
-			
+
 			const unpackStream = unpackTar(destDir);
 			await pipeline(Readable.from([tarBuffer]), unpackStream);
 
 			// Check for pollution
-			// @ts-ignore
-			expect(({}).polluted).toBeUndefined();
-			// @ts-ignore
+			// @ts-expect-error
+			expect({}.polluted).toBeUndefined();
+			// @ts-expect-error
 			expect(Object.prototype.polluted).toBeUndefined();
 		});
 	});
