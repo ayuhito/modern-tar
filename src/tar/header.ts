@@ -186,8 +186,8 @@ const PAX_MAPPING: Record<
 // Parses PAX record data into an overrides object.
 export function parsePax(buffer: Uint8Array): HeaderOverrides {
 	const decoder = new TextDecoder("utf-8");
-	const overrides: HeaderOverrides = {};
-	const pax: Record<string, string> = {};
+	const overrides: HeaderOverrides = Object.create(null);
+	const pax: Record<string, string> = Object.create(null);
 	let offset = 0;
 
 	while (offset < buffer.length) {
@@ -212,9 +212,9 @@ export function parsePax(buffer: Uint8Array): HeaderOverrides {
 		const [key, value] = recordStr.split("=", 2);
 		if (key && value !== undefined) {
 			pax[key] = value;
-			const mapping = PAX_MAPPING[key];
 
-			if (mapping) {
+			if (Object.hasOwn(PAX_MAPPING, key)) {
+				const mapping = PAX_MAPPING[key];
 				const [targetKey, parser] = mapping;
 				const parsedValue = parser(value);
 
