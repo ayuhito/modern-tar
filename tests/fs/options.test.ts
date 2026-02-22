@@ -214,6 +214,29 @@ describe("options fs", () => {
 			expect(files).toContain("test.txt");
 		});
 
+		it.skipIf(process.platform === "win32")(
+			"strips hardlink linknames with strip option",
+			async () => {
+				const binDir = path.join(tmpDir, "source", "wrapper", "bin");
+				await fs.mkdir(binDir, { recursive: true });
+				await fs.writeFile(path.join(binDir, "python3.6"), "python\n");
+				await fs.link(
+					path.join(binDir, "python3.6"),
+					path.join(binDir, "python3.6m"),
+				);
+
+				const extractDir = path.join(tmpDir, "extract");
+				await pipeline(
+					packTar(path.join(tmpDir, "source")),
+					unpackTar(extractDir, { strip: 1 }),
+				);
+
+				const s1 = await fs.stat(path.join(extractDir, "bin", "python3.6"));
+				const s2 = await fs.stat(path.join(extractDir, "bin", "python3.6m"));
+				expect(s1.ino).toBe(s2.ino);
+			},
+		);
+
 		it("inherits core filter option", async () => {
 			const sourceDir = path.join(tmpDir, "source");
 			await fs.mkdir(sourceDir);

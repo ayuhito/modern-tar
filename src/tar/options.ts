@@ -1,5 +1,11 @@
-import { DIRECTORY } from "./constants";
+import { DIRECTORY, LINK } from "./constants";
 import type { TarHeader, UnpackOptions } from "./types";
+
+// Strip the first n components from a path.
+const stripPath = (p: string, n: number): string => {
+	const parts = p.split("/").filter(Boolean);
+	return n >= parts.length ? "" : parts.slice(n).join("/");
+};
 
 // Apply strip, filter, and map options to a header.
 export function transformHeader(
@@ -14,22 +20,22 @@ export function transformHeader(
 
 	// Strip path components.
 	if (strip && strip > 0) {
-		const components = h.name.split("/").filter(Boolean); // Filter empty strings.
+		const newName = stripPath(h.name, strip);
+		if (!newName) return null; // Path is fully stripped
 
-		if (strip >= components.length) return null; // Path is fully stripped
-
-		// Rebuild name after stripping.
-		const newName = components.slice(strip).join("/");
 		h.name =
 			h.type === DIRECTORY && !newName.endsWith("/") ? `${newName}/` : newName;
 
-		// Also strip absolute linknames.
-		if (h.linkname?.startsWith("/")) {
-			const linkComponents = h.linkname.split("/").filter(Boolean);
-			h.linkname =
-				strip >= linkComponents.length
-					? "/" // Fully stripped, but retain root for absolute link.
-					: `/${linkComponents.slice(strip).join("/")}`;
+		// Strip linknames that are archive-root-relative.
+		//
+		// - Hardlink linknames are relative to the archive root, so they must be stripped.
+		// - Symlink linknames are relative to the entry's parent directory, so only absolute symlinks need stripping.
+		if (h.linkname) {
+			const isAbsolute = h.linkname.startsWith("/");
+			if (isAbsolute || h.type === LINK) {
+				const stripped = stripPath(h.linkname, strip);
+				h.linkname = isAbsolute ? `/${stripped}` || "/" : stripped;
+			}
 		}
 	}
 

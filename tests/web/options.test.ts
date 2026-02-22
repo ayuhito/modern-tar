@@ -158,32 +158,26 @@ describe("unpack options", () => {
 				expect(symlinkEntry?.header.linkname).toBe("/subdir/target.txt"); // stripped
 			});
 
-			it("preserves relative hardlinks unchanged", async () => {
+			it("strips relative hardlink linknames", async () => {
 				const archive = await packTar([
+					{
+						header: { name: "parent/subdir/target.txt", size: 4, type: "file" },
+						body: "test",
+					},
 					{
 						header: {
 							name: "parent/subdir/mylink",
 							size: 0,
 							type: "link",
-							linkname: "target.txt", // relative hardlink
+							linkname: "parent/subdir/target.txt",
 						},
-					},
-					{
-						header: {
-							name: "parent/subdir/target.txt",
-							size: 4,
-							type: "file",
-						},
-						body: "test",
 					},
 				]);
 
 				const entries = await unpackTar(archive, { strip: 1 });
-
-				expect(entries).toHaveLength(2);
-				const hardlinkEntry = entries.find((e) => e.header.type === "link");
-				expect(hardlinkEntry?.header.name).toBe("subdir/mylink");
-				expect(hardlinkEntry?.header.linkname).toBe("target.txt"); // unchanged
+				const link = entries.find((e) => e.header.type === "link");
+				expect(link?.header.name).toBe("subdir/mylink");
+				expect(link?.header.linkname).toBe("subdir/target.txt");
 			});
 
 			it("strips absolute hardlinks correctly", async () => {
