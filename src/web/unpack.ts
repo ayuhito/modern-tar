@@ -40,15 +40,26 @@ export function createTarDecoder(
 
 	let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null;
 	let pumping = false;
+	// Used to return a promise when starved for data to avoid infinite pull() loops.
+	let pullResolve: (() => void) | null = null;
+	// biome-ignore lint/complexity/noCommaOperator: Smaller bundle.
+	const resolve = () => (pullResolve?.(), (pullResolve = null));
 
 	// Pull from the unpacker and push to the appropriate streams.
 	const pump = (
 		controller: TransformStreamDefaultController<ParsedTarEntry>,
+		chunk?: Uint8Array,
+		ended?: boolean,
 	) => {
-		if (pumping) return;
+		if (pumping) return chunk && unpacker.write(chunk);
 		pumping = true;
 
 		try {
+			if (chunk) unpacker.write(chunk);
+			if (ended) unpacker.end();
+			// Signal that state has changed (new data or EOF) to wake up any pending pull().
+			resolve();
+
 			while (true) {
 				if (unpacker.isEntryActive()) {
 					if (bodyController) {
@@ -57,88 +68,73 @@ export function createTarDecoder(
 							// biome-ignore lint/complexity/noCommaOperator: Smaller callback.
 							(c) => (bodyController!.enqueue(c), true),
 						);
-
-						// Rxeturns 0 if no data is available OR if body is complete.
-						if (fed === 0 && !unpacker.isBodyComplete()) break;
-					} else if (!unpacker.skipEntry()) {
-						break;
-					}
+						if (fed > 0) resolve();
+						if (fed === 0 && !unpacker.isBodyComplete()) {
+							if (ended) {
+								try {
+									// biome-ignore lint/style/noNonNullAssertion: Required for close.
+									bodyController!.close();
+								} catch {}
+								// biome-ignore lint/complexity/noCommaOperator: Smaller bundle.
+								(bodyController = null), resolve();
+							}
+							break;
+						}
+					} else if (!unpacker.skipEntry()) break;
 
 					// Cleanup.
 					if (unpacker.isBodyComplete()) {
 						try {
 							bodyController?.close();
 						} catch {}
-						bodyController = null;
 
+						// biome-ignore lint/complexity/noCommaOperator: Smaller bundle.
+						(bodyController = null), resolve();
 						if (!unpacker.skipPadding()) break;
 					}
 				} else {
 					// If entry is not active, try to read the next header.
 					const header = unpacker.readHeader();
-					if (header === null || header === undefined) break;
+					if (!header) break;
 
 					// Start a new entry.
 					controller.enqueue({
 						header,
 						body: new ReadableStream({
-							start(c) {
-								if (header.size === 0) c.close();
-								else bodyController = c;
-							},
-							pull: () => pump(controller),
-							cancel() {
-								bodyController = null;
+							start: (c) => (header.size ? (bodyController = c) : c.close()),
+							pull: () => {
 								pump(controller);
+								if (bodyController && !unpacker.isBodyComplete())
+									return new Promise<void>((r) => (pullResolve = r));
 							},
+							cancel: () =>
+								(
+									// biome-ignore lint/complexity/noCommaOperator: Smaller bundle.
+									(bodyController = null), resolve(), pump(controller)
+								),
 						}),
 					});
 				}
 			}
+
+			// If we've ended and processed all entries, validate that there are no trailing bytes.
+			if (ended) unpacker.validateEOF();
 		} catch (error) {
 			try {
 				bodyController?.error(error);
 			} catch {}
-			bodyController = null;
+			// biome-ignore lint/complexity/noCommaOperator: Smaller bundle.
+			(bodyController = null), resolve();
 			throw error;
 		} finally {
 			pumping = false;
 		}
 	};
 
-	return new TransformStream<Uint8Array, ParsedTarEntry>(
+	return new TransformStream(
 		{
-			transform(chunk, controller) {
-				try {
-					// Write incoming data to the unpacker.
-					unpacker.write(chunk);
-					pump(controller);
-				} catch (error) {
-					try {
-						bodyController?.error(error);
-					} catch {}
-					throw error;
-				}
-			},
-
-			flush(controller) {
-				try {
-					unpacker.end();
-					pump(controller);
-					unpacker.validateEOF();
-
-					if (unpacker.isEntryActive() && !unpacker.isBodyComplete()) {
-						try {
-							bodyController?.close();
-						} catch {}
-					}
-				} catch (error) {
-					try {
-						bodyController?.error(error);
-					} catch {}
-					throw error;
-				}
-			},
+			transform: (chunk, controller) => pump(controller, chunk),
+			flush: (controller) => pump(controller, undefined, true),
 		},
 		undefined,
 		{ highWaterMark: 1 },

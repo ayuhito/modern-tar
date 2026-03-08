@@ -37,6 +37,9 @@ jobs:
       - name: Test
         run: npm run test
 
+      - name: Test Workers
+        run: npm run test:workers
+
   test-bun:
     name: Bun (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -65,6 +68,9 @@ jobs:
 
       - name: Test
         run: bun run test --run
+
+      - name: Test Workers
+        run: bun run test:workers
 
   test-browser:
     name: Browser Tests

@@ -267,6 +267,7 @@ The core library uses the [Web Streams API](https://caniuse.com/streams) and req
   - Firefox 102+
   - Safari 14.1+
   - Edge 79+
+- **Cloudflare Workers**:[2022-11-30+](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#streams-constructors) (compatability date)
 
 ## Acknowledgements
 
