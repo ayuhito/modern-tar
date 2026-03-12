@@ -4,14 +4,16 @@ import { describe, expect, it } from "vitest";
 import { packTar } from "../../src/web/helpers";
 
 describe("Cloudflare Workers Integration", () => {
-	const createTest = (fixture: string) => async () => {
-		const body = new Uint8Array(64 * 1024).fill(0xaa);
-		const tarBuffer = await packTar([
-			{
-				header: { name: "test.txt", size: body.length, type: "file" },
-				body,
-			},
-		]);
+	const createTest = (fixture: string, count: number) => async () => {
+		const tarBuffer = await packTar(
+			new Array(count).fill(0).map(() => {
+				const body = new Uint8Array(64 * 1024).fill(0xaa);
+				return {
+					header: { name: "test.txt", size: body.length, type: "file" },
+					body,
+				};
+			}),
+		);
 
 		const mf = new Miniflare({
 			modules: true,
@@ -38,20 +40,33 @@ describe("Cloudflare Workers Integration", () => {
 
 			const res = await resPromise;
 			const text = await res.text();
-			expect(text).toBe("Read 1 entries");
+			expect(text).toBe(`Read ${count} entries`);
 		} finally {
 			await mf.dispose();
 		}
 	};
 
 	it(
-		"should decode using manual reader",
-		createTest("worker-fixture.js"),
+		"should decode using manual reader (1)",
+		createTest("worker-fixture.js", 1),
 		20000,
 	);
+
 	it(
-		"should decode using async iterator",
-		createTest("worker-iterator-fixture.js"),
+		"should decode using manual reader (2000)",
+		createTest("worker-fixture.js", 2000),
+		20000,
+	);
+
+	it(
+		"should decode using async iterator (1)",
+		createTest("worker-iterator-fixture.js", 1),
+		20000,
+	);
+
+	it(
+		"should decode using async iterator (2500)",
+		createTest("worker-iterator-fixture.js", 2500),
 		20000,
 	);
 });

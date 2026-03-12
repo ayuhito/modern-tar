@@ -73,17 +73,13 @@ export function unpackTar(
 								if (needsDrain) {
 									await currentFileStream.waitDrain();
 								} else {
-									cb(); // Need more data.
-									return;
+									return cb(); // Need more data.
 								}
 							}
 						}
 
 						// Body complete, skip padding.
-						while (!unpacker.skipPadding()) {
-							cb();
-							return;
-						}
+						while (!unpacker.skipPadding()) return cb();
 
 						// Padding complete, close file.
 						const streamToClose = currentFileStream;
@@ -93,10 +89,7 @@ export function unpackTar(
 						currentWriteCallback = null;
 					} else {
 						// Otherwise, just discard the entry body.
-						if (!unpacker.skipEntry()) {
-							cb(); // Need more data
-							return;
-						}
+						if (!unpacker.skipEntry()) return cb(); // Need more data
 					}
 				}
 
@@ -105,20 +98,13 @@ export function unpackTar(
 					const header = unpacker.readHeader();
 
 					// EOF shouldn't happen in write(), but handle it.
-					if (header === undefined || header === null) {
-						cb();
-						return;
-					}
+					if (header === undefined || header === null) return cb();
 
 					// Transform header with options.
 					const transformedHeader = transformHeader(header, options);
 					// Filtered out.
 					if (!transformedHeader) {
-						if (!unpacker.skipEntry()) {
-							cb();
-							return;
-						}
-
+						if (!unpacker.skipEntry()) return cb();
 						continue;
 					}
 
@@ -158,8 +144,7 @@ export function unpackTar(
 									// Need more data, so save state to continue later.
 									currentFileStream = fileStream;
 									currentWriteCallback = writeCallback;
-									cb();
-									return;
+									return cb();
 								}
 							}
 						}
@@ -169,18 +154,14 @@ export function unpackTar(
 							// Need more data, so save state to continue later.
 							currentFileStream = fileStream;
 							currentWriteCallback = writeCallback;
-							cb();
-							return;
+							return cb();
 						}
 
 						// Close without await.
 						opQueue.add(() => fileStream.end());
 					} else {
 						// No body data or already handled.
-						if (!unpacker.skipEntry()) {
-							cb();
-							return;
-						}
+						if (!unpacker.skipEntry()) return cb();
 					}
 				}
 			} catch (err) {

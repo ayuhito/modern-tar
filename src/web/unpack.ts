@@ -93,6 +93,7 @@ export function createTarDecoder(
 						if (!unpacker.skipPadding()) break;
 					}
 				} else {
+					if ((controller.desiredSize ?? 0) <= 0) break;
 					// If entry is not active, try to read the next header.
 					const header = unpacker.readHeader();
 					if (!header) break;
@@ -137,6 +138,9 @@ export function createTarDecoder(
 			flush: (controller) => pump(controller, undefined, true),
 		},
 		undefined,
-		{ highWaterMark: 1 },
+		{
+			// Keep one extra slot to avoid backpressure deadlocks when the unpacker needs more data to proceed.
+			highWaterMark: 2,
+		},
 	);
 }
