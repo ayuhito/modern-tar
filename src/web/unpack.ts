@@ -93,7 +93,6 @@ export function createTarDecoder(
 						if (!unpacker.skipPadding()) break;
 					}
 				} else {
-					if ((controller.desiredSize ?? 0) <= 0) break;
 					// If entry is not active, try to read the next header.
 					const header = unpacker.readHeader();
 					if (!header) break;
