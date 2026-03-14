@@ -17,8 +17,8 @@ export function generatePax(header: TarHeader): {
 } | null {
 	const paxRecords: Record<string, string> = {};
 
-	// Check max filename length.
-	if (header.name.length > USTAR_NAME_SIZE) {
+	// Check max filename length (using byte length for multi-byte safety).
+	if (encoder.encode(header.name).length > USTAR_NAME_SIZE) {
 		const split = findUstarSplit(header.name);
 
 		// If a valid USTAR split is not possible, we must use a PAX record.
@@ -28,16 +28,16 @@ export function generatePax(header: TarHeader): {
 	}
 
 	// Check max linkname length.
-	if (header.linkname && header.linkname.length > USTAR_NAME_SIZE) {
+	if (header.linkname && encoder.encode(header.linkname).length > USTAR_NAME_SIZE) {
 		paxRecords.linkpath = header.linkname;
 	}
 
 	// Check user/group names.
-	if (header.uname && header.uname.length > USTAR_UNAME_SIZE) {
+	if (header.uname && encoder.encode(header.uname).length > USTAR_UNAME_SIZE) {
 		paxRecords.uname = header.uname;
 	}
 
-	if (header.gname && header.gname.length > USTAR_GNAME_SIZE) {
+	if (header.gname && encoder.encode(header.gname).length > USTAR_GNAME_SIZE) {
 		paxRecords.gname = header.gname;
 	}
 
@@ -105,26 +105,28 @@ export function generatePax(header: TarHeader): {
 }
 
 // Tries to split a long path into a USTAR compatible name and prefix.
+// Uses byte lengths to correctly handle multi-byte UTF-8 characters.
 export function findUstarSplit(
 	path: string,
 ): { name: string; prefix: string } | null {
 	// No split needed if the path already fits in the name field.
-	if (path.length <= USTAR_NAME_SIZE) {
+	if (encoder.encode(path).length <= USTAR_NAME_SIZE) {
 		return null;
 	}
 
-	// For the name part to fit, the slash must be at or after this index.
-	const minSlashIndex = path.length - USTAR_NAME_SIZE - 1;
+	// Find the rightmost '/' that allows both parts to fit within byte limits.
+	for (let i = path.length - 1; i > 0; i--) {
+		if (path[i] !== "/") continue;
 
-	// Find the rightmost slash that respects the prefix length limit (155).
-	const slashIndex = path.lastIndexOf("/", USTAR_PREFIX_SIZE);
+		const prefix = path.slice(0, i);
+		const name = path.slice(i + 1);
 
-	// A valid split exists if we found a slash and it allows both parts to fit.
-	if (slashIndex > 0 && slashIndex >= minSlashIndex) {
-		return {
-			prefix: path.slice(0, slashIndex),
-			name: path.slice(slashIndex + 1),
-		};
+		if (
+			encoder.encode(prefix).length <= USTAR_PREFIX_SIZE &&
+			encoder.encode(name).length <= USTAR_NAME_SIZE
+		) {
+			return { prefix, name };
+		}
 	}
 
 	return null; // No valid split point found.
