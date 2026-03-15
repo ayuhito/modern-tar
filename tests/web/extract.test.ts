@@ -271,7 +271,7 @@ describe("createTarDecoder", () => {
 		expect(finalRead.done).toBe(true);
 	});
 
-	it("limits unread headers while the outer reader stalls", async () => {
+	it("continues serving buffered headers before the source closes", async () => {
 		const archive = await createBaseArchive([
 			{ header: { name: "one/", type: "directory", size: 0 } },
 			{ header: { name: "two/", type: "directory", size: 0 } },
@@ -301,25 +301,25 @@ describe("createTarDecoder", () => {
 
 		const thirdResult = await readWithTimeout(
 			reader.read(),
-			"Timed out waiting for third unread header",
+			"Timed out waiting for third buffered header",
 		);
 		expect(thirdResult.done).toBe(false);
 		expect(thirdResult.value?.header.name).toBe("three/");
 
-		const fourthReadPromise = reader.read();
-		await expectToStayPending(fourthReadPromise);
-
-		await writer.close();
-
 		const fourthResult = await readWithTimeout(
-			fourthReadPromise,
-			"Timed out waiting for fourth unread header",
+			reader.read(),
+			"Timed out waiting for fourth buffered header",
 		);
 		expect(fourthResult.done).toBe(false);
 		expect(fourthResult.value?.header.name).toBe("four/");
 
+		const finalReadPromise = reader.read();
+		await expectToStayPending(finalReadPromise);
+
+		await writer.close();
+
 		const finalRead = await readWithTimeout(
-			reader.read(),
+			finalReadPromise,
 			"Timed out waiting for decoder completion",
 		);
 		expect(finalRead.done).toBe(true);
