@@ -82,6 +82,32 @@ describe("options fs", () => {
 			expect(files).toEqual(["large.txt"]);
 		});
 
+		it("filters filesystem sources using source paths", async () => {
+			const sensitiveFile = path.join(tmpDir, "secret.txt");
+			await fs.writeFile(sensitiveFile, "top-secret");
+
+			const packStream = packTar(
+				[
+					{
+						type: "file",
+						source: sensitiveFile,
+						target: "safe/secret.txt",
+					},
+				],
+				{
+					filter: (filePath) => !path.isAbsolute(filePath),
+				},
+			);
+
+			const extractDir = path.join(tmpDir, "extract-filter-source");
+			const unpackStream = unpackTar(extractDir);
+			await pipeline(packStream, unpackStream);
+
+			await expect(
+				fs.readFile(path.join(extractDir, "safe", "secret.txt"), "utf-8"),
+			).rejects.toThrow();
+		});
+
 		it("uses map option to transform headers", async () => {
 			const sourceDir = path.join(FIXTURES_DIR, "a");
 			const packStream = packTar(sourceDir, {
