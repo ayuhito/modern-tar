@@ -14,30 +14,27 @@ export function createTarPacker(
 	let bytesWritten = 0;
 	let finalized = false;
 
+	const fail = (message: string): never => {
+		const error = new Error(message);
+		onError(error);
+		throw error;
+	};
+
 	return {
 		add(header: TarHeader): void {
-			if (finalized) {
-				const error = new Error("No new tar entries after finalize.");
-				onError(error);
-				throw error;
-			}
+			if (finalized) fail("No new tar entries after finalize.");
+			if (currentHeader !== null)
+				fail("Previous entry must be completed before adding a new one");
 
-			if (currentHeader !== null) {
-				const error = new Error(
-					"Previous entry must be completed before adding a new one",
-				);
-				onError(error);
-				throw error;
-			}
+			// Entries without a data body have size 0.
+			const size = isBodyless(header) ? 0 : header.size;
+
+			if (!Number.isSafeInteger(size) || size < 0)
+				fail("Invalid tar entry size.");
 
 			try {
-				// Entries without a data body have size 0.
-				const size = isBodyless(header) ? 0 : (header.size ?? 0);
-
 				const headerBlocks = getHeaderBlocks({ ...header, size });
-				for (const block of headerBlocks) {
-					onData(block);
-				}
+				for (const block of headerBlocks) onData(block);
 
 				currentHeader = { ...header, size };
 				bytesWritten = 0;
@@ -47,26 +44,16 @@ export function createTarPacker(
 		},
 
 		write(chunk: Uint8Array): void {
-			if (!currentHeader) {
-				const error = new Error("No active tar entry.");
-				onError(error);
-				throw error;
-			}
-
-			if (finalized) {
-				const error = new Error("Cannot write data after finalize.");
-				onError(error);
-				throw error;
-			}
+			if (!currentHeader) fail("No active tar entry.");
+			if (finalized) fail("Cannot write data after finalize.");
 
 			const newTotal = bytesWritten + chunk.length;
-			if (newTotal > currentHeader.size) {
-				const error = new Error(
-					`"${currentHeader.name}" exceeds given size of ${currentHeader.size} bytes.`,
+			// biome-ignore lint/style/noNonNullAssertion: Checked above.
+			if (newTotal > currentHeader!.size)
+				fail(
+					// biome-ignore lint/style/noNonNullAssertion: Checked above.
+					`"${currentHeader!.name}" exceeds given size of ${currentHeader!.size} bytes.`,
 				);
-				onError(error);
-				throw error;
-			}
 
 			try {
 				bytesWritten = newTotal;
@@ -77,27 +64,18 @@ export function createTarPacker(
 		},
 
 		endEntry(): void {
-			if (!currentHeader) {
-				const error = new Error("No active entry to end.");
-				onError(error);
-				throw error;
-			}
-
-			if (finalized) {
-				const error = new Error("Cannot end entry after finalize.");
-				onError(error);
-				throw error;
-			}
+			if (!currentHeader) fail("No active entry to end.");
+			if (finalized) fail("Cannot end entry after finalize.");
 
 			try {
-				if (bytesWritten !== currentHeader.size) {
-					const error = new Error(`Size mismatch for "${currentHeader.name}".`);
-					onError(error);
-					throw error;
-				}
+				// biome-ignore lint/style/noNonNullAssertion: Checked above.
+				if (bytesWritten !== currentHeader!.size)
+					// biome-ignore lint/style/noNonNullAssertion: Checked above.
+					fail(`Size mismatch for "${currentHeader!.name}".`);
 
 				// Add padding to reach 512-byte boundary.
-				const paddingSize = -currentHeader.size & BLOCK_SIZE_MASK;
+				// biome-ignore lint/style/noNonNullAssertion: Checked above.
+				const paddingSize = -currentHeader!.size & BLOCK_SIZE_MASK;
 				// Write padding buffer if needed.
 				if (paddingSize > 0) onData(new Uint8Array(paddingSize));
 
@@ -111,19 +89,9 @@ export function createTarPacker(
 		},
 
 		finalize(): void {
-			if (finalized) {
-				const error = new Error("Archive has already been finalized");
-				onError(error);
-				throw error;
-			}
-
-			if (currentHeader !== null) {
-				const error = new Error(
-					"Cannot finalize while an entry is still active",
-				);
-				onError(error);
-				throw error;
-			}
+			if (finalized) fail("Archive has already been finalized");
+			if (currentHeader !== null)
+				fail("Cannot finalize while an entry is still active");
 
 			try {
 				// Write two 512-byte zero blocks to mark end of archive

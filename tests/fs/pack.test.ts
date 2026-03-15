@@ -225,7 +225,7 @@ describe("pack", () => {
 				for await (const _chunk of packStream) {
 					// Just consume the stream to trigger the error
 				}
-			}).rejects.toThrow("Streams require a positive size.");
+			}).rejects.toThrow("Invalid tar entry size.");
 		});
 
 		it("throws error when StreamSource has zero size", async () => {
@@ -251,6 +251,35 @@ describe("pack", () => {
 				}
 			}).rejects.toThrow("Streams require a positive size.");
 		});
+
+		it.each([Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+			"throws error when StreamSource size is %p",
+			async (size) => {
+				const sources = [
+					{
+						type: "stream" as const,
+						content: new ReadableStream({
+							start(controller) {
+								controller.enqueue(
+									new TextEncoder().encode("test content"),
+								);
+								controller.close();
+							},
+						}),
+						target: "test.txt",
+						size,
+					},
+				];
+
+				const packStream = packTar(sources);
+
+				await expect(async () => {
+					for await (const _chunk of packStream) {
+						// Just consume the stream to trigger the error
+					}
+				}).rejects.toThrow("Invalid tar entry size.");
+			},
+		);
 
 		it("works correctly with valid StreamSource size", async () => {
 			const content = "test content for valid stream";
