@@ -20,6 +20,33 @@ const createBaseArchive = (
 	return packTar(entries);
 };
 
+const readWithTimeout = <T>(
+	promise: Promise<T>,
+	message: string,
+	ms = 100,
+): Promise<T> =>
+	Promise.race([
+		promise,
+		new Promise<never>((_, reject) =>
+			setTimeout(() => reject(new Error(message)), ms),
+		),
+	]);
+
+const expectToStayPending = async <T>(
+	promise: Promise<T>,
+	ms = 50,
+): Promise<void> => {
+	const pending = Symbol("pending");
+	const result = await Promise.race([
+		promise,
+		new Promise<typeof pending>((resolve) =>
+			setTimeout(() => resolve(pending), ms),
+		),
+	]);
+
+	expect(result).toBe(pending);
+};
+
 describe("unpackTar", () => {
 	it("extracts a single file tar", async () => {
 		const buffer = await fs.readFile(ONE_FILE_TAR);
@@ -188,6 +215,148 @@ describe("createTarDecoder", () => {
 		}
 
 		expect(names).toEqual(["dir/", "dir/file.txt", "dir/empty.txt"]);
+	});
+
+	it("pauses body streaming until the current entry is cancelled", async () => {
+		const archive = await createBaseArchive([
+			{
+				header: { name: "large.bin", type: "file", size: 2048 },
+				body: new Uint8Array(2048).fill(97),
+			},
+			{ header: { name: "after.txt", type: "file", size: 5 }, body: "hello" },
+		]);
+
+		const decoder = createTarDecoder();
+		const reader = decoder.readable.getReader();
+		const writer = decoder.writable.getWriter();
+
+		const writeAll = (async () => {
+			for (let i = 0; i < archive.length; i += 128) {
+				await writer.write(archive.subarray(i, i + 128));
+			}
+		})();
+
+		const firstResult = await readWithTimeout(
+			reader.read(),
+			"Timed out waiting for first entry",
+		);
+		expect(firstResult.done).toBe(false);
+		const firstEntry = firstResult.value;
+		if (!firstEntry) throw new Error("Expected first entry");
+		expect(firstEntry.header.name).toBe("large.bin");
+
+		await writeAll;
+
+		const secondReadPromise = reader.read();
+		await expectToStayPending(secondReadPromise);
+
+		await firstEntry.body.cancel();
+
+		const secondResult = await readWithTimeout(
+			secondReadPromise,
+			"Timed out waiting for second entry",
+		);
+		expect(secondResult.done).toBe(false);
+		const secondEntry = secondResult.value;
+		if (!secondEntry) throw new Error("Expected second entry");
+		expect(secondEntry.header.name).toBe("after.txt");
+
+		await secondEntry.body.cancel();
+		await writer.close();
+
+		const finalRead = await readWithTimeout(
+			reader.read(),
+			"Timed out waiting for decoder completion",
+		);
+		expect(finalRead.done).toBe(true);
+	});
+
+	it("limits unread headers while the outer reader stalls", async () => {
+		const archive = await createBaseArchive([
+			{ header: { name: "one/", type: "directory", size: 0 } },
+			{ header: { name: "two/", type: "directory", size: 0 } },
+			{ header: { name: "three/", type: "directory", size: 0 } },
+			{ header: { name: "four/", type: "directory", size: 0 } },
+		]);
+
+		const decoder = createTarDecoder();
+		const reader = decoder.readable.getReader();
+		const writer = decoder.writable.getWriter();
+
+		await writer.write(archive);
+
+		const firstResult = await readWithTimeout(
+			reader.read(),
+			"Timed out waiting for first unread header",
+		);
+		expect(firstResult.done).toBe(false);
+		expect(firstResult.value?.header.name).toBe("one/");
+
+		const secondResult = await readWithTimeout(
+			reader.read(),
+			"Timed out waiting for second unread header",
+		);
+		expect(secondResult.done).toBe(false);
+		expect(secondResult.value?.header.name).toBe("two/");
+
+		const thirdReadPromise = reader.read();
+		await expectToStayPending(thirdReadPromise);
+
+		await writer.close();
+
+		const thirdResult = await readWithTimeout(
+			thirdReadPromise,
+			"Timed out waiting for third unread header",
+		);
+		expect(thirdResult.done).toBe(false);
+		expect(thirdResult.value?.header.name).toBe("three/");
+
+		const fourthResult = await readWithTimeout(
+			reader.read(),
+			"Timed out waiting for fourth unread header",
+		);
+		expect(fourthResult.done).toBe(false);
+		expect(fourthResult.value?.header.name).toBe("four/");
+
+		const finalRead = await readWithTimeout(
+			reader.read(),
+			"Timed out waiting for decoder completion",
+		);
+		expect(finalRead.done).toBe(true);
+	});
+
+	it("flushes trailing buffered entries when the source closes", async () => {
+		const archive = await createBaseArchive([
+			{ header: { name: "one/", type: "directory", size: 0 } },
+			{ header: { name: "two/", type: "directory", size: 0 } },
+			{ header: { name: "three/", type: "directory", size: 0 } },
+		]);
+
+		const decoder = createTarDecoder();
+		const reader = decoder.readable.getReader();
+		const writer = decoder.writable.getWriter();
+
+		await writer.write(archive);
+		await writer.close();
+
+		const names: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			const result = await readWithTimeout(
+				reader.read(),
+				"Timed out waiting for flushed entry",
+			);
+			expect(result.done).toBe(false);
+			if (!result.value) throw new Error("Expected flushed entry");
+			names.push(result.value.header.name);
+		}
+
+		expect(names).toEqual(["one/", "two/", "three/"]);
+
+		const finalRead = await readWithTimeout(
+			reader.read(),
+			"Timed out waiting for decoder completion",
+		);
+		expect(finalRead.done).toBe(true);
 	});
 
 	it("rejects a stream with an invalid checksum in strict mode", async () => {

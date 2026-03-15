@@ -28,7 +28,10 @@ export function generatePax(header: TarHeader): {
 	}
 
 	// Check max linkname length.
-	if (header.linkname && encoder.encode(header.linkname).length > USTAR_NAME_SIZE) {
+	if (
+		header.linkname &&
+		encoder.encode(header.linkname).length > USTAR_NAME_SIZE
+	) {
 		paxRecords.linkpath = header.linkname;
 	}
 

@@ -246,7 +246,9 @@ describe("V7 tar format support", () => {
 			expect(linkEntry.header.size).toBe(0);
 
 			expect(fileEntry.header.name).toBe("next-file.txt");
-			expect(new TextDecoder().decode(fileEntry.data).trim()).toBe("Hello World");
+			expect(new TextDecoder().decode(fileEntry.data).trim()).toBe(
+				"Hello World",
+			);
 		});
 	});
 });
