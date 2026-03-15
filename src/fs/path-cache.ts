@@ -19,10 +19,11 @@ export const createPathCache = (
 	destDirPath: string,
 	options: UnpackOptionsFS,
 ) => {
+	const { maxDepth = 1024, dmode } = options;
 	// Serializes directory creation operations within the same directory tree.
 	const dirPromises = createCache<Promise<void>>();
 	// Tracks path conflicts to prevent file/directory type mismatches.
-	const pathConflicts = createCache<TarHeader["type"]>();
+	const pathConflicts = new Map<string, TarHeader["type"]>();
 	// Stores hardlinks to be created after all files are written.
 	const deferredLinks: Array<{ linkTarget: string; outPath: string }> = [];
 	// Caches resolved real paths for symlinked directories.
@@ -176,7 +177,6 @@ export const createPathCache = (
 		 */
 		async preparePath(header: TarHeader): Promise<string | undefined> {
 			const { name, linkname, type, mode, mtime } = header;
-			const { maxDepth = 1024, dmode } = options;
 
 			const normalizedName = normalizeHeaderName(name);
 			const destDir = await destDirPromise;
