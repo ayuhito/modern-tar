@@ -44,6 +44,7 @@ export function createTarDecoder(
 	// Pull from the unpacker and push to the appropriate streams.
 	const pump = (
 		controller: TransformStreamDefaultController<ParsedTarEntry>,
+		force = false,
 	) => {
 		if (pumping) return;
 		pumping = true;
@@ -52,13 +53,19 @@ export function createTarDecoder(
 			while (true) {
 				if (unpacker.isEntryActive()) {
 					if (bodyController) {
+						if ((bodyController.desiredSize ?? 1) <= 0) break;
+
 						const fed = unpacker.streamBody(
-							// biome-ignore lint/style/noNonNullAssertion: Checked above.
-							// biome-ignore lint/complexity/noCommaOperator: Smaller callback.
-							(c) => (bodyController!.enqueue(c), true),
+							(c) =>
+								(
+									// biome-ignore lint/style/noNonNullAssertion lint/complexity/noCommaOperator: Checked above and smaller bundle size.
+									bodyController!.enqueue(c),
+									// biome-ignore lint/style/noNonNullAssertion: Checked above.
+									(bodyController!.desiredSize ?? 1) > 0
+								),
 						);
 
-						// Rxeturns 0 if no data is available OR if body is complete.
+						// Returns 0 if no data is available OR if body is complete.
 						if (fed === 0 && !unpacker.isBodyComplete()) break;
 					} else if (!unpacker.skipEntry()) {
 						break;
@@ -74,6 +81,8 @@ export function createTarDecoder(
 						if (!unpacker.skipPadding()) break;
 					}
 				} else {
+					if (!force && (controller.desiredSize ?? 0) < 0) break;
+
 					// If entry is not active, try to read the next header.
 					const header = unpacker.readHeader();
 					if (header === null || header === undefined) break;
@@ -124,7 +133,8 @@ export function createTarDecoder(
 			flush(controller) {
 				try {
 					unpacker.end();
-					pump(controller);
+					// Flush drains any final buffered headers/EOF state after the last write.
+					pump(controller, true);
 					unpacker.validateEOF();
 
 					if (unpacker.isEntryActive() && !unpacker.isBodyComplete()) {
