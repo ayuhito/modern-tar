@@ -106,98 +106,94 @@ describe("unpack tar", () => {
 		expect(names).toEqual(["first.txt", "second.txt"]);
 	});
 
-	it(
-		"streams real tarball and extracts wasm via filter",
-		{ timeout: 60_000 },
-		async () => {
-			const response = await fetch(TSGO_WASM_URL);
-			if (!response.body) throw new Error("No response body");
+	it("streams real tarball and extracts wasm via filter", {
+		timeout: 60_000,
+	}, async () => {
+		const response = await fetch(TSGO_WASM_URL);
+		if (!response.body) throw new Error("No response body");
 
-			const tarStream = response.body.pipeThrough(createGzipDecoder());
-			const entryStream = tarStream.pipeThrough(createTarDecoder());
-			const reader = entryStream.getReader();
+		const tarStream = response.body.pipeThrough(createGzipDecoder());
+		const entryStream = tarStream.pipeThrough(createTarDecoder());
+		const reader = entryStream.getReader();
 
-			let sawWasm = false;
-			let wasmLength = 0;
-			try {
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
+		let sawWasm = false;
+		let wasmLength = 0;
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
 
-					const name = value.header.name.split("/").slice(1).join("/");
-					if (name !== "tsgo.wasm") {
-						const skipReader = value.body.getReader();
-						while (true) {
-							const { done: skipDone } = await skipReader.read();
-							if (skipDone) break;
-						}
-						skipReader.releaseLock();
-						continue;
-					}
-
-					// Read the entire body to ensure the stream completes without hanging.
-					const bodyReader = value.body.getReader();
-					let total = 0;
+				const name = value.header.name.split("/").slice(1).join("/");
+				if (name !== "tsgo.wasm") {
+					const skipReader = value.body.getReader();
 					while (true) {
-						const { done: bodyDone, value: chunk } = await bodyReader.read();
-						if (bodyDone) break;
-						total += chunk?.length ?? 0;
+						const { done: skipDone } = await skipReader.read();
+						if (skipDone) break;
 					}
-					wasmLength = total;
-					expect(wasmLength).toBeGreaterThan(0);
-					sawWasm = true;
-					bodyReader.releaseLock();
-					// Continue to drain the rest of the entries to ensure full completion.
+					skipReader.releaseLock();
+					continue;
 				}
-			} finally {
-				reader.releaseLock();
+
+				// Read the entire body to ensure the stream completes without hanging.
+				const bodyReader = value.body.getReader();
+				let total = 0;
+				while (true) {
+					const { done: bodyDone, value: chunk } = await bodyReader.read();
+					if (bodyDone) break;
+					total += chunk?.length ?? 0;
+				}
+				wasmLength = total;
+				expect(wasmLength).toBeGreaterThan(0);
+				sawWasm = true;
+				bodyReader.releaseLock();
+				// Continue to drain the rest of the entries to ensure full completion.
 			}
+		} finally {
+			reader.releaseLock();
+		}
 
-			expect(sawWasm).toBe(true);
-			expect(wasmLength).toBeGreaterThan(0);
-		},
-	);
+		expect(sawWasm).toBe(true);
+		expect(wasmLength).toBeGreaterThan(0);
+	});
 
-	it(
-		"unpackTar resolves when filtering a streamed gzip tarball",
-		{ timeout: 60_000 },
-		async () => {
-			const response = await fetch(TSGO_WASM_URL);
-			if (!response.body) throw new Error("No response body");
+	it("unpackTar resolves when filtering a streamed gzip tarball", {
+		timeout: 60_000,
+	}, async () => {
+		const response = await fetch(TSGO_WASM_URL);
+		if (!response.body) throw new Error("No response body");
 
-			const tarStream = response.body.pipeThrough(createGzipDecoder());
+		const tarStream = response.body.pipeThrough(createGzipDecoder());
 
-			const { entries, durationMs } = await Promise.race([
-				(async () => {
-					const start = performance.now();
-					const results = await unpackTar(tarStream, {
-						strip: 1,
-						filter: (header) => header.name === "tsgo.wasm",
-					});
-					return {
-						entries: results,
-						durationMs: performance.now() - start,
-					};
-				})(),
-				new Promise<never>((_, reject) =>
-					setTimeout(
-						() =>
-							reject(
-								new Error(
-									"unpackTar did not resolve within the expected timeframe",
-								),
+		const { entries, durationMs } = await Promise.race([
+			(async () => {
+				const start = performance.now();
+				const results = await unpackTar(tarStream, {
+					strip: 1,
+					filter: (header) => header.name === "tsgo.wasm",
+				});
+				return {
+					entries: results,
+					durationMs: performance.now() - start,
+				};
+			})(),
+			new Promise<never>((_, reject) =>
+				setTimeout(
+					() =>
+						reject(
+							new Error(
+								"unpackTar did not resolve within the expected timeframe",
 							),
-						10_000,
-					),
+						),
+					10_000,
 				),
-			]);
+			),
+		]);
 
-			expect(entries).toHaveLength(1);
-			const [wasm] = entries;
-			expect(wasm).toBeDefined();
-			expect(wasm.header.name).toBe("tsgo.wasm");
-			expect(wasm.data?.length).toBeGreaterThan(0);
-			expect(durationMs).toBeLessThan(10_000);
-		},
-	);
+		expect(entries).toHaveLength(1);
+		const [wasm] = entries;
+		expect(wasm).toBeDefined();
+		expect(wasm.header.name).toBe("tsgo.wasm");
+		expect(wasm.data?.length).toBeGreaterThan(0);
+		expect(durationMs).toBeLessThan(10_000);
+	});
 });

@@ -42,30 +42,28 @@ describe("real world examples", () => {
 		expect(readmeEntry?.data?.length).toBe(1107);
 	});
 
-	it(
-		"extracts a massive native binary package (@next/swc)",
-		{ timeout: 60000 },
-		async () => {
-			const entries = await extractTgz(NEXT_SWC_TGZ);
+	it("extracts a massive native binary package (@next/swc)", {
+		timeout: 60000,
+	}, async () => {
+		const entries = await extractTgz(NEXT_SWC_TGZ);
 
-			const filesAndDirs = entries.filter(
-				(e) => e.header.type === "file" || e.header.type === "directory",
-			);
-			expect(filesAndDirs.length).toBe(3);
+		const filesAndDirs = entries.filter(
+			(e) => e.header.type === "file" || e.header.type === "directory",
+		);
+		expect(filesAndDirs.length).toBe(3);
 
-			// Verify the massive binary file exists and is the correct size
-			const binaryEntry = entries.find(
-				(e) => e.header.name === "package/next-swc.linux-x64-gnu.node",
-			);
-			expect(binaryEntry).toBeDefined();
-			expect(binaryEntry?.data?.length).toBe(131406240);
+		// Verify the massive binary file exists and is the correct size
+		const binaryEntry = entries.find(
+			(e) => e.header.name === "package/next-swc.linux-x64-gnu.node",
+		);
+		expect(binaryEntry).toBeDefined();
+		expect(binaryEntry?.data?.length).toBe(131406240);
 
-			// Verify package.json exists
-			expect(
-				entries.some((e) => e.header.name === "package/package.json"),
-			).toBe(true);
-		},
-	);
+		// Verify package.json exists
+		expect(entries.some((e) => e.header.name === "package/package.json")).toBe(
+			true,
+		);
+	});
 
 	it("extracts a native C++ package with build files (sharp)", async () => {
 		const entries = await extractTgz(SHARP_TGZ);
