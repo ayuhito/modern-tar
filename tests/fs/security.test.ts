@@ -904,6 +904,52 @@ describe("security", () => {
 		);
 	});
 
+	describe("pre-existing path attacks", () => {
+		it.skipIf(process.platform === "win32")(
+			"prevents overwriting through a pre-existing leaf symlink",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const outsideDir = path.join(tmpDir, "outside");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(outsideDir, { recursive: true });
+
+				const victimPath = path.join(outsideDir, "victim.txt");
+				await fs.writeFile(victimPath, "original");
+
+				const leafSymlink = path.join(extractDir, "escape.txt");
+				await fs.symlink(path.relative(extractDir, victimPath), leafSymlink);
+
+				const entries: TarEntry[] = [
+					{
+						header: {
+							name: "escape.txt",
+							size: 6,
+							type: "file",
+							mode: 0o644,
+							mtime: new Date(),
+							uid: 0,
+							gid: 0,
+						},
+						body: "pwned!",
+					},
+				];
+
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
+
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toMatchObject({
+					code: "ELOOP",
+				});
+
+				expect(await fs.readFile(victimPath, "utf8")).toBe("original");
+				expect(await fs.readlink(leafSymlink)).toBe(
+					path.relative(extractDir, victimPath),
+				);
+			},
+		);
+	});
+
 	describe("CVE-specific attacks", () => {
 		it.skipIf(process.platform === "win32")(
 			"prevents tar-fs symlink traversal vulnerability (CVE-2025-59343)",

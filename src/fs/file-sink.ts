@@ -14,6 +14,12 @@ export interface FileSink {
 
 /** Maximum number of bytes to buffer before applying backpressure. */
 const BATCH_BYTES = 256 * 1024; // 256KB
+const OPEN_FLAGS =
+	fs.constants.O_WRONLY |
+	fs.constants.O_CREAT |
+	fs.constants.O_TRUNC |
+	// Fail if the destination is a symlink instead of following it.
+	(fs.constants.O_NOFOLLOW ?? 0);
 
 const STATE_UNOPENED = 0;
 const STATE_OPENING = 1;
@@ -184,7 +190,7 @@ export function createFileSink(
 		if (state !== STATE_UNOPENED) return;
 		state = STATE_OPENING;
 
-		fs.open(path, "w", mode, (err, openFd) => {
+		fs.open(path, OPEN_FLAGS, mode, (err, openFd) => {
 			if (err) return fail(err);
 
 			if (state === STATE_CLOSED || state === STATE_FAILED) {
