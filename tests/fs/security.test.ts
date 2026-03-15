@@ -2062,6 +2062,70 @@ describe("security", () => {
 			);
 		});
 
+		it(
+			"preserves duplicate path tracking beyond cache-sized archives",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				const entries: TarEntry[] = [
+					{
+						header: {
+							name: "dup.txt",
+							size: 5,
+							type: "file",
+							mode: 0o644,
+							mtime: new Date(),
+							uid: 0,
+							gid: 0,
+						},
+						body: "FIRST",
+					},
+				];
+
+				for (let i = 0; i < 10000; i++) {
+					entries.push({
+						header: {
+							name: `filler-${i}.txt`,
+							size: 0,
+							type: "file",
+							mode: 0o644,
+							mtime: new Date(),
+							uid: 0,
+							gid: 0,
+						},
+						body: "",
+					});
+				}
+
+				entries.push({
+					header: {
+						name: "dup.txt",
+						size: 6,
+						type: "file",
+						mode: 0o644,
+						mtime: new Date(),
+						uid: 0,
+						gid: 0,
+					},
+					body: "SECOND",
+				});
+
+				const tarBuffer = await packTar(entries);
+				const tarStream = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
+
+				await expect(pipeline(tarStream, unpackStream)).resolves.toBeUndefined();
+
+				const dupContent = await fs.readFile(
+					path.join(extractDir, "dup.txt"),
+					"utf8",
+				);
+				expect(dupContent).toBe("FIRST");
+			},
+			20_000,
+		);
+
 		it("allows legitimate same-type operations on same path", async () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });

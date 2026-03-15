@@ -488,24 +488,25 @@ describe("decompression", () => {
 			await expect(streamToBuffer(compressedStream)).rejects.toThrow();
 		});
 
-		it.each([Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
-			"rejects invalid entry size %p before writing",
-			async (size) => {
-				const { readable, controller } = createTarPacker();
+		it.each([
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			1.5,
+		])("rejects invalid entry size %p before writing", async (size) => {
+			const { readable, controller } = createTarPacker();
 
-				expect(() =>
-					controller.add({
-						name: "invalid.txt",
-						size,
-						type: "file",
-					}),
-				).toThrow("Invalid tar entry size.");
+			expect(() =>
+				controller.add({
+					name: "invalid.txt",
+					size,
+					type: "file",
+				}),
+			).toThrow("Invalid tar entry size.");
 
-				await expect(streamToBuffer(readable)).rejects.toThrow(
-					"Invalid tar entry size.",
-				);
-			},
-		);
+			await expect(streamToBuffer(readable)).rejects.toThrow(
+				"Invalid tar entry size.",
+			);
+		});
 
 		it("detects malformed gzip headers", async () => {
 			// Create malformed gzip data

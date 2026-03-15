@@ -29,6 +29,7 @@
 		"@types/node": "^25.0.2",
 		"@vitest/browser-playwright": "4.0.15",
 		"@vitest/coverage-v8": "4.0.15",
+		"miniflare": "^4.20260301.1",
 		"tsdown": "^0.18.0",
 		"typescript": "^5.9.3",
 		"vitest": "4.0.15"
@@ -37,6 +38,7 @@
 		"build": "tsdown",
 		"dev": "tsdown --watch",
 		"test": "vitest",
+		"test:workers": "tsdown && vitest --config vitest.workers.config.ts --run",
 		"coverage": "vitest run --coverage",
 		"check": "biome check --write",
 		"typecheck": "tsc --noEmit",

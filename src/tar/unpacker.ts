@@ -40,6 +40,11 @@ export function createUnpacker(options: DecoderOptions = {}) {
 		isBodyComplete: (): boolean =>
 			!currentEntry || currentEntry.remaining === 0,
 
+		/** Whether the buffered bytes are sufficient to finish the current entry. */
+		canFinish: (): boolean =>
+			!currentEntry ||
+			available() >= currentEntry.remaining + currentEntry.padding,
+
 		/** Add data to the internal buffer. */
 		write(chunk: Uint8Array): void {
 			if (ended) throw new Error("Archive already ended.");
@@ -120,8 +125,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				const metaParser = getMetaParser(internalHeader.type);
 				if (metaParser) {
 					const paddedSize =
-						internalHeader.size +
-						(-internalHeader.size & BLOCK_SIZE_MASK);
+						internalHeader.size + (-internalHeader.size & BLOCK_SIZE_MASK);
 
 					// Check if we have enough data for the meta entry's body using total size.
 					if (available() < BLOCK_SIZE + paddedSize) {
