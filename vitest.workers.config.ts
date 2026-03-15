@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	test: {
+		include: ["tests/workers/workers.test.ts"],
 		exclude: [
 			"**/node_modules/**",
 			"**/dist/**",
@@ -9,21 +10,9 @@ export default defineConfig({
 			"**/.{idea,git,cache,output,temp}/**",
 			"**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
 			"**/tests/browser/**",
-			"**/tests/workers/**",
 			// Exclude problematic symlink fixtures that cause ELOOP errors
 			"**/tests/fs/fixtures/e/symlink",
 		],
-		coverage: {
-			exclude: [
-				"**/node_modules/**",
-				"**/dist/**",
-				"**/.{idea,git,cache,output,temp}/**",
-				"**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
-				"**/tests/**",
-				"**/benchmarks/**",
-				"tsdown.config.ts",
-			],
-		},
 	},
 	server: {
 		watch: {

@@ -239,10 +239,7 @@ export function packTar(
 					const isDir = target.endsWith("/");
 
 					if (job.type === "stream") {
-						if (
-							(!isDir && job.size <= 0) ||
-							(isDir && job.size !== 0)
-						)
+						if ((!isDir && job.size <= 0) || (isDir && job.size !== 0))
 							throw new Error(
 								isDir
 									? "Streams for directories must have size 0."

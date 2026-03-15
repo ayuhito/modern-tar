@@ -37,21 +37,79 @@ export function createTarDecoder(
 	options: DecoderOptions = {},
 ): TransformStream<Uint8Array, ParsedTarEntry> {
 	const unpacker = createUnpacker(options);
+	const strict = options.strict ?? false;
 
+	// Drives the outer stream of ParsedTarEntry objects.
+	let controller: ReadableStreamDefaultController<ParsedTarEntry> | null = null;
+	// Points at the currently active entry body stream.
 	let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null;
 	let pumping = false;
+	// We can parse the two zero EOF blocks before the writable side actually closes.
+	// Keeping these states separate lets strict mode reject non-zero trailing bytes.
+	let eofReached = false;
+	let sourceEnded = false;
+	let closed = false;
 
-	// Pull from the unpacker and push to the appropriate streams.
-	const pump = (
-		controller: TransformStreamDefaultController<ParsedTarEntry>,
-		force = false,
-	) => {
-		if (pumping) return;
+	const closeBody = () => {
+		try {
+			bodyController?.close();
+		} catch {}
+		bodyController = null;
+	};
+
+	const fail = (reason: unknown) => {
+		if (closed) return;
+		closed = true;
+
+		try {
+			bodyController?.error(reason);
+		} catch {}
+		bodyController = null;
+
+		try {
+			// biome-ignore lint/style/noNonNullAssertion: Closed flg checks.
+			controller!.error(reason);
+		} catch {}
+		controller = null;
+	};
+
+	const finish = () => {
+		if (closed) return;
+		closed = true;
+		closeBody();
+
+		try {
+			// biome-ignore lint/style/noNonNullAssertion: Closed flag checks.
+			controller!.close();
+		} catch {}
+		controller = null;
+	};
+
+	const truncateOrFinish = () => {
+		if (strict) throw new Error("Tar archive is truncated.");
+		finish();
+	};
+
+	const pump = () => {
+		if (pumping || closed || !controller) return;
 		pumping = true;
 
 		try {
 			while (true) {
+				if (eofReached) {
+					if (sourceEnded) {
+						unpacker.validateEOF();
+						finish();
+					}
+					break;
+				}
+
 				if (unpacker.isEntryActive()) {
+					if (sourceEnded && !unpacker.canFinish()) {
+						truncateOrFinish();
+						break;
+					}
+
 					if (bodyController) {
 						if ((bodyController.desiredSize ?? 1) <= 0) break;
 
@@ -65,27 +123,44 @@ export function createTarDecoder(
 								),
 						);
 
-						// Returns 0 if no data is available OR if body is complete.
-						if (fed === 0 && !unpacker.isBodyComplete()) break;
+						if (fed === 0 && !unpacker.isBodyComplete()) {
+							if (sourceEnded) truncateOrFinish();
+							break;
+						}
 					} else if (!unpacker.skipEntry()) {
+						if (sourceEnded) truncateOrFinish();
 						break;
 					}
 
 					// Cleanup.
 					if (unpacker.isBodyComplete()) {
-						try {
-							bodyController?.close();
-						} catch {}
-						bodyController = null;
+						closeBody();
 
-						if (!unpacker.skipPadding()) break;
+						if (!unpacker.skipPadding()) {
+							if (sourceEnded) truncateOrFinish();
+							break;
+						}
 					}
 				} else {
-					if (!force && (controller.desiredSize ?? 0) < 0) break;
+					if ((controller.desiredSize ?? 0) < 0) break;
 
 					// If entry is not active, try to read the next header.
 					const header = unpacker.readHeader();
-					if (header === null || header === undefined) break;
+					if (header === null) {
+						if (sourceEnded) finish();
+						break;
+					}
+
+					if (header === undefined) {
+						if (sourceEnded) {
+							unpacker.validateEOF();
+							finish();
+							break;
+						}
+
+						eofReached = true;
+						break;
+					}
 
 					// Start a new entry.
 					controller.enqueue({
@@ -95,64 +170,70 @@ export function createTarDecoder(
 								if (header.size === 0) c.close();
 								else bodyController = c;
 							},
-							pull: () => pump(controller),
+							pull: pump,
 							cancel() {
 								bodyController = null;
-								pump(controller);
+								pump();
 							},
 						}),
 					});
 				}
 			}
 		} catch (error) {
-			try {
-				bodyController?.error(error);
-			} catch {}
-			bodyController = null;
+			fail(error);
 			throw error;
 		} finally {
 			pumping = false;
 		}
 	};
 
-	return new TransformStream<Uint8Array, ParsedTarEntry>(
-		{
-			transform(chunk, controller) {
+	return {
+		readable: new ReadableStream<ParsedTarEntry>(
+			{
+				start(c) {
+					controller = c;
+				},
+				pull: pump,
+				cancel(reason) {
+					if (reason !== undefined) fail(reason);
+					else finish();
+				},
+			},
+			{
+				// Memory management is managed by the unpacker, but HWM 2 does perform a bit better when working
+				// with many small entries.
+				highWaterMark: 2,
+			},
+		),
+
+		writable: new WritableStream<Uint8Array>({
+			write(chunk) {
 				try {
-					// Write incoming data to the unpacker.
+					if (eofReached && strict && chunk.some((byte) => byte !== 0))
+						throw new Error("Invalid EOF.");
+
 					unpacker.write(chunk);
-					pump(controller);
+					pump();
 				} catch (error) {
-					try {
-						bodyController?.error(error);
-					} catch {}
+					fail(error);
 					throw error;
 				}
 			},
 
-			flush(controller) {
+			close() {
 				try {
+					sourceEnded = true;
 					unpacker.end();
-					// Flush drains any final buffered headers/EOF state after the last write.
-					pump(controller, true);
-					unpacker.validateEOF();
-
-					if (unpacker.isEntryActive() && !unpacker.isBodyComplete()) {
-						try {
-							bodyController?.close();
-						} catch {}
-					}
+					pump();
 				} catch (error) {
-					try {
-						bodyController?.error(error);
-					} catch {}
+					fail(error);
 					throw error;
 				}
 			},
-		},
-		undefined,
-		// Memory management is managed by the unpacker, but HWM 2 does perform a bit better when working with
-		// many small entries.
-		{ highWaterMark: 2 },
-	);
+
+			abort(reason) {
+				fail(reason);
+			},
+		}),
+	};
 }
