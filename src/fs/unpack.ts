@@ -52,8 +52,15 @@ export function unpackTar(
 	// Track current file stream across write() calls for handling backpressure
 	let currentFileStream: FileSink | null = null;
 	let currentWriteCallback: ((chunk: Uint8Array) => boolean) | null = null;
+	// Detached file closes must still fail extraction if they error later.
+	let queuedError: Error | null = null;
 
-	return new Writable({
+	const onQueuedError = (err: Error) => {
+		queuedError ??= err;
+		if (!writable.destroyed) writable.destroy(err);
+	};
+
+	const writable = new Writable({
 		async write(chunk, _, cb) {
 			try {
 				unpacker.write(chunk);
@@ -87,7 +94,8 @@ export function unpackTar(
 
 						// Padding complete, close file.
 						const streamToClose = currentFileStream;
-						if (streamToClose) opQueue.add(() => streamToClose.end());
+						if (streamToClose)
+							opQueue.add(() => streamToClose.end()).catch(onQueuedError);
 
 						currentFileStream = null;
 						currentWriteCallback = null;
@@ -174,7 +182,7 @@ export function unpackTar(
 						}
 
 						// Close without await.
-						opQueue.add(() => fileStream.end());
+						opQueue.add(() => fileStream.end()).catch(onQueuedError);
 					} else {
 						// No body data or already handled.
 						if (!unpacker.skipEntry()) {
@@ -197,6 +205,7 @@ export function unpackTar(
 				await pathCache.ready();
 				// Wait for all file ops to complete.
 				await opQueue.onIdle();
+				if (queuedError) throw queuedError;
 				// Now that all files are written, create the hardlinks.
 				await pathCache.applyLinks();
 				cb();
@@ -227,4 +236,6 @@ export function unpackTar(
 			);
 		},
 	});
+
+	return writable;
 }
