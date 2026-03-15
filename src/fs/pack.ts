@@ -240,7 +240,6 @@ export function packTar(
 
 					if (job.type === "stream") {
 						if (
-							typeof job.size !== "number" ||
 							(!isDir && job.size <= 0) ||
 							(isDir && job.size !== 0)
 						)

@@ -225,7 +225,7 @@ describe("pack", () => {
 				for await (const _chunk of packStream) {
 					// Just consume the stream to trigger the error
 				}
-			}).rejects.toThrow("Streams require a positive size.");
+			}).rejects.toThrow("Invalid tar entry size.");
 		});
 
 		it("throws error when StreamSource has zero size", async () => {

@@ -27,7 +27,7 @@ export function createTarPacker(
 				fail("Previous entry must be completed before adding a new one");
 
 			// Entries without a data body have size 0.
-			const size = isBodyless(header) ? 0 : (header.size ?? 0);
+			const size = isBodyless(header) ? 0 : header.size;
 
 			if (!Number.isSafeInteger(size) || size < 0)
 				fail("Invalid tar entry size.");
