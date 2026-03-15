@@ -9,6 +9,7 @@ import {
 	writeOctal,
 	writeString,
 } from "../../src/tar/encoding";
+import { createTarHeader } from "../../src/tar/header";
 import { createUnpacker } from "../../src/tar/unpacker";
 import { streamToBuffer } from "../../src/web/stream-utils";
 
@@ -451,5 +452,31 @@ describe("tar utilities", () => {
 		}).not.toThrow();
 
 		expect(errorOccurred).toBe(false);
+	});
+
+	it("waits for oversized meta entry bodies without 32-bit overflow", () => {
+		const unpacker = createUnpacker();
+		const hugeMetaSize = 2 ** 31 + 1;
+
+		unpacker.write(
+			createTarHeader({
+				name: "meta",
+				size: hugeMetaSize,
+				type: "pax-header",
+			}),
+		);
+
+		expect(unpacker.readHeader()).toBeNull();
+
+		unpacker.write(
+			createTarHeader({
+				name: "file.txt",
+				size: 0,
+				type: "file",
+			}),
+		);
+
+		// The meta header should remain pending until its declared body arrives.
+		expect(unpacker.readHeader()).toBeNull();
 	});
 });

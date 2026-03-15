@@ -120,7 +120,8 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				const metaParser = getMetaParser(internalHeader.type);
 				if (metaParser) {
 					const paddedSize =
-						(internalHeader.size + BLOCK_SIZE_MASK) & ~BLOCK_SIZE_MASK;
+						internalHeader.size +
+						(-internalHeader.size & BLOCK_SIZE_MASK);
 
 					// Check if we have enough data for the meta entry's body using total size.
 					if (available() < BLOCK_SIZE + paddedSize) {
