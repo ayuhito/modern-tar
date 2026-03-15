@@ -313,7 +313,7 @@ export function packTar(
 				}
 
 				// BigIntStats have the same methods as regular Stats.
-				if (filter && !filter(target, stat as unknown as Stats)) return;
+				if (filter && !filter(job.source, stat as unknown as Stats)) return;
 
 				// Cast bigint fields to number where safe.
 				let header: TarHeader = {
