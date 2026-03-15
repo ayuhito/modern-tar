@@ -10,6 +10,8 @@ import { decoder, encoder } from "./encoding";
 import { createTarHeader } from "./header";
 import type { TarHeader } from "./types";
 
+const USTAR_SPLIT_MAX_SIZE = USTAR_PREFIX_SIZE + USTAR_NAME_SIZE + 1;
+
 // Checks a tar header for fields that exceed USTAR limits and generates a PAX header entry if necessary.
 export function generatePax(header: TarHeader): {
 	paxHeader: Uint8Array;
@@ -112,10 +114,18 @@ export function generatePax(header: TarHeader): {
 export function findUstarSplit(
 	path: string,
 ): { name: string; prefix: string } | null {
-	// No split needed if the path already fits in the name field.
-	if (encoder.encode(path).length <= USTAR_NAME_SIZE) {
+	const totalPathBytes = encoder.encode(path).length;
+
+	// A USTAR split only applies to UTF-8 paths that overflow name[100] but
+	// still fit within prefix[155] + "/" + name[100].
+	//
+	// Returning null here signals to the caller that a USTAR split is not possible
+	// and a PAX record should be used instead.
+	if (
+		totalPathBytes <= USTAR_NAME_SIZE ||
+		totalPathBytes > USTAR_SPLIT_MAX_SIZE
+	)
 		return null;
-	}
 
 	// Find the rightmost '/' that allows both parts to fit within byte limits.
 	for (let i = path.length - 1; i > 0; i--) {
@@ -127,9 +137,8 @@ export function findUstarSplit(
 		if (
 			encoder.encode(prefix).length <= USTAR_PREFIX_SIZE &&
 			encoder.encode(name).length <= USTAR_NAME_SIZE
-		) {
+		)
 			return { prefix, name };
-		}
 	}
 
 	return null; // No valid split point found.

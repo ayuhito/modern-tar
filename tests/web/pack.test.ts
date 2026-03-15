@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decoder } from "../../src/tar/encoding";
+import { decoder, encoder } from "../../src/tar/encoding";
 import { packTar, type TarEntry, unpackTar } from "../../src/web";
 
 describe("pack", () => {
@@ -192,6 +192,42 @@ describe("pack", () => {
 		// Also do a round-trip to be sure it extracts correctly.
 		const [extracted] = await unpackTar(packedBuffer);
 		expect(extracted.header.name).toBe(longName);
+	});
+
+	it("handles USTAR long filenames with multi-byte characters by byte length", async () => {
+		// 253 UTF-8 bytes: too large for name[100], but still valid for
+		// prefix[155] + "/" + name[100].
+		const expectedPrefix = "가".repeat(51); // 153 UTF-8 bytes
+		const expectedName = "나".repeat(33); // 99 UTF-8 bytes
+		const longName = `${expectedPrefix}/${expectedName}`;
+
+		expect(encoder.encode(longName).length).toBe(253);
+		expect(encoder.encode(expectedPrefix).length).toBeLessThanOrEqual(155);
+		expect(encoder.encode(expectedName).length).toBeLessThanOrEqual(100);
+
+		const entries: TarEntry[] = [
+			{
+				header: { name: longName, size: 4 },
+				body: "test",
+			},
+		];
+
+		const packedBuffer = await packTar(entries);
+		const headerBlock = packedBuffer.slice(0, 512);
+
+		const nameField = decoder.decode(
+			headerBlock.slice(0, 100).filter((b) => b !== 0),
+		);
+		const prefixField = decoder.decode(
+			headerBlock.slice(345, 345 + 155).filter((b) => b !== 0),
+		);
+
+		expect(nameField).toBe(expectedName);
+		expect(prefixField).toBe(expectedPrefix);
+
+		const [extracted] = await unpackTar(packedBuffer);
+		expect(extracted.header.name).toBe(longName);
+		expect(extracted.header.pax?.path).toBeUndefined();
 	});
 
 	it("packs and then extracts successfully (round-trip)", async () => {
