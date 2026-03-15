@@ -151,6 +151,8 @@ export function createTarDecoder(
 			},
 		},
 		undefined,
-		{ highWaterMark: 1 },
+		// Memory management is managed by the unpacker, but HWM 2 does perform a bit better when working with
+		// many small entries.
+		{ highWaterMark: 2 },
 	);
 }

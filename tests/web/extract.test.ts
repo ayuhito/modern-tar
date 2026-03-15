@@ -299,20 +299,20 @@ describe("createTarDecoder", () => {
 		expect(secondResult.done).toBe(false);
 		expect(secondResult.value?.header.name).toBe("two/");
 
-		const thirdReadPromise = reader.read();
-		await expectToStayPending(thirdReadPromise);
-
-		await writer.close();
-
 		const thirdResult = await readWithTimeout(
-			thirdReadPromise,
+			reader.read(),
 			"Timed out waiting for third unread header",
 		);
 		expect(thirdResult.done).toBe(false);
 		expect(thirdResult.value?.header.name).toBe("three/");
 
+		const fourthReadPromise = reader.read();
+		await expectToStayPending(fourthReadPromise);
+
+		await writer.close();
+
 		const fourthResult = await readWithTimeout(
-			reader.read(),
+			fourthReadPromise,
 			"Timed out waiting for fourth unread header",
 		);
 		expect(fourthResult.done).toBe(false);
