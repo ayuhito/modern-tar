@@ -130,11 +130,7 @@ export function createTarPacker(): {
 			// Bodyless entries should have size 0.
 			const bodyless = isBodyless(header);
 
-			// Shallow copy.
-			const h = { ...header };
-			if (bodyless) h.size = 0;
-
-			packer.add(h);
+			packer.add(header);
 			if (bodyless) packer.endEntry();
 
 			return new WritableStream<Uint8Array>({
