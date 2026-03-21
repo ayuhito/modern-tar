@@ -1,5 +1,5 @@
 import { isBodyless } from "./body";
-import { BLOCK_SIZE, BLOCK_SIZE_MASK } from "./constants";
+import { BLOCK_SIZE, BLOCK_SIZE_MASK, ZERO_BLOCK } from "./constants";
 import { getHeaderBlocks } from "./header";
 import type { TarHeader } from "./types";
 
@@ -33,10 +33,12 @@ export function createTarPacker(
 				fail("Invalid tar entry size.");
 
 			try {
-				const headerBlocks = getHeaderBlocks({ ...header, size });
+				const resolved = { ...header, size };
+				const headerBlocks = getHeaderBlocks(resolved);
+
 				for (const block of headerBlocks) onData(block);
 
-				currentHeader = { ...header, size };
+				currentHeader = resolved;
 				bytesWritten = 0;
 			} catch (error) {
 				onError(error as Error);
@@ -76,8 +78,8 @@ export function createTarPacker(
 				// Add padding to reach 512-byte boundary.
 				// biome-ignore lint/style/noNonNullAssertion: Checked above.
 				const paddingSize = -currentHeader!.size & BLOCK_SIZE_MASK;
-				// Write padding buffer if needed.
-				if (paddingSize > 0) onData(new Uint8Array(paddingSize));
+				// Write padding buffer if needed, reusing the pre-allocated ZERO_BLOCK.
+				if (paddingSize > 0) onData(ZERO_BLOCK.subarray(0, paddingSize));
 
 				// Reset state.
 				currentHeader = null;

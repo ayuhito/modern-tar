@@ -14,7 +14,7 @@ export function writeString(
 	}
 }
 
-// Writes a number as a zero-padded octal string.
+// Writes a number as a zero-padded octal string using direct byte writes.
 export function writeOctal(
 	view: Uint8Array,
 	offset: number,
@@ -23,10 +23,14 @@ export function writeOctal(
 ) {
 	if (value === undefined) return;
 
-	// Format to an octal string, pad with leading zeros to size - 1.
 	// The final byte is left as 0 (NUL terminator), assuming a zero-filled view.
-	const octalString = value.toString(8).padStart(size - 1, "0");
-	encoder.encodeInto(octalString, view.subarray(offset, offset + size - 1));
+	// Write octal digits right-to-left, filling remaining positions with '0' (0x30).
+	const end = offset + size - 2; // Last digit position (before NUL)
+
+	for (let i = end, v = value; i >= offset; --i) {
+		view[i] = (v & 7) + 48; // (v % 8) + ASCII '0'
+		v >>>= 3;
+	}
 }
 
 // Reads a NUL-terminated string from the view.
@@ -52,7 +56,7 @@ export function readOctal(
 	let value = 0;
 	const end = offset + size;
 
-	for (let i = offset; i < end; i++) {
+	for (let i = offset; i < end; ++i) {
 		const charCode = view[i];
 		if (charCode === 0) break; // Stop at NUL terminator
 		if (charCode === 32) continue; // Ignore whitespace
@@ -83,7 +87,7 @@ export function readNumeric(
 		result = view[offset] & 0x7f;
 
 		// Process the remaining bytes.
-		for (let i = 1; i < size; i++) {
+		for (let i = 1; i < size; ++i) {
 			result = result * 256 + view[offset + i];
 		}
 

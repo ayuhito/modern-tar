@@ -9,19 +9,13 @@ const ASCII_ZERO = 48; // '0'
 // Validates the checksum of a tar header block.
 export function validateChecksum(block: Uint8Array): boolean {
 	const stored = readOctal(block, USTAR_CHECKSUM_OFFSET, USTAR_CHECKSUM_SIZE);
+	const checksumEnd = USTAR_CHECKSUM_OFFSET + USTAR_CHECKSUM_SIZE;
 
-	let sum = 0;
-	for (let i = 0; i < block.length; i++) {
-		// If the byte is part of the checksum field, treat it as a space.
-		if (
-			i >= USTAR_CHECKSUM_OFFSET &&
-			i < USTAR_CHECKSUM_OFFSET + USTAR_CHECKSUM_SIZE
-		) {
-			sum += CHECKSUM_SPACE;
-		} else {
-			sum += block[i];
-		}
-	}
+	// Pre-added with spaces for the checksum field
+	let sum = CHECKSUM_SPACE * USTAR_CHECKSUM_SIZE;
+
+	for (let i = 0; i < USTAR_CHECKSUM_OFFSET; ++i) sum += block[i];
+	for (let i = checksumEnd; i < block.length; ++i) sum += block[i];
 
 	return stored === sum;
 }
@@ -43,7 +37,7 @@ export function writeChecksum(block: Uint8Array): void {
 
 	// Write checksum as a 6-digit octal string directly into the block.
 	// We work backwards from the last digit's position.
-	for (let i = USTAR_CHECKSUM_OFFSET + 6 - 1; i >= USTAR_CHECKSUM_OFFSET; i--) {
+	for (let i = USTAR_CHECKSUM_OFFSET + 6 - 1; i >= USTAR_CHECKSUM_OFFSET; --i) {
 		block[i] = (checksum & 7) + ASCII_ZERO; // (checksum % 8)
 		checksum >>= 3; // Math.floor(checksum / 8)
 	}

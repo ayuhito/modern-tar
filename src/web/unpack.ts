@@ -35,7 +35,7 @@ import type { ParsedTarEntry } from "./types";
  */
 export function createTarDecoder(
 	options: DecoderOptions = {},
-): TransformStream<Uint8Array, ParsedTarEntry> {
+): ReadableWritablePair<ParsedTarEntry, Uint8Array> {
 	const unpacker = createUnpacker(options);
 	const strict = options.strict ?? false;
 

@@ -39,6 +39,7 @@ import {
 	ZERO_BLOCK,
 } from "./constants";
 import {
+	decoder,
 	readNumeric,
 	readOctal,
 	readString,
@@ -185,7 +186,6 @@ const PAX_MAPPING: Record<
 
 // Parses PAX record data into an overrides object.
 export function parsePax(buffer: Uint8Array): HeaderOverrides {
-	const decoder = new TextDecoder("utf-8");
 	const overrides: HeaderOverrides = Object.create(null);
 	const pax: Record<string, string> = Object.create(null);
 	let offset = 0;
@@ -282,8 +282,8 @@ export function getHeaderBlocks(header: TarHeader): Uint8Array[] {
 
 	// Calculate padding for the PAX body.
 	const paxPadding = -pax.paxBody.length & BLOCK_SIZE_MASK;
-	const paddingBlocks =
-		paxPadding > 0 ? [ZERO_BLOCK.subarray(0, paxPadding)] : [];
 
-	return [pax.paxHeader, pax.paxBody, ...paddingBlocks, base];
+	return paxPadding > 0
+		? [pax.paxHeader, pax.paxBody, ZERO_BLOCK.subarray(0, paxPadding), base]
+		: [pax.paxHeader, pax.paxBody, base];
 }
