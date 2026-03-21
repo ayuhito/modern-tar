@@ -33,12 +33,11 @@ export function createTarPacker(
 				fail("Invalid tar entry size.");
 
 			try {
-				const resolved = { ...header, size };
-				const headerBlocks = getHeaderBlocks(resolved);
+				const headerBlocks = getHeaderBlocks({ ...header, size });
 
 				for (const block of headerBlocks) onData(block);
 
-				currentHeader = resolved;
+				currentHeader = { ...header, size };
 				bytesWritten = 0;
 			} catch (error) {
 				onError(error as Error);

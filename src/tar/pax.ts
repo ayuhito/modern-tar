@@ -20,9 +20,7 @@ export function generatePax(header: TarHeader): {
 	const paxRecords: Record<string, string> = {};
 
 	// Check max filename length (using byte length for multi-byte safety).
-	const nameBytes = encoder.encode(header.name);
-
-	if (nameBytes.length > USTAR_NAME_SIZE) {
+	if (encoder.encode(header.name).length > USTAR_NAME_SIZE) {
 		const split = findUstarSplit(header.name);
 
 		// If a valid USTAR split is not possible, we must use a PAX record.

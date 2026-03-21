@@ -282,8 +282,8 @@ export function getHeaderBlocks(header: TarHeader): Uint8Array[] {
 
 	// Calculate padding for the PAX body.
 	const paxPadding = -pax.paxBody.length & BLOCK_SIZE_MASK;
+	const paddingBlocks =
+		paxPadding > 0 ? [ZERO_BLOCK.subarray(0, paxPadding)] : [];
 
-	return paxPadding > 0
-		? [pax.paxHeader, pax.paxBody, ZERO_BLOCK.subarray(0, paxPadding), base]
-		: [pax.paxHeader, pax.paxBody, base];
+	return [pax.paxHeader, pax.paxBody, ...paddingBlocks, base];
 }

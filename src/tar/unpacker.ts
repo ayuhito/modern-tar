@@ -266,11 +266,8 @@ function isZeroBlock(block: Uint8Array): boolean {
 		return true;
 	}
 
-	// If the block is not 8-byte aligned, use DataView for 4-byte checks
-	// (128 iterations instead of 512) without alignment requirements.
-	const dv = new DataView(block.buffer, block.byteOffset, block.length);
-	for (let i = 0; i < block.length; i += 4) {
-		if (dv.getUint32(i) !== 0) return false;
+	for (let i = 0; i < block.length; ++i) {
+		if (block[i] !== 0) return false;
 	}
 
 	return true;
