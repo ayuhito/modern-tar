@@ -101,8 +101,7 @@ export function packTar(
 					source: path.join(directoryPath!, entry.name),
 					target: entry.name,
 				}))
-			: // Snapshot caller descriptors before workers run; user code can mutate the
-				// original array or objects while async packing is still in progress.
+			: // Snapshot the sources array to avoid mutation during processing.
 				sources.map((source) => ({ ...source }));
 
 		const results = new Map<number, JobResult | null>();
