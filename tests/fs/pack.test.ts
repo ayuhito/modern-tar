@@ -1,4 +1,5 @@
-import * as fs from "node:fs/promises";
+import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -14,15 +15,21 @@ const FIXTURES_DIR = path.join(__dirname, "fixtures");
 const mtime = (stat: { mtime: Date }) =>
 	Math.floor(stat.mtime.getTime() / 1000);
 
+const readArchiveText = async (stream: AsyncIterable<Uint8Array>) => {
+	const chunks: Buffer[] = [];
+	for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+	return Buffer.concat(chunks).toString("utf8");
+};
+
 describe("pack", () => {
 	let tmpDir: string;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "modern-tar-pack-test-"));
+		tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "modern-tar-pack-test-"));
 	});
 
 	afterEach(async () => {
-		await fs.rm(tmpDir, { recursive: true, force: true });
+		await fsp.rm(tmpDir, { recursive: true, force: true });
 	});
 
 	it("packs and extracts a directory with a single file", async () => {
@@ -34,19 +41,19 @@ describe("pack", () => {
 
 		await pipeline(packStream, unpackStream);
 
-		const files = await fs.readdir(destDir);
+		const files = await fsp.readdir(destDir);
 		expect(files).toHaveLength(1);
 		expect(files[0]).toBe("hello.txt");
 
 		const originalPath = path.join(sourceDir, "hello.txt");
 		const copiedPath = path.join(destDir, "hello.txt");
 
-		const originalContent = await fs.readFile(originalPath, "utf-8");
-		const copiedContent = await fs.readFile(copiedPath, "utf-8");
+		const originalContent = await fsp.readFile(originalPath, "utf-8");
+		const copiedContent = await fsp.readFile(copiedPath, "utf-8");
 		expect(copiedContent).toBe(originalContent);
 
-		const originalStat = await fs.stat(originalPath);
-		const copiedStat = await fs.stat(copiedPath);
+		const originalStat = await fsp.stat(originalPath);
+		const copiedStat = await fsp.stat(copiedPath);
 		expect(copiedStat.mode).toBe(originalStat.mode);
 		expect(mtime(copiedStat)).toBe(mtime(originalStat));
 	});
@@ -60,17 +67,17 @@ describe("pack", () => {
 
 		await pipeline(packStream, unpackStream);
 
-		const rootFiles = await fs.readdir(destDir);
+		const rootFiles = await fsp.readdir(destDir);
 		expect(rootFiles).toEqual(["a"]);
 
-		const nestedFiles = await fs.readdir(path.join(destDir, "a"));
+		const nestedFiles = await fsp.readdir(path.join(destDir, "a"));
 		expect(nestedFiles).toEqual(["test.txt"]);
 
 		const originalPath = path.join(sourceDir, "a", "test.txt");
 		const copiedPath = path.join(destDir, "a", "test.txt");
 
-		const originalContent = await fs.readFile(originalPath, "utf-8");
-		const copiedContent = await fs.readFile(copiedPath, "utf-8");
+		const originalContent = await fsp.readFile(originalPath, "utf-8");
+		const copiedContent = await fsp.readFile(copiedPath, "utf-8");
 		expect(copiedContent).toBe(originalContent);
 	});
 
@@ -85,8 +92,8 @@ describe("pack", () => {
 		const longPath = path.join(sourceDir, longDirName, nestedDirName);
 		const fullPath = path.join(longPath, fileName);
 
-		await fs.mkdir(longPath, { recursive: true });
-		await fs.writeFile(fullPath, "long path test");
+		await fsp.mkdir(longPath, { recursive: true });
+		await fsp.writeFile(fullPath, "long path test");
 
 		const destDir = path.join(tmpDir, "extracted");
 		const packStream = packTar(sourceDir);
@@ -100,7 +107,7 @@ describe("pack", () => {
 			nestedDirName,
 			fileName,
 		);
-		const content = await fs.readFile(extractedFile, "utf-8");
+		const content = await fsp.readFile(extractedFile, "utf-8");
 		expect(content).toBe("long path test");
 	});
 
@@ -113,8 +120,8 @@ describe("pack", () => {
 		const longPathDir = path.join(sourceDir, path.dirname(longFileName));
 		const fullPath = path.join(sourceDir, longFileName);
 
-		await fs.mkdir(longPathDir, { recursive: true });
-		await fs.writeFile(fullPath, "pax path test");
+		await fsp.mkdir(longPathDir, { recursive: true });
+		await fsp.writeFile(fullPath, "pax path test");
 
 		const destDir = path.join(tmpDir, "extracted");
 		const packStream = packTar(sourceDir);
@@ -123,7 +130,7 @@ describe("pack", () => {
 		await pipeline(packStream, unpackStream);
 
 		const extractedFile = path.join(destDir, longFileName);
-		const content = await fs.readFile(extractedFile, "utf-8");
+		const content = await fsp.readFile(extractedFile, "utf-8");
 		expect(content).toBe("pax path test");
 	});
 
@@ -138,17 +145,172 @@ describe("pack", () => {
 
 		await pipeline(packStream, unpackStream);
 
-		const files = await fs.readdir(destDir);
+		const files = await fsp.readdir(destDir);
 		expect(files.includes(".gitignore")).toBe(false);
 	});
 
+	it.skipIf(process.platform === "win32")(
+		"skips files swapped after validation",
+		async () => {
+			const sourceDir = path.join(tmpDir, "source");
+			await fsp.mkdir(sourceDir);
+
+			const file = path.join(sourceDir, "file.txt");
+			const secret = path.join(tmpDir, "secret.txt");
+
+			await fsp.writeFile(file, "SAFE12345678");
+			await fsp.writeFile(secret, "LEAK12345678");
+
+			let swapped = false;
+			const archive = await readArchiveText(
+				packTar([{ type: "file", source: file, target: "file.txt" }], {
+					concurrency: 1,
+					filter: (filePath) => {
+						if (filePath === file && !swapped) {
+							swapped = true;
+							fs.unlinkSync(file);
+							fs.symlinkSync(secret, file);
+						}
+
+						return true;
+					},
+				}),
+			);
+
+			expect(swapped).toBe(true);
+			expect(archive).not.toContain("LEAK12345678");
+			expect(archive).not.toContain("file.txt");
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"does not follow dereferenced symlink swaps outside the base",
+		async () => {
+			const sourceDir = path.join(tmpDir, "source");
+			await fsp.mkdir(sourceDir);
+
+			const target = path.join(sourceDir, "target.txt");
+			const link = path.join(sourceDir, "link.txt");
+			const secret = path.join(tmpDir, "secret.txt");
+
+			await fsp.writeFile(target, "SAFE12345678");
+			await fsp.writeFile(secret, "LEAK12345678");
+			await fsp.symlink("target.txt", link);
+
+			let swapped = false;
+			const archive = await readArchiveText(
+				packTar([{ type: "file", source: link, target: "link.txt" }], {
+					baseDir: sourceDir,
+					concurrency: 1,
+					dereference: true,
+					filter: (filePath) => {
+						if (filePath === link && !swapped) {
+							swapped = true;
+							fs.unlinkSync(link);
+							fs.symlinkSync(secret, link);
+						}
+
+						return true;
+					},
+				}),
+			);
+
+			expect(swapped).toBe(true);
+			expect(archive).not.toContain("LEAK12345678");
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"skips dereferenced symlinks with final targets outside the base",
+		async () => {
+			const sourceDir = path.join(tmpDir, "source");
+			await fsp.mkdir(sourceDir);
+
+			const inner = path.join(sourceDir, "inner.txt");
+			const outer = path.join(sourceDir, "outer.txt");
+			const secret = path.join(tmpDir, "secret.txt");
+
+			await fsp.writeFile(secret, "CHAIN-LEAK!");
+			await fsp.symlink(secret, inner);
+			await fsp.symlink("inner.txt", outer);
+
+			const archive = await readArchiveText(
+				packTar([{ type: "file", source: outer, target: "outer.txt" }], {
+					baseDir: sourceDir,
+					concurrency: 1,
+					dereference: true,
+				}),
+			);
+
+			expect(archive).not.toContain("CHAIN-LEAK!");
+			expect(archive).not.toContain("outer.txt");
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"allows dereferenced targets with dot-prefixed names inside the base",
+		async () => {
+			const sourceDir = path.join(tmpDir, "source");
+			await fsp.mkdir(sourceDir);
+
+			const target = path.join(sourceDir, "..safe.txt");
+			const link = path.join(sourceDir, "link.txt");
+
+			await fsp.writeFile(target, "SAFE-DOT-TARGET");
+			await fsp.symlink("..safe.txt", link);
+
+			const archive = await readArchiveText(
+				packTar([{ type: "file", source: link, target: "link.txt" }], {
+					baseDir: sourceDir,
+					dereference: true,
+				}),
+			);
+
+			expect(archive).toContain("SAFE-DOT-TARGET");
+			expect(archive).toContain("link.txt");
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"skips directories swapped after validation",
+		async () => {
+			const sourceDir = path.join(tmpDir, "source");
+			const childDir = path.join(sourceDir, "child");
+			const outsideDir = path.join(tmpDir, "outside");
+
+			await fsp.mkdir(childDir, { recursive: true });
+			await fsp.mkdir(outsideDir);
+			await fsp.writeFile(path.join(outsideDir, "secret.txt"), "DIR-LEAK!");
+
+			let swapped = false;
+			const archive = await readArchiveText(
+				packTar(sourceDir, {
+					concurrency: 1,
+					filter: (filePath) => {
+						if (filePath === childDir && !swapped) {
+							swapped = true;
+							fs.rmSync(childDir, { recursive: true, force: true });
+							fs.symlinkSync(outsideDir, childDir);
+						}
+
+						return true;
+					},
+				}),
+			);
+
+			expect(swapped).toBe(true);
+			expect(archive).not.toContain("DIR-LEAK!");
+			expect(archive).not.toContain("secret.txt");
+		},
+	);
+
 	it("handles empty files", async () => {
 		const sourceDir = path.join(tmpDir, "source");
-		await fs.mkdir(sourceDir, { recursive: true });
+		await fsp.mkdir(sourceDir, { recursive: true });
 
 		// Create an empty file
 		const emptyFilePath = path.join(sourceDir, "empty.txt");
-		await fs.writeFile(emptyFilePath, "");
+		await fsp.writeFile(emptyFilePath, "");
 
 		const destDir = path.join(tmpDir, "extracted");
 		const packStream = packTar(sourceDir);
@@ -158,16 +320,16 @@ describe("pack", () => {
 
 		// Verify the extracted file
 		const extractedPath = path.join(destDir, "empty.txt");
-		const extractedContent = await fs.readFile(extractedPath);
+		const extractedContent = await fsp.readFile(extractedPath);
 		expect(extractedContent).toEqual(Buffer.alloc(0));
 
-		const stats = await fs.stat(extractedPath);
+		const stats = await fsp.stat(extractedPath);
 		expect(stats.size).toBe(0);
 	});
 
 	it("handles various file sizes correctly", async () => {
 		const sourceDir = path.join(tmpDir, "source");
-		await fs.mkdir(sourceDir, { recursive: true });
+		await fsp.mkdir(sourceDir, { recursive: true });
 
 		// Create files of different sizes to test both small and large file handling
 		const files = [
@@ -180,7 +342,7 @@ describe("pack", () => {
 		// Create all test files
 		for (const file of files) {
 			const content = Buffer.alloc(file.size, file.name[0]);
-			await fs.writeFile(path.join(sourceDir, file.name), content);
+			await fsp.writeFile(path.join(sourceDir, file.name), content);
 		}
 
 		const destDir = path.join(tmpDir, "extracted");
@@ -192,12 +354,12 @@ describe("pack", () => {
 		// Verify all files were extracted correctly
 		for (const file of files) {
 			const extractedPath = path.join(destDir, file.name);
-			const extractedContent = await fs.readFile(extractedPath);
+			const extractedContent = await fsp.readFile(extractedPath);
 			const expectedContent = Buffer.alloc(file.size, file.name[0]);
 
 			expect(extractedContent).toEqual(expectedContent);
 
-			const stats = await fs.stat(extractedPath);
+			const stats = await fsp.stat(extractedPath);
 			expect(stats.size).toBe(file.size);
 		}
 	});
@@ -303,7 +465,7 @@ describe("pack", () => {
 			await pipeline(packStream, unpackStream);
 
 			const extractedFile = path.join(destDir, "valid-stream.txt");
-			const extractedContent = await fs.readFile(extractedFile, "utf-8");
+			const extractedContent = await fsp.readFile(extractedFile, "utf-8");
 			expect(extractedContent).toBe(content);
 		});
 	});
@@ -313,14 +475,14 @@ describe("pack", () => {
 		const testFile = path.join(tmpDir, "test.txt");
 		const testDir = path.join(tmpDir, "testdir");
 
-		await fs.writeFile(testFile, "test content");
-		await fs.mkdir(testDir);
-		await fs.writeFile(path.join(testDir, "nested.txt"), "nested content");
+		await fsp.writeFile(testFile, "test content");
+		await fsp.mkdir(testDir);
+		await fsp.writeFile(path.join(testDir, "nested.txt"), "nested content");
 
 		// Set specific permissions (only on Unix systems)
 		if (process.platform !== "win32") {
-			await fs.chmod(testFile, 0o600); // rw-------
-			await fs.chmod(testDir, 0o700); // rwx------
+			await fsp.chmod(testFile, 0o600); // rw-------
+			await fsp.chmod(testDir, 0o700); // rwx------
 		}
 
 		// Pack with mode overrides
@@ -349,8 +511,8 @@ describe("pack", () => {
 		const extractedFile = path.join(destDir, "override.txt");
 		const extractedDir = path.join(destDir, "overridedir");
 
-		const fileStat = await fs.stat(extractedFile);
-		const dirStat = await fs.stat(extractedDir);
+		const fileStat = await fsp.stat(extractedFile);
+		const dirStat = await fsp.stat(extractedDir);
 
 		// Mask to get only permission bits (remove file type bits)
 		const fileMode = fileStat.mode & 0o777;
@@ -367,10 +529,10 @@ describe("pack", () => {
 		}
 
 		// Verify content is still correct (all platforms)
-		const content = await fs.readFile(extractedFile, "utf-8");
+		const content = await fsp.readFile(extractedFile, "utf-8");
 		expect(content).toBe("test content");
 
-		const nestedContent = await fs.readFile(
+		const nestedContent = await fsp.readFile(
 			path.join(extractedDir, "nested.txt"),
 			"utf-8",
 		);
@@ -382,9 +544,9 @@ describe("pack", () => {
 		const testFile = path.join(tmpDir, "test.txt");
 		const testDir = path.join(tmpDir, "testdir");
 
-		await fs.writeFile(testFile, "test content");
-		await fs.mkdir(testDir);
-		await fs.writeFile(path.join(testDir, "nested.txt"), "nested content");
+		await fsp.writeFile(testFile, "test content");
+		await fsp.mkdir(testDir);
+		await fsp.writeFile(path.join(testDir, "nested.txt"), "nested content");
 
 		// Custom metadata values
 		const customMtime = new Date("2023-01-15T12:00:00Z");
@@ -443,9 +605,9 @@ describe("pack", () => {
 		const extractedDir = path.join(destDir, "overridden-dir");
 		const extractedContent = path.join(destDir, "content-file.txt");
 
-		const fileStat = await fs.stat(extractedFile);
-		const dirStat = await fs.stat(extractedDir);
-		const contentStat = await fs.stat(extractedContent);
+		const fileStat = await fsp.stat(extractedFile);
+		const dirStat = await fsp.stat(extractedDir);
+		const contentStat = await fsp.stat(extractedContent);
 
 		// Check modes (mask to get only permission bits)
 		if (process.platform === "win32") {
@@ -465,9 +627,9 @@ describe("pack", () => {
 		expect(timeDiff).toBeLessThan(1000);
 
 		// Verify content integrity
-		const fileContent = await fs.readFile(extractedFile, "utf-8");
-		const contentFileContent = await fs.readFile(extractedContent, "utf-8");
-		const nestedFileContent = await fs.readFile(
+		const fileContent = await fsp.readFile(extractedFile, "utf-8");
+		const contentFileContent = await fsp.readFile(extractedContent, "utf-8");
+		const nestedFileContent = await fsp.readFile(
 			path.join(extractedDir, "nested.txt"),
 			"utf-8",
 		);
@@ -493,20 +655,20 @@ describe("pack", () => {
 		await pipeline(packStream, unpackStream);
 
 		const extractedFile = path.join(destDir, "default-content.txt");
-		const stat = await fs.stat(extractedFile);
+		const stat = await fsp.stat(extractedFile);
 
 		// Verify content and that it was created successfully with safe defaults
-		const content = await fs.readFile(extractedFile, "utf-8");
+		const content = await fsp.readFile(extractedFile, "utf-8");
 		expect(content).toBe("test content");
 		expect(stat.size).toBe(12); // "test content".length
 	});
 
 	it("allows partial metadata overrides while preserving filesystem values", async () => {
 		const testFile = path.join(tmpDir, "partial.txt");
-		await fs.writeFile(testFile, "partial override test");
+		await fsp.writeFile(testFile, "partial override test");
 
 		// Get original filesystem metadata
-		const originalStat = await fs.stat(testFile);
+		const originalStat = await fsp.stat(testFile);
 
 		const sources = [
 			{
@@ -526,10 +688,10 @@ describe("pack", () => {
 		await pipeline(packStream, unpackStream);
 
 		const extractedFile = path.join(destDir, "partial-override.txt");
-		const extractedStat = await fs.stat(extractedFile);
+		const extractedStat = await fsp.stat(extractedFile);
 
 		// Verify content
-		const content = await fs.readFile(extractedFile, "utf-8");
+		const content = await fsp.readFile(extractedFile, "utf-8");
 		expect(content).toBe("partial override test");
 
 		// Mode should be preserved from filesystem (masked to permission bits)
@@ -844,11 +1006,11 @@ describe("pack", () => {
 		const absoluteDir = path.join(destDir, "absolute", "directory");
 		const windowsFile = path.join(destDir, "windows", "file.txt");
 
-		expect(await fs.readFile(absoluteFile, "utf8")).toBe(
+		expect(await fsp.readFile(absoluteFile, "utf8")).toBe(
 			"file with absolute path",
 		);
-		expect((await fs.stat(absoluteDir)).isDirectory()).toBe(true);
-		expect(await fs.readFile(windowsFile, "utf8")).toBe(
+		expect((await fsp.stat(absoluteDir)).isDirectory()).toBe(true);
+		expect(await fsp.readFile(windowsFile, "utf8")).toBe(
 			"windows absolute path",
 		);
 	});
