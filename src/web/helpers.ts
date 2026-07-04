@@ -90,7 +90,7 @@ export async function packTar(
 	// Await the packing promise to ensure any background errors are thrown.
 	await packingPromise;
 
-	return new Uint8Array(await streamToBuffer(readable));
+	return streamToBuffer(readable);
 }
 
 /**
