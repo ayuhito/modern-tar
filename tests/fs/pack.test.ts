@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { packTar, unpackTar } from "../../src/fs";
+import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { createTarDecoder, type TarHeader } from "../../src/web";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -147,6 +147,44 @@ describe("pack", () => {
 
 		const files = await fsp.readdir(destDir);
 		expect(files.includes(".gitignore")).toBe(false);
+	});
+
+	it("snapshots caller-provided source arrays and descriptors", async () => {
+		const sourceDir = path.join(tmpDir, "source");
+		await fsp.mkdir(sourceDir);
+		await fsp.writeFile(path.join(sourceDir, "child.txt"), "child");
+
+		const safe = path.join(tmpDir, "safe.txt");
+		const secret = path.join(tmpDir, "secret.txt");
+		await fsp.writeFile(safe, "SAFE-DESCRIPTOR");
+		await fsp.writeFile(secret, "SECRET-DESCRIPTOR");
+
+		const sources: TarSource[] = [
+			{ type: "directory", source: sourceDir, target: "source" },
+			{ type: "file", source: safe, target: "safe.txt" },
+		];
+
+		let mutated = false;
+		const archive = await readArchiveText(
+			packTar(sources, {
+				concurrency: 1,
+				filter: (filePath) => {
+					if (filePath === sourceDir && !mutated) {
+						mutated = true;
+						const pending = sources[1] as Extract<TarSource, { type: "file" }>;
+						pending.source = secret;
+						pending.target = "secret.txt";
+					}
+
+					return true;
+				},
+			}),
+		);
+
+		expect(mutated).toBe(true);
+		expect(sources).toHaveLength(2);
+		expect(archive).toContain("SAFE-DESCRIPTOR");
+		expect(archive).not.toContain("SECRET-DESCRIPTOR");
 	});
 
 	it.skipIf(process.platform === "win32")(

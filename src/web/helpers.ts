@@ -42,7 +42,7 @@ import { createTarDecoder } from "./unpack";
  * ```
  */
 export async function packTar(
-	entries: (TarEntry | ParsedTarEntryWithData)[],
+	entries: readonly (TarEntry | ParsedTarEntryWithData)[],
 ): Promise<Uint8Array> {
 	const { readable, controller } = createTarPacker();
 

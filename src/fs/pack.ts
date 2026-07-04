@@ -67,7 +67,7 @@ export const packTarSources = packTar;
  * ```
  */
 export function packTar(
-	sources: TarSource[] | string,
+	sources: readonly TarSource[] | string,
 	options: PackOptionsFS = {},
 ): Readable {
 	const stream = new Readable({ read() {} });
@@ -101,7 +101,9 @@ export function packTar(
 					source: path.join(directoryPath!, entry.name),
 					target: entry.name,
 				}))
-			: (sources as TarSource[]);
+			: // Snapshot caller descriptors before workers run; user code can mutate the
+				// original array or objects while async packing is still in progress.
+				sources.map((source) => ({ ...source }));
 
 		const results = new Map<number, JobResult | null>();
 		// Resolvers is used to notify the writer when a job result is ready.
