@@ -67,7 +67,7 @@ export const packTarSources = packTar;
  * ```
  */
 export function packTar(
-	sources: TarSource[] | string,
+	sources: readonly TarSource[] | string,
 	options: PackOptionsFS = {},
 ): Readable {
 	const stream = new Readable({ read() {} });
@@ -101,7 +101,8 @@ export function packTar(
 					source: path.join(directoryPath!, entry.name),
 					target: entry.name,
 				}))
-			: (sources as TarSource[]);
+			: // Snapshot the sources array to avoid mutation during processing.
+				sources.map((source) => ({ ...source }));
 
 		const results = new Map<number, JobResult | null>();
 		// Resolvers is used to notify the writer when a job result is ready.
