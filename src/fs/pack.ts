@@ -1,6 +1,6 @@
-import type { Stats } from "node:fs";
+import * as fs from "node:fs";
 import type { FileHandle } from "node:fs/promises";
-import * as fs from "node:fs/promises";
+import * as fsp from "node:fs/promises";
 import { cpus } from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
@@ -21,6 +21,9 @@ type JobResult = {
 	header: TarHeader;
 	body?: FileBody;
 };
+
+const BIGINT_STAT = { bigint: true } as const;
+const WITH_FILE_TYPES = { withFileTypes: true } as const;
 
 /**
  * @deprecated Use `packTar` instead. This function is now an alias for `packTar`.
@@ -87,18 +90,17 @@ export function packTar(
 		// Determine input type and resolve directory path if needed
 		const isDir = typeof sources === "string";
 		const directoryPath = isDir ? path.resolve(sources) : null;
+		let realBaseDir: string | undefined;
 
 		// Create initial job queue from directory contents or provided sources
 		const jobs: TarSource[] = isDir
 			? // biome-ignore lint/style/noNonNullAssertion: isDir matches this check.
-				(await fs.readdir(directoryPath!, { withFileTypes: true })).map(
-					(entry) => ({
-						type: entry.isDirectory() ? DIRECTORY : FILE,
-						// biome-ignore lint/style/noNonNullAssertion: Checked above.
-						source: path.join(directoryPath!, entry.name),
-						target: entry.name,
-					}),
-				)
+				(await fsp.readdir(directoryPath!, WITH_FILE_TYPES)).map((entry) => ({
+					type: entry.isDirectory() ? DIRECTORY : FILE,
+					// biome-ignore lint/style/noNonNullAssertion: Checked above.
+					source: path.join(directoryPath!, entry.name),
+					target: entry.name,
+				}))
 			: (sources as TarSource[]);
 
 		const results = new Map<number, JobResult | null>();
@@ -263,7 +265,7 @@ export function packTar(
 						mtime: job.mtime ?? new Date(),
 						uid: job.uid ?? 0,
 						gid: job.gid ?? 0,
-					} as Stats;
+					} as fs.Stats;
 
 					if (filter && !filter(target, stat)) return;
 
@@ -289,27 +291,37 @@ export function packTar(
 					return;
 				}
 
-				let stat = await fs.lstat(job.source, { bigint: true });
+				let source = job.source;
+				let stat = await fsp.lstat(source, BIGINT_STAT);
 
 				// Optionally follow symlinks to their targets.
 				if (dereference && stat.isSymbolicLink()) {
-					const linkTarget = await fs.readlink(job.source);
-					const resolved = path.resolve(path.dirname(job.source), linkTarget);
+					source = await fsp.realpath(source);
 
-					// Ensure symlinks do not point outside the base directory.
-					const resolvedBase = baseDir ?? directoryPath ?? process.cwd();
+					// `realpath` follows the whole symlink chain. Compare the final
+					// target against a real base.
+					const relativeToBase = path.relative(
+						(realBaseDir ??= await fsp.realpath(
+							baseDir ?? directoryPath ?? process.cwd(),
+						)),
+						source,
+					);
 					if (
-						!resolved.startsWith(resolvedBase + path.sep) &&
-						resolved !== resolvedBase
+						relativeToBase === ".." ||
+						// biome-ignore lint/style/useTemplate: Smaller minified output.
+						relativeToBase.startsWith(".." + path.sep) ||
+						path.isAbsolute(relativeToBase)
 					) {
 						return; // Skip and do no further work.
 					}
 
-					stat = await fs.stat(job.source, { bigint: true }); // Follow the link.
+					stat = await fsp.lstat(source, BIGINT_STAT);
+					// If the resolved target became a symlink again, avoid following a
+					// second mutable path chain.
+					if (stat.isSymbolicLink()) return;
 				}
 
-				// BigIntStats have the same methods as regular Stats.
-				if (filter && !filter(job.source, stat as unknown as Stats)) return;
+				if (filter && !filter(job.source, stat as unknown as fs.Stats)) return;
 
 				// Cast bigint fields to number where safe.
 				let header: TarHeader = {
@@ -331,12 +343,13 @@ export function packTar(
 
 					// Enqueue children for processing.
 					try {
-						for (const d of await fs.readdir(job.source, {
-							withFileTypes: true,
-						})) {
+						const { dev, ino } = await fsp.lstat(source, BIGINT_STAT);
+						if (stat.dev !== dev || stat.ino !== ino) return;
+
+						for (const d of await fsp.readdir(source, WITH_FILE_TYPES)) {
 							jobs.push({
 								type: d.isDirectory() ? DIRECTORY : FILE,
-								source: path.join(job.source, d.name),
+								source: path.join(source, d.name),
 								target: `${header.name}${d.name}`, // Reuse normalized parent path.
 							});
 						}
@@ -344,31 +357,51 @@ export function packTar(
 				} else if (stat.isSymbolicLink()) {
 					// Store the link itself, not the target file.
 					header.type = SYMLINK;
-					header.linkname = await fs.readlink(job.source);
+					header.linkname = await fsp.readlink(job.source);
 				} else if (stat.isFile()) {
 					header.size = Number(stat.size);
+					let handle: FileHandle;
+					try {
+						// Reject final-component symlink swaps before opening a file body.
+						handle = await fsp.open(source, fs.constants.O_NOFOLLOW ?? 0);
+					} catch (error) {
+						const code = (error as { code?: string }).code;
+						if (code === "ELOOP" || code === "ENOENT") return;
+						throw error;
+					}
+					let handleToClose: FileHandle | undefined = handle;
 
-					// Deduplicate hard links with inode number.
-					if (stat.nlink > 1 && seenInodes.has(stat.ino)) {
-						header.type = LINK;
-						// biome-ignore lint/style/noNonNullAssertion: .has check above.
-						header.linkname = seenInodes.get(stat.ino)!;
-						header.size = 0;
-					} else {
-						// Else handle as a regular file.
-						if (stat.nlink > 1) seenInodes.set(stat.ino, target);
-						if (header.size > 0) {
-							// If the file is small (< 32KB), read it into a buffer immediately.
-							if (header.size < 32 * 1024) {
-								body = await fs.readFile(job.source);
-							} else {
-								// For large files, stream from from disk when needed.
-								body = {
-									handle: await fs.open(job.source, "r"),
-									size: header.size,
-								};
+					try {
+						const { dev, ino } = await handle.stat(BIGINT_STAT);
+						// Read only if the opened fd still points at the inode validated by
+						// lstat. This catches replacement between check and open.
+						if (stat.dev !== dev || stat.ino !== ino) return;
+
+						// Deduplicate hard links with inode number.
+						if (stat.nlink > 1 && seenInodes.has(stat.ino)) {
+							header.type = LINK;
+							// biome-ignore lint/style/noNonNullAssertion: .has check above.
+							header.linkname = seenInodes.get(stat.ino)!;
+							header.size = 0;
+						} else {
+							// Else handle as a regular file.
+							if (stat.nlink > 1) seenInodes.set(stat.ino, target);
+							if (header.size > 0) {
+								// If the file is small (< 32KB), read it into a buffer immediately.
+								if (header.size < 32 * 1024) {
+									body = await handle.readFile();
+								} else {
+									// The writer owns and closes this descriptor once it streams.
+									body = {
+										handle,
+										size: header.size,
+									};
+									handleToClose = undefined;
+								}
 							}
 						}
+					} finally {
+						await handleToClose?.close();
 					}
 				} else {
 					return; // Skip unsupported file types (sockets, FIFOs, etc.)
