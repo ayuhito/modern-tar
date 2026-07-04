@@ -39,6 +39,7 @@ import {
 	ZERO_BLOCK,
 } from "./constants";
 import {
+	decoder,
 	readNumeric,
 	readOctal,
 	readString,
@@ -185,9 +186,9 @@ const PAX_MAPPING: Record<
 
 // Parses PAX record data into an overrides object.
 export function parsePax(buffer: Uint8Array): HeaderOverrides {
-	const decoder = new TextDecoder("utf-8");
 	const overrides: HeaderOverrides = Object.create(null);
 	const pax: Record<string, string> = Object.create(null);
+	let isPax = false;
 	let offset = 0;
 
 	while (offset < buffer.length) {
@@ -212,6 +213,7 @@ export function parsePax(buffer: Uint8Array): HeaderOverrides {
 		const [key, value] = recordStr.split("=", 2);
 		if (key && value !== undefined) {
 			pax[key] = value;
+			isPax = true;
 
 			if (Object.hasOwn(PAX_MAPPING, key)) {
 				const mapping = PAX_MAPPING[key];
@@ -229,7 +231,7 @@ export function parsePax(buffer: Uint8Array): HeaderOverrides {
 		offset = recordEnd;
 	}
 
-	if (Object.keys(pax).length > 0) overrides.pax = pax;
+	if (isPax) overrides.pax = pax;
 
 	return overrides;
 }
