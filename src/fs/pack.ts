@@ -344,12 +344,8 @@ export function packTar(
 					// Enqueue children for processing.
 					try {
 						// Recheck before readdir so a swapped symlink cannot expose outside files.
-						const currentStat = await fsp.lstat(source, BIGINT_STAT);
-						if (
-							!currentStat.isDirectory() ||
-							stat.dev !== currentStat.dev ||
-							stat.ino !== currentStat.ino
-						)
+						const s = await fsp.lstat(source, BIGINT_STAT);
+						if (!s.isDirectory() || stat.dev !== s.dev || stat.ino !== s.ino)
 							return;
 
 						for (const d of await fsp.readdir(source, WITH_FILE_TYPES)) {
