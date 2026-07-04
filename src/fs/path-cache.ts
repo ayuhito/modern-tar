@@ -161,6 +161,8 @@ export const createPathCache = (
 		return promise;
 	};
 
+	const rm = (p: string) => fs.rm(p, { force: true });
+
 	return {
 		/**
 		 * Resolves once the destination directory has been initialized.
@@ -235,6 +237,13 @@ export const createPathCache = (
 				case FILE: {
 					pathConflicts.set(normalizedName, FILE);
 					await prepareDirectory(parentDir);
+					try {
+						const stat = await fs.lstat(outPath);
+						if (!stat.isDirectory() && (!stat.isFile() || stat.nlink > 1))
+							await rm(outPath);
+					} catch (err: unknown) {
+						if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
+					}
 					return outPath;
 				}
 
@@ -255,6 +264,7 @@ export const createPathCache = (
 					);
 
 					// Create the symlink.
+					await rm(outPath);
 					await fs.symlink(linkname, outPath);
 
 					// Set symlink modification time.
@@ -329,6 +339,7 @@ export const createPathCache = (
 		async applyLinks() {
 			for (const { linkTarget, outPath } of deferredLinks) {
 				try {
+					await rm(outPath);
 					await fs.link(linkTarget, outPath);
 				} catch (err: unknown) {
 					if ((err as NodeJS.ErrnoException).code === ENOENT)

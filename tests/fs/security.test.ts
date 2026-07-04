@@ -906,7 +906,7 @@ describe("security", () => {
 
 	describe("pre-existing path attacks", () => {
 		it.skipIf(process.platform === "win32")(
-			"prevents overwriting through a pre-existing leaf symlink",
+			"replaces pre-existing link leaves without following them",
 			async () => {
 				const extractDir = path.join(tmpDir, "extract");
 				const outsideDir = path.join(tmpDir, "outside");
@@ -918,6 +918,9 @@ describe("security", () => {
 
 				const leafSymlink = path.join(extractDir, "escape.txt");
 				await fs.symlink(path.relative(extractDir, victimPath), leafSymlink);
+
+				const linkedLeaf = path.join(extractDir, "linked.txt");
+				await fs.link(victimPath, linkedLeaf);
 
 				const entries: TarEntry[] = [
 					{
@@ -932,6 +935,18 @@ describe("security", () => {
 						},
 						body: "pwned!",
 					},
+					{
+						header: {
+							name: "linked.txt",
+							size: 8,
+							type: "file",
+							mode: 0o644,
+							mtime: new Date(),
+							uid: 0,
+							gid: 0,
+						},
+						body: "changed!",
+					},
 				];
 
 				const tarBuffer = await packTar(entries);
@@ -940,14 +955,11 @@ describe("security", () => {
 
 				await expect(
 					pipeline(maliciousTar, unpackStream),
-				).rejects.toMatchObject({
-					code: "ELOOP",
-				});
+				).resolves.toBeUndefined();
 
 				expect(await fs.readFile(victimPath, "utf8")).toBe("original");
-				expect(await fs.readlink(leafSymlink)).toBe(
-					path.relative(extractDir, victimPath),
-				);
+				expect(await fs.readFile(leafSymlink, "utf8")).toBe("pwned!");
+				expect(await fs.readFile(linkedLeaf, "utf8")).toBe("changed!");
 			},
 		);
 	});

@@ -144,4 +144,30 @@ describe("links", () => {
 			expect(timeDiff).toBeLessThan(2000); // Within 2 seconds
 		},
 	);
+
+	it.skipIf(process.platform === "win32")(
+		"replaces existing link leaves",
+		async () => {
+			const sourceDir = path.join(tmpDir, "source");
+			await fs.mkdir(sourceDir, { recursive: true });
+
+			const targetPath = path.join(sourceDir, "target.txt");
+			await fs.writeFile(targetPath, "target\n");
+			await fs.symlink("target.txt", path.join(sourceDir, "link.txt"));
+			await fs.link(targetPath, path.join(sourceDir, "hardlink.txt"));
+
+			const destDir = path.join(tmpDir, "extracted");
+
+			await pipeline(packTar(sourceDir), unpackTar(destDir));
+			await pipeline(packTar(sourceDir), unpackTar(destDir));
+
+			expect(await fs.readlink(path.join(destDir, "link.txt"))).toBe(
+				"target.txt",
+			);
+
+			const targetStat = await fs.stat(path.join(destDir, "target.txt"));
+			const hardlinkStat = await fs.stat(path.join(destDir, "hardlink.txt"));
+			expect(hardlinkStat.ino).toBe(targetStat.ino);
+		},
+	);
 });
