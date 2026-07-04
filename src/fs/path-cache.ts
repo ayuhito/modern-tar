@@ -237,13 +237,6 @@ export const createPathCache = (
 				case FILE: {
 					pathConflicts.set(normalizedName, FILE);
 					await prepareDirectory(parentDir);
-					try {
-						const stat = await fs.lstat(outPath);
-						if (!stat.isDirectory() && (!stat.isFile() || stat.nlink > 1))
-							await rm(outPath);
-					} catch (err: unknown) {
-						if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
-					}
 					return outPath;
 				}
 
