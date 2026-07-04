@@ -20,6 +20,7 @@ const OPEN_FLAGS =
 	fs.constants.O_TRUNC |
 	// Fail if the destination is a symlink instead of following it.
 	(fs.constants.O_NOFOLLOW ?? 0);
+const CREATE_FLAGS = OPEN_FLAGS | fs.constants.O_EXCL;
 
 const STATE_UNOPENED = 0;
 const STATE_OPENING = 1;
@@ -190,7 +191,7 @@ export function createFileSink(
 		if (state !== STATE_UNOPENED) return;
 		state = STATE_OPENING;
 
-		fs.open(path, OPEN_FLAGS, mode, (err, openFd) => {
+		const onOpen = (err: NodeJS.ErrnoException | null, openFd: number) => {
 			if (err) return fail(err);
 
 			if (state === STATE_CLOSED || state === STATE_FAILED) {
@@ -210,6 +211,14 @@ export function createFileSink(
 			} else {
 				settleWaiters();
 			}
+		};
+
+		fs.open(path, CREATE_FLAGS, mode, (err, openFd) => {
+			if (!err || err.code !== "EEXIST") return onOpen(err, openFd);
+			fs.rm(path, { force: true }, (rmErr) => {
+				if (rmErr) return fail(rmErr);
+				fs.open(path, CREATE_FLAGS, mode, onOpen);
+			});
 		});
 	};
 

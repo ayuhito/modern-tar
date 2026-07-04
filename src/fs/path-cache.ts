@@ -255,6 +255,7 @@ export const createPathCache = (
 					);
 
 					// Create the symlink.
+					await fs.rm(outPath, { force: true });
 					await fs.symlink(linkname, outPath);
 
 					// Set symlink modification time.
@@ -329,6 +330,7 @@ export const createPathCache = (
 		async applyLinks() {
 			for (const { linkTarget, outPath } of deferredLinks) {
 				try {
+					await fs.rm(outPath, { force: true });
 					await fs.link(linkTarget, outPath);
 				} catch (err: unknown) {
 					if ((err as NodeJS.ErrnoException).code === ENOENT)
