@@ -13,20 +13,37 @@ const TSGO_WASM_URL = new URL(
 	import.meta.url,
 ).href;
 
-describe("unpack tar", () => {
-	it("handles gzip response body with strip + filter", async () => {
-		const entries = [
-			{
-				header: { name: "pkg/readme.txt", size: 4, type: "file" },
-				body: "docs",
-			},
-			{
-				header: { name: "pkg/tsgo.wasm", size: 6, type: "file" },
-				body: "wasm!!",
-			},
-		] as TarEntry[];
+const createWasmArchive = () =>
+	packTar([
+		{
+			header: { name: "pkg/readme.txt", size: 4, type: "file" },
+			body: "docs",
+		},
+		{
+			header: { name: "pkg/tsgo.wasm", size: 6, type: "file" },
+			body: "wasm!!",
+		},
+	] satisfies TarEntry[]);
 
-		const tarBuffer = await packTar(entries);
+describe("unpack tar", () => {
+	it("buffers complete ArrayBuffer archives", async () => {
+		const tarBuffer = await createWasmArchive();
+		const arrayBuffer = tarBuffer.buffer.slice(
+			tarBuffer.byteOffset,
+			tarBuffer.byteOffset + tarBuffer.byteLength,
+		);
+
+		const [wasm] = await unpackTar(arrayBuffer, {
+			strip: 1,
+			filter: (header) => header.name === "tsgo.wasm",
+		});
+
+		expect(wasm.header.name).toBe("tsgo.wasm");
+		expect(new TextDecoder().decode(wasm.data)).toBe("wasm!!");
+	});
+
+	it("streams gzip response body with strip + filter", async () => {
+		const tarBuffer = await createWasmArchive();
 
 		// Compress the tar buffer
 		const compressedChunks: Uint8Array[] = [];

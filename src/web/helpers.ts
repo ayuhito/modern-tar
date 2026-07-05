@@ -232,20 +232,15 @@ function unpackTarBuffer(
 
 		const data = new Uint8Array(size);
 		let offset = 0;
-		while (!unpacker.isBodyComplete()) {
-			const fed = unpacker.streamBody((chunk) => {
-				data.set(chunk, offset);
-				offset += chunk.length;
-				return true;
-			});
+		unpacker.streamBody((chunk) => {
+			data.set(chunk, offset);
+			offset += chunk.length;
+			return true;
+		});
 
-			if (fed === 0) {
-				break;
-			}
-		}
-
+		const bodyComplete = unpacker.isBodyComplete();
 		let paddingComplete = true;
-		if (unpacker.isBodyComplete()) {
+		if (bodyComplete) {
 			paddingComplete = unpacker.skipPadding();
 			if (!paddingComplete && strict) {
 				throw new Error("Tar archive is truncated.");
@@ -253,7 +248,7 @@ function unpackTarBuffer(
 		}
 
 		results.push({ header: processedHeader, data });
-		if (!unpacker.isBodyComplete() || !paddingComplete) break;
+		if (!bodyComplete || !paddingComplete) break;
 	}
 
 	unpacker.validateEOF();
