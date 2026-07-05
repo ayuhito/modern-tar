@@ -399,6 +399,9 @@ export const createPathCache = (
 						realTargetDir,
 						path.basename(linkTarget),
 					);
+					const targetStat = await fs.lstat(realTarget);
+					if (targetStat.isSymbolicLink())
+						throw new Error(`Hardlink "${linkTarget}" is a symlink.`);
 
 					const realOutDir = await fs.realpath(path.dirname(outPath));
 					validateBounds(
@@ -407,29 +410,16 @@ export const createPathCache = (
 						`Hardlink "${outPath}" points outside the extraction directory.`,
 					);
 					const realOutPath = path.join(realOutDir, path.basename(outPath));
-					const targetStat = await fs.stat(realTarget);
 
 					await fs.rm(realOutPath, { force: true });
 					await fs.link(realTarget, realOutPath);
 
-					const linkedPath = await fs.realpath(realOutPath);
-					try {
-						validateBounds(
-							linkedPath,
-							destRoot,
-							`Hardlink "${outPath}" points outside the extraction directory.`,
-						);
-					} catch (err) {
-						await fs.rm(linkedPath, { force: true });
-						throw err;
-					}
-
-					const linkStat = await fs.stat(linkedPath);
+					const linkStat = await fs.lstat(realOutPath);
 					if (
 						linkStat.dev !== targetStat.dev ||
 						linkStat.ino !== targetStat.ino
 					) {
-						await fs.rm(linkedPath, { force: true });
+						await fs.rm(realOutPath, { force: true });
 						throw new Error(
 							`Hardlink target "${linkTarget}" changed during creation for link at "${outPath}".`,
 						);
