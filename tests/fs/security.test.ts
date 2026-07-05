@@ -1250,6 +1250,36 @@ describe("security", () => {
 		);
 
 		it.skipIf(process.platform === "win32")(
+			"rejects leaf symlink hardlink targets without deleting external targets",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const outsideDir = path.join(tmpDir, "outside");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(outsideDir, { recursive: true });
+
+				const victimFile = path.join(outsideDir, "victim.txt");
+				const prelink = path.join(extractDir, "prelink");
+				await fs.writeFile(victimFile, "do not delete");
+				await fs.symlink(victimFile, prelink);
+
+				const maliciousTar = await createTarWithMaliciousHardlink(
+					"link.txt",
+					"prelink",
+				);
+
+				await expect(
+					pipeline(maliciousTar, unpackTar(extractDir)),
+				).rejects.toThrow();
+				await expect(fs.readFile(victimFile, "utf8")).resolves.toBe(
+					"do not delete",
+				);
+				await expect(
+					fs.lstat(path.join(extractDir, "link.txt")),
+				).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
 			"prevents CVE-2025-48387 multi-stage symlink+hardlink attack",
 			async () => {
 				const extractDir = path.join(tmpDir, "extract");
