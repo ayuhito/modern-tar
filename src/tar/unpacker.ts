@@ -45,6 +45,11 @@ export function createUnpacker(options: DecoderOptions = {}) {
 			!currentEntry ||
 			available() >= currentEntry.remaining + currentEntry.padding,
 
+		bodyBytes: (): number =>
+			currentEntry && currentEntry.remaining > 0
+				? Math.min(currentEntry.remaining, available())
+				: 0,
+
 		/** Add data to the internal buffer. */
 		write(chunk: Uint8Array): void {
 			if (ended) throw new Error("Archive already ended.");

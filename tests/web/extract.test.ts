@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { BLOCK_SIZE, USTAR_CHECKSUM_OFFSET } from "../../src/tar/constants";
 import { decoder, encoder } from "../../src/tar/encoding";
+import { createTarHeader } from "../../src/tar/header";
 
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
 import {
@@ -76,6 +77,46 @@ describe("unpackTar", () => {
 		expect(decoder.decode(entries[0].data)).toBe("i am file-1\n");
 		expect(entries[1].header.name).toBe("file-2.txt");
 		expect(decoder.decode(entries[1].data)).toBe("i am file-2\n");
+	});
+
+	it("returns file data independent from the source archive buffer", async () => {
+		const archive = await createBaseArchive([
+			{ header: { name: "file.txt", type: "file", size: 5 }, body: "hello" },
+		]);
+		const [entry] = await unpackTar(archive);
+
+		entry.data[0] = "x".charCodeAt(0);
+		expect(archive[BLOCK_SIZE]).toBe("h".charCodeAt(0));
+
+		archive[BLOCK_SIZE] = "y".charCodeAt(0);
+		expect(entry.data[0]).toBe("x".charCodeAt(0));
+	});
+
+	it("does not retain impossible file sizes for non-strict data", async () => {
+		const archive = createTarHeader({
+			name: "huge.bin",
+			type: "file",
+			size: 1024 * 1024,
+		});
+		const [entry] = await unpackTar(archive, { strict: false });
+
+		expect(entry.data?.buffer.byteLength).toBe(0);
+
+		const paxArchive = await createBaseArchive([
+			{
+				header: {
+					name: "negative-pax-size.txt",
+					type: "file",
+					size: 1,
+					pax: { size: "-1" },
+				},
+				body: "x",
+			},
+		]);
+		const [paxEntry] = await unpackTar(paxArchive, { strict: false });
+
+		expect(paxEntry.header.size).toBe(-1);
+		expect(paxEntry.data?.buffer.byteLength).toBe(0);
 	});
 
 	it("extracts a tar with various entry types (directory, symlink)", async () => {
