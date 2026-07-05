@@ -1,6 +1,7 @@
 import { isBodyless, normalizeBody } from "../tar/body";
 import { transformHeader } from "../tar/options";
 import type { TarHeader, UnpackOptions } from "../tar/types";
+import { createUnpacker } from "../tar/unpacker";
 import { createTarPacker } from "./pack";
 import { drain, streamToBuffer } from "./stream-utils";
 import type { ParsedTarEntryWithData, TarEntry } from "./types";
@@ -142,20 +143,15 @@ export async function unpackTar(
 	archive: ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>,
 	options: UnpackOptions = {},
 ): Promise<ParsedTarEntryWithData[]> {
-	const sourceStream: ReadableStream<Uint8Array> =
-		archive instanceof ReadableStream
-			? archive
-			: new ReadableStream<Uint8Array>({
-					start(controller) {
-						controller.enqueue(
-							archive instanceof Uint8Array ? archive : new Uint8Array(archive),
-						);
-						controller.close();
-					},
-				});
+	if (!(archive instanceof ReadableStream)) {
+		return unpackTarBuffer(
+			archive instanceof Uint8Array ? archive : new Uint8Array(archive),
+			options,
+		);
+	}
 
 	const results: ParsedTarEntryWithData[] = [];
-	const entryStream = sourceStream.pipeThrough(createTarDecoder(options));
+	const entryStream = archive.pipeThrough(createTarDecoder(options));
 
 	for await (const entry of entryStream) {
 		let processedHeader: TarHeader | null;
@@ -189,5 +185,72 @@ export async function unpackTar(
 		}
 	}
 
+	return results;
+}
+
+function unpackTarBuffer(
+	archive: Uint8Array,
+	options: UnpackOptions,
+): ParsedTarEntryWithData[] {
+	const unpacker = createUnpacker(options);
+	const strict = options.strict ?? false;
+	const results: ParsedTarEntryWithData[] = [];
+
+	unpacker.write(archive);
+	unpacker.end();
+
+	while (true) {
+		const header = unpacker.readHeader();
+		if (header === undefined) break;
+		if (header === null) {
+			if (strict) throw new Error("Tar archive is truncated.");
+			break;
+		}
+
+		const processedHeader = transformHeader(header, options);
+		if (processedHeader === null) {
+			const skipped = unpacker.skipEntry();
+			if (!skipped && strict) throw new Error("Tar archive is truncated.");
+			if (!skipped) break;
+			continue;
+		}
+
+		if (isBodyless(processedHeader)) {
+			const skipped = unpacker.skipEntry();
+			if (!skipped && strict) throw new Error("Tar archive is truncated.");
+
+			results.push({ header: processedHeader });
+			if (!skipped) break;
+			continue;
+		}
+
+		let size = header.size;
+		if (size < 0 || !unpacker.canFinish()) {
+			if (strict) throw new Error("Tar archive is truncated.");
+			size = unpacker.bodyBytes();
+		}
+
+		const data = new Uint8Array(size);
+		let offset = 0;
+		unpacker.streamBody((chunk) => {
+			data.set(chunk, offset);
+			offset += chunk.length;
+			return true;
+		});
+
+		const bodyComplete = unpacker.isBodyComplete();
+		let paddingComplete = true;
+		if (bodyComplete) {
+			paddingComplete = unpacker.skipPadding();
+			if (!paddingComplete && strict) {
+				throw new Error("Tar archive is truncated.");
+			}
+		}
+
+		results.push({ header: processedHeader, data });
+		if (!bodyComplete || !paddingComplete) break;
+	}
+
+	unpacker.validateEOF();
 	return results;
 }
