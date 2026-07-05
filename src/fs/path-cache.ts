@@ -8,6 +8,13 @@ import type { UnpackOptionsFS } from "./types";
 
 const ENOENT = "ENOENT";
 
+// On Windows, both forward and backward slashes are valid path separators.
+const linkSep = process.platform === "win32" ? /[/\\]/ : "/";
+
+// Splits a symlink target into its path components, filtering out empty and "." parts.
+const linkParts = (linkname: string): string[] =>
+	linkname.split(linkSep).filter((part) => part && part !== ".");
+
 /**
  * Creates a path validation, security check, and directory creation manager,
  * ensuring all filesystem writes are safe.
@@ -26,6 +33,10 @@ export const createPathCache = (
 	const pathConflicts = new Map<string, TarHeader["type"]>();
 	// Stores hardlinks to be created after all files are written.
 	const deferredLinks: Array<{ linkTarget: string; outPath: string }> = [];
+	// Stores archive-created symlinks for final graph validation.
+	let symlinks: Map<string, string> | undefined;
+	// Without a real ".." component, symlink expansion cannot climb out.
+	let hasParentRef = false;
 	// Caches resolved real paths for symlinked directories.
 	const realDirCache = createCache<Promise<string>>();
 
@@ -76,10 +87,7 @@ export const createPathCache = (
 		const destDir = await destDirPromise;
 
 		// If it's the destination directory itself, we can skip realpath call.
-		if (dirPath === destDir.symbolic) {
-			validateBounds(destDir.real, destDir.real, errorMessage);
-			return destDir.real;
-		}
+		if (dirPath === destDir.symbolic) return destDir.real;
 
 		// Check cache first.
 		let promise = realDirCache.get(dirPath);
@@ -92,9 +100,7 @@ export const createPathCache = (
 			realDirCache.set(dirPath, promise);
 		}
 
-		const realDir = await promise;
-		validateBounds(realDir, destDir.real, errorMessage);
-		return realDir;
+		return promise;
 	};
 
 	// Ensures a directory exists.
@@ -244,19 +250,23 @@ export const createPathCache = (
 					// Handle empty linkname.
 					if (!linkname) return;
 
-					await prepareDirectory(parentDir);
-
-					// Validate symlink target stays within extraction directory
-					const linkTargetPath = path.resolve(parentDir, linkname);
+					// Validate the lexical symlink target before writing the link.
 					validateBounds(
-						linkTargetPath,
+						path.resolve(parentDir, linkname),
 						destDir.symbolic,
 						`Symlink "${linkname}" points outside the extraction directory.`,
 					);
 
+					await prepareDirectory(parentDir);
+
 					// Create the symlink.
 					await fs.rm(outPath, { force: true });
 					await fs.symlink(linkname, outPath);
+					(symlinks ??= new Map()).set(normalizedName, linkname);
+
+					// Empty and "." parts do not matter when only detecting "..".
+					hasParentRef ||=
+						linkname.includes("..") && linkname.split(linkSep).includes("..");
 
 					// Set symlink modification time.
 					if (mtime)
@@ -289,10 +299,10 @@ export const createPathCache = (
 					);
 
 					// Ensure target's parent directory exists.
-					await prepareDirectory(path.dirname(linkTarget));
+					const targetParent = path.dirname(linkTarget);
+					await prepareDirectory(targetParent);
 
 					// Additionally validate by resolving target parents real path.
-					const targetParent = path.dirname(linkTarget);
 					const realTargetParent = await getRealDir(
 						targetParent,
 						`Hardlink "${linkname}" points outside the extraction directory.`,
@@ -320,6 +330,70 @@ export const createPathCache = (
 				default:
 					// Unknown entry type.
 					return;
+			}
+		},
+
+		/**
+		 * Validates archive-created symlinks after all symlinks have been written.
+		 *
+		 * Catches symlink chains whose final target changes after a later archive
+		 * entry creates another symlink.
+		 */
+		async checkSymlinks() {
+			if (!symlinks || symlinks.size < 2 || !hasParentRef) return;
+
+			const destDir = (await destDirPromise).symbolic;
+			const destRoot = path.parse(destDir).root;
+			const destDepth = linkParts(destDir.slice(destRoot.length)).length;
+			for (const [name, linkname] of symlinks) {
+				// Stored absolute linknames already passed the creation-time bounds check.
+				// Strip the destination prefix here while preserving later ".." parts.
+				let pendingParts: string[];
+				if (path.isAbsolute(linkname)) {
+					pendingParts = linkParts(linkname.slice(destRoot.length));
+					pendingParts.splice(0, destDepth);
+				} else {
+					pendingParts = linkParts(`${path.posix.dirname(name)}/${linkname}`);
+				}
+				const resolvedParts: string[] = [];
+				let followedSymlinks = 0;
+
+				for (let i = 0; i < pendingParts.length; i++) {
+					const part = pendingParts[i];
+
+					if (part === "..") {
+						if (!resolvedParts.length) {
+							await fs.rm(path.join(destDir, name), { force: true });
+							throw new Error(
+								`Symlink "${linkname}" points outside the extraction directory.`,
+							);
+						}
+
+						resolvedParts.pop();
+						continue;
+					}
+
+					resolvedParts.push(part);
+
+					const nextLink = symlinks.get(resolvedParts.join("/"));
+					if (!nextLink) continue;
+
+					// Once we follow more symlinks than exist, this is a cycle. It may be
+					// unusable at runtime, but it is not a path that escaped the root.
+					if (++followedSymlinks > symlinks.size) break;
+
+					// Expand symlink components before applying following ".." parts, which
+					// matches filesystem lookup order and catches "noop/.." chain attacks.
+					resolvedParts.pop();
+					if (path.isAbsolute(nextLink)) {
+						resolvedParts.length = 0;
+						const nextParts = linkParts(nextLink.slice(destRoot.length));
+						nextParts.splice(0, destDepth);
+						pendingParts.splice(i + 1, 0, ...nextParts);
+					} else {
+						pendingParts.splice(i + 1, 0, ...linkParts(nextLink));
+					}
+				}
 			}
 		},
 
