@@ -558,6 +558,30 @@ describe("security", () => {
 		);
 
 		it.skipIf(process.platform === "win32")(
+			"prevents repeated symlink graph rewrites from escaping",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				const linkname = `${"noop/".repeat(8)}${"../".repeat(8)}`;
+				const entries: TarEntry[] = [
+					symlinkEntry("root", linkname),
+					symlinkEntry("noop", "."),
+				];
+
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
+
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+					`Symlink "${linkname}" points outside the extraction directory.`,
+				);
+
+				await expect(fs.lstat(path.join(extractDir, "root"))).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
 			"prevents absolute symlink graphs that resolve outside extraction directory",
 			async () => {
 				const extractDir = path.join(tmpDir, "extract");
