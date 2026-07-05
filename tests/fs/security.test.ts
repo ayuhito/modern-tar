@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { finished, pipeline } from "node:stream/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar as packTarFS, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/encoding";
@@ -158,6 +158,17 @@ describe("security", () => {
 		const tarBuffer = await packTar(entries);
 		return Readable.from([tarBuffer]);
 	};
+
+	const writeChunk = (
+		stream: ReturnType<typeof unpackTar>,
+		chunk: Uint8Array,
+	): Promise<void> =>
+		new Promise((resolve, reject) => {
+			stream.write(chunk, (err) => {
+				if (err) reject(err);
+				else resolve();
+			});
+		});
 
 	describe("path traversal prevention", () => {
 		describe("file path traversal", () => {
@@ -1039,6 +1050,100 @@ describe("security", () => {
 				expect(await fs.readFile(victimPath, "utf8")).toBe("original");
 				expect(await fs.readFile(leafSymlink, "utf8")).toBe("pwned!");
 				expect(await fs.readFile(linkedLeaf, "utf8")).toBe("changed!");
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents file bodies from following a replaced parent directory",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const outsideDir = path.join(tmpDir, "outside");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(outsideDir, { recursive: true });
+
+				const tarBuffer = await packTar([
+					{
+						header: {
+							name: "dir/file.txt",
+							size: 5,
+							type: "file",
+						},
+						body: "pwned",
+					},
+				]);
+				const unpackStream = unpackTar(extractDir);
+
+				await writeChunk(unpackStream, tarBuffer.subarray(0, 512));
+				await fs.rm(path.join(extractDir, "dir"), {
+					recursive: true,
+					force: true,
+				});
+				await fs.symlink("../outside", path.join(extractDir, "dir"));
+
+				unpackStream.end(tarBuffer.subarray(512));
+				await finished(unpackStream).catch(() => undefined);
+
+				await expect(
+					fs.access(path.join(outsideDir, "file.txt")),
+				).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents deferred hardlinks from following a replaced target parent",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const outsideDir = path.join(tmpDir, "outside");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(outsideDir, { recursive: true });
+
+				const outsideFile = path.join(outsideDir, "file.txt");
+				await fs.writeFile(outsideFile, "outside-secret");
+
+				const tarBuffer = await packTar([
+					{
+						header: {
+							name: "target/file.txt",
+							size: 6,
+							type: "file",
+						},
+						body: "inside",
+					},
+					{
+						header: {
+							name: "link.txt",
+							size: 0,
+							type: "link",
+							linkname: "target/file.txt",
+						},
+					},
+				]);
+				const eofOffset = tarBuffer.length - 1024;
+				const unpackStream = unpackTar(extractDir);
+
+				await writeChunk(unpackStream, tarBuffer.subarray(0, eofOffset));
+				await fs.rm(path.join(extractDir, "target"), {
+					recursive: true,
+					force: true,
+				});
+				await fs.symlink("../outside", path.join(extractDir, "target"));
+
+				unpackStream.end(tarBuffer.subarray(eofOffset));
+				await finished(unpackStream).catch(() => undefined);
+
+				const outsideStat = await fs.stat(outsideFile);
+				try {
+					const linkStat = await fs.stat(path.join(extractDir, "link.txt"));
+					expect({
+						dev: linkStat.dev,
+						ino: linkStat.ino,
+					}).not.toEqual({
+						dev: outsideStat.dev,
+						ino: outsideStat.ino,
+					});
+				} catch (err) {
+					expect((err as NodeJS.ErrnoException).code).toBe("ENOENT");
+				}
 			},
 		);
 	});

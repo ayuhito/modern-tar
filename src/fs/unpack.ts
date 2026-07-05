@@ -146,6 +146,7 @@ export function unpackTar(
 							mode: options.fmode ?? safeMode,
 							mtime: transformedHeader.mtime ?? undefined,
 						});
+						await fileStream.waitDrain();
 
 						// Stream body from unpacker to file.
 						let needsDrain = false;

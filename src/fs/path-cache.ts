@@ -298,29 +298,9 @@ export const createPathCache = (
 						`Hardlink "${linkname}" points outside the extraction directory.`,
 					);
 
-					// Ensure target's parent directory exists.
-					const targetParent = path.dirname(linkTarget);
-					await prepareDirectory(targetParent);
-
-					// Additionally validate by resolving target parents real path.
-					const realTargetParent = await getRealDir(
-						targetParent,
-						`Hardlink "${linkname}" points outside the extraction directory.`,
-					);
-					const realLinkTarget = path.join(
-						realTargetParent,
-						path.basename(linkTarget),
-					);
-
-					validateBounds(
-						realLinkTarget,
-						destDir.real,
-						`Hardlink "${linkname}" points outside the extraction directory.`,
-					);
-
 					// Defer hardlink creation until after all files are written.
+					await prepareDirectory(parentDir);
 					if (linkTarget !== outPath) {
-						await prepareDirectory(parentDir);
 						deferredLinks.push({ linkTarget, outPath });
 					}
 
@@ -399,13 +379,57 @@ export const createPathCache = (
 
 		/**
 		 * Creates all deferred hardlinks after file extraction is complete.
-		 * This ensures hardlink targets exist before creating the links without race conditions.
+		 * This ensures hardlink targets exist before creating the links.
 		 */
 		async applyLinks() {
+			const destRoot = (await destDirPromise).real;
 			for (const { linkTarget, outPath } of deferredLinks) {
 				try {
-					await fs.rm(outPath, { force: true });
-					await fs.link(linkTarget, outPath);
+					const realTargetDir = await fs.realpath(path.dirname(linkTarget));
+					validateBounds(
+						realTargetDir,
+						destRoot,
+						`Hardlink "${linkTarget}" points outside the extraction directory.`,
+					);
+					const realTarget = path.join(
+						realTargetDir,
+						path.basename(linkTarget),
+					);
+
+					const realOutDir = await fs.realpath(path.dirname(outPath));
+					validateBounds(
+						realOutDir,
+						destRoot,
+						`Hardlink "${outPath}" points outside the extraction directory.`,
+					);
+					const realOutPath = path.join(realOutDir, path.basename(outPath));
+					const targetStat = await fs.stat(realTarget);
+
+					await fs.rm(realOutPath, { force: true });
+					await fs.link(realTarget, realOutPath);
+
+					const linkedPath = await fs.realpath(realOutPath);
+					try {
+						validateBounds(
+							linkedPath,
+							destRoot,
+							`Hardlink "${outPath}" points outside the extraction directory.`,
+						);
+					} catch (err) {
+						await fs.rm(linkedPath, { force: true });
+						throw err;
+					}
+
+					const linkStat = await fs.stat(linkedPath);
+					if (
+						linkStat.dev !== targetStat.dev ||
+						linkStat.ino !== targetStat.ino
+					) {
+						await fs.rm(linkedPath, { force: true });
+						throw new Error(
+							`Hardlink target "${linkTarget}" changed during creation for link at "${outPath}".`,
+						);
+					}
 				} catch (err: unknown) {
 					if ((err as NodeJS.ErrnoException).code === ENOENT)
 						throw new Error(

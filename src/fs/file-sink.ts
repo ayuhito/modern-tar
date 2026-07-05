@@ -22,14 +22,12 @@ const OPEN_FLAGS =
 	(fs.constants.O_NOFOLLOW ?? 0);
 const CREATE_FLAGS = OPEN_FLAGS | fs.constants.O_EXCL;
 
-const STATE_UNOPENED = 0;
 const STATE_OPENING = 1;
 const STATE_OPEN = 2;
 const STATE_CLOSED = 3;
 const STATE_FAILED = 4;
 
 type SinkState =
-	| typeof STATE_UNOPENED
 	| typeof STATE_OPENING
 	| typeof STATE_OPEN
 	| typeof STATE_CLOSED
@@ -52,7 +50,7 @@ export function createFileSink(
 	path: string,
 	{ mode = 0o666, mtime }: SinkOptions = {},
 ): FileSink {
-	let state: SinkState = STATE_UNOPENED;
+	let state: SinkState = STATE_OPENING;
 	let flushing = false;
 	let fd: number | null = null;
 	let queue: Buffer[] = []; // Buffers waiting to be written out (current batch).
@@ -187,45 +185,30 @@ export function createFileSink(
 		}
 	};
 
-	const open = () => {
-		if (state !== STATE_UNOPENED) return;
-		state = STATE_OPENING;
+	const onOpen = (err: NodeJS.ErrnoException | null, openFd: number) => {
+		if (err) return fail(err);
 
-		const onOpen = (err: NodeJS.ErrnoException | null, openFd: number) => {
-			if (err) return fail(err);
+		if (state === STATE_CLOSED || state === STATE_FAILED) {
+			fs.close(openFd);
+			return;
+		}
 
-			if (state === STATE_CLOSED || state === STATE_FAILED) {
-				fs.close(openFd);
-				return;
-			}
+		fd = openFd;
+		state = STATE_OPEN;
 
-			fd = openFd;
-			state = STATE_OPEN;
-
-			if (endResolve) {
-				// end() ran before open() resolved, so finish work immediately.
-				if (queue.length > 0) flush();
-				else close();
-			} else if (bytes >= BATCH_BYTES && !flushing) {
-				flush();
-			} else {
-				settleWaiters();
-			}
-		};
-
-		fs.open(path, CREATE_FLAGS, mode, (err, openFd) => {
-			if (!err || err.code !== "EEXIST") return onOpen(err, openFd);
-			fs.rm(path, { force: true }, (rmErr) => {
-				if (rmErr) return fail(rmErr);
-				fs.open(path, CREATE_FLAGS, mode, onOpen);
-			});
-		});
+		if (endResolve) {
+			// end() ran before open() resolved, so finish work immediately.
+			if (queue.length > 0) flush();
+			else close();
+		} else if (bytes >= BATCH_BYTES && !flushing) {
+			flush();
+		} else {
+			settleWaiters();
+		}
 	};
 
 	const write = (chunk: Buffer | Uint8Array | string): boolean => {
 		if (storedError || state >= STATE_CLOSED || endResolve) return false;
-
-		if (state !== STATE_OPEN && state !== STATE_OPENING) open();
 
 		// Normalize chunk to Buffer.
 		const buf = Buffer.isBuffer(chunk)
@@ -246,13 +229,16 @@ export function createFileSink(
 	};
 
 	const waitDrain = () => {
-		// If we're already drained, return the shared resolved promise.
-		if (bytes < BATCH_BYTES || state !== STATE_OPEN) return DRAINED_PROMISE;
+		if (
+			state === STATE_OPENING ||
+			(state === STATE_OPEN && bytes >= BATCH_BYTES)
+		)
+			return new Promise<void>((resolve, reject) => {
+				waitResolves.push(resolve);
+				waitRejects.push(reject);
+			});
 
-		return new Promise<void>((resolve, reject) => {
-			waitResolves.push(resolve);
-			waitRejects.push(reject);
-		});
+		return DRAINED_PROMISE;
 	};
 
 	const end = (): Promise<void> => {
@@ -264,10 +250,8 @@ export function createFileSink(
 			endResolve = resolve;
 			endReject = reject;
 
-			// Open if we deferred file creation (no writes yet but need to set mtime).
-			if (state !== STATE_OPEN && state !== STATE_OPENING) open();
-			// Otherwise, flush any remaining data and close immediately.
-			else if (state === STATE_OPEN && !flushing) {
+			// If open is still pending, onOpen will observe endResolve and close.
+			if (state === STATE_OPEN && !flushing) {
 				if (queue.length > 0) flush();
 				else close();
 			}
@@ -299,5 +283,13 @@ export function createFileSink(
 		finish();
 	};
 
+	// Open immediately so callers can await waitDrain() before writing body data.
+	fs.open(path, CREATE_FLAGS, mode, (err, openFd) => {
+		if (!err || err.code !== "EEXIST") return onOpen(err, openFd);
+		fs.rm(path, { force: true }, (rmErr) => {
+			if (rmErr) return fail(rmErr);
+			fs.open(path, CREATE_FLAGS, mode, onOpen);
+		});
+	});
 	return { write, end, destroy, waitDrain };
 }

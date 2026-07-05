@@ -20,8 +20,6 @@ describe("createFileSink", () => {
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
-		// File opens on first write
-
 		stream.write(Buffer.from("hello"));
 		stream.write(Buffer.from(" world"));
 		// Await the asynchronous end
@@ -35,8 +33,6 @@ describe("createFileSink", () => {
 		const filePath = `${testDir}/batched.txt`;
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath);
-
-		// File opens on first write
 
 		// Buffer multiple writes
 		stream.write(Buffer.from("chunk1\n"));
@@ -55,8 +51,6 @@ describe("createFileSink", () => {
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath);
 
-		// File opens on end() call for empty files
-
 		// No writes, just end
 		await stream.end(); // Await async end
 
@@ -71,8 +65,6 @@ describe("createFileSink", () => {
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
-		// File opens on first write
-
 		stream.write(Buffer.from("data1"));
 		stream.write(Buffer.from("data2"));
 
@@ -81,7 +73,7 @@ describe("createFileSink", () => {
 		// end should be a no-op after destroy
 		await stream.end(); // Should not throw
 
-		// With ready() called, the file might be created but writes should be discarded
+		// The file might be created, but writes should be discarded.
 		try {
 			const content = await readFile(filePath, "utf-8");
 			// File exists but should be empty since writes were discarded
@@ -96,8 +88,6 @@ describe("createFileSink", () => {
 		const filePath = `${testDir}/discarded-queue.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
-
-		// File opens on first write
 
 		// Write some data
 		stream.write(Buffer.from("written"));
@@ -139,8 +129,6 @@ describe("createFileSink", () => {
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath);
 
-		// File opens on first write
-
 		stream.write(Buffer.from("single chunk"));
 		await stream.end(); // Await async end
 
@@ -152,8 +140,6 @@ describe("createFileSink", () => {
 		const filePath = `${testDir}/mode.txt`;
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath, { mode: 0o600 });
-
-		// File opens on first write
 
 		stream.write(Buffer.from("test"));
 		await stream.end(); // Await async end
@@ -170,8 +156,6 @@ describe("createFileSink", () => {
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath);
 
-		// File opens on first write
-
 		stream.write(Buffer.from("")); // Empty - should be skipped
 		stream.write(Buffer.from("hello")); // Real data
 		stream.write(Buffer.from("")); // Empty - should be skipped
@@ -185,8 +169,6 @@ describe("createFileSink", () => {
 		const filePath = `${testDir}/streaming.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
-
-		// File opens on first write
 
 		stream.write(Buffer.from("test data"));
 
@@ -224,8 +206,6 @@ describe("createFileSink", () => {
 		const testMtime = new Date("2023-01-15T10:30:00Z");
 		const stream = createFileSink(filePath, { mtime: testMtime });
 
-		// File opens on first write
-
 		stream.write("test content");
 		await stream.end();
 
@@ -243,8 +223,6 @@ describe("createFileSink", () => {
 		const testMtime = new Date("2023-06-20T15:45:30Z");
 		const stream = createFileSink(filePath, { mtime: testMtime });
 
-		// File opens on first write
-
 		// End without writing any content
 		await stream.end();
 
@@ -260,8 +238,6 @@ describe("createFileSink", () => {
 	it("should work without mtime option (no futimes call)", async () => {
 		const filePath = join(testDir, "no-mtime-test.txt");
 		const stream = createFileSink(filePath); // No mtime option
-
-		// File opens on first write
 
 		stream.write("content without mtime");
 		await stream.end();
@@ -280,7 +256,6 @@ describe("createFileSink", () => {
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
-		// File opens on first write, then all writes are handled
 		stream.write(Buffer.from("data1"));
 		stream.write(Buffer.from("data2"));
 		stream.write(Buffer.from("data3"));
@@ -295,8 +270,6 @@ describe("createFileSink", () => {
 		const filePath = `${testDir}/no-ready-needed.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
-
-		// File opens on first write - no ready() method needed
 
 		stream.write(Buffer.from("test"));
 		await stream.end();
