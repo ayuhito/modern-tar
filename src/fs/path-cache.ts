@@ -378,9 +378,13 @@ export const createPathCache = (
 					const nextLink = symlinks.get(resolvedParts.join("/"));
 					if (!nextLink) continue;
 
-					// Once we follow more symlinks than exist, this is a cycle. It may be
-					// unusable at runtime, but it is not a path that escaped the root.
-					if (++followedSymlinks > symlinks.size) break;
+					// More follows than archive-created symlinks means this graph is cycling.
+					if (++followedSymlinks > symlinks.size) {
+						await fs.rm(path.join(destDir, name), { force: true });
+						throw new Error(
+							`Symlink "${linkname}" points outside the extraction directory.`,
+						);
+					}
 
 					// Expand symlink components before applying following ".." parts, which
 					// matches filesystem lookup order and catches "noop/.." chain attacks.
