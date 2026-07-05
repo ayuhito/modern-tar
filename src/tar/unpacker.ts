@@ -13,6 +13,7 @@ import type { DecoderOptions, TarHeader } from "./types";
 const STATE_HEADER = 0;
 const STATE_BODY = 1;
 
+const MAX_META_SIZE = 8 * 1024 * 1024;
 const truncateErr = new Error("Tar archive is truncated.");
 
 export function createUnpacker(options: DecoderOptions = {}) {
@@ -129,6 +130,10 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				// Check if it's a meta-header (like PAX or GNU long names).
 				const metaParser = getMetaParser(internalHeader.type);
 				if (metaParser) {
+					if (internalHeader.size > MAX_META_SIZE) {
+						throw new Error("Tar metadata entry exceeds maximum size.");
+					}
+
 					const paddedSize =
 						internalHeader.size + (-internalHeader.size & BLOCK_SIZE_MASK);
 

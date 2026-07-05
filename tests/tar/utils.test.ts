@@ -454,29 +454,23 @@ describe("tar utilities", () => {
 		expect(errorOccurred).toBe(false);
 	});
 
-	it("waits for oversized meta entry bodies without 32-bit overflow", () => {
-		const unpacker = createUnpacker();
-		const hugeMetaSize = 2 ** 31 + 1;
+	it("rejects oversized meta entry bodies", () => {
+		const oversizedMetaSize = 8 * 1024 * 1024 + 1;
 
-		unpacker.write(
-			createTarHeader({
-				name: "meta",
-				size: hugeMetaSize,
-				type: "pax-header",
-			}),
-		);
+		for (const strict of [false, true]) {
+			const unpacker = createUnpacker({ strict });
 
-		expect(unpacker.readHeader()).toBeNull();
+			unpacker.write(
+				createTarHeader({
+					name: "meta",
+					size: oversizedMetaSize,
+					type: "pax-header",
+				}),
+			);
 
-		unpacker.write(
-			createTarHeader({
-				name: "file.txt",
-				size: 0,
-				type: "file",
-			}),
-		);
-
-		// The meta header should remain pending until its declared body arrives.
-		expect(unpacker.readHeader()).toBeNull();
+			expect(() => unpacker.readHeader()).toThrow(
+				"Tar metadata entry exceeds maximum size.",
+			);
+		}
 	});
 });
