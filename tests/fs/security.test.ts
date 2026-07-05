@@ -484,6 +484,15 @@ describe("security", () => {
 	});
 
 	describe("symlink traversal prevention", () => {
+		const symlinkEntry = (name: string, linkname: string): TarEntry => ({
+			header: {
+				name,
+				size: 0,
+				type: "symlink",
+				linkname,
+			},
+		});
+
 		it.skipIf(process.platform === "win32")(
 			"prevents symlinks pointing outside extraction directory",
 			async () => {
@@ -510,6 +519,76 @@ describe("security", () => {
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
 					'Symlink "/etc/passwd" points outside the extraction directory.',
+				);
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents symlink graphs that resolve outside extraction directory",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				const entries: TarEntry[] = [
+					symlinkEntry("root", "noop/.."),
+					symlinkEntry("noop", "."),
+				];
+
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
+
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+					'Symlink "noop/.." points outside the extraction directory.',
+				);
+
+				await expect(fs.lstat(path.join(extractDir, "root"))).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents absolute symlink graphs that resolve outside extraction directory",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				const absoluteLinkname = `${extractDir}/noop/..`;
+				const entries: TarEntry[] = [
+					symlinkEntry("root", absoluteLinkname),
+					symlinkEntry("noop", "."),
+				];
+
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
+
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+					`Symlink "${absoluteLinkname}" points outside the extraction directory.`,
+				);
+
+				await expect(fs.lstat(path.join(extractDir, "root"))).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"does not treat backslashes as path separators on POSIX",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+
+				const entries: TarEntry[] = [
+					symlinkEntry("root", "noop\\.."),
+					symlinkEntry("noop", "."),
+				];
+
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
+
+				await pipeline(maliciousTar, unpackStream);
+
+				await expect(fs.readlink(path.join(extractDir, "root"))).resolves.toBe(
+					"noop\\..",
 				);
 			},
 		);

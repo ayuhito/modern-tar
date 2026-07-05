@@ -206,6 +206,8 @@ export function unpackTar(
 				// Wait for all file ops to complete.
 				await opQueue.onIdle();
 				if (queuedError) throw queuedError;
+				// Validate symlink targets after all archive-created symlinks exist.
+				await pathCache.checkSymlinks();
 				// Now that all files are written, create the hardlinks.
 				await pathCache.applyLinks();
 				cb();
