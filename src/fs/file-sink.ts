@@ -1,4 +1,6 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
+import { validateBounds } from "./path";
 
 interface SinkOptions {
 	mode?: number;
@@ -47,7 +49,8 @@ const DRAINED_PROMISE: Promise<void> = Promise.resolve();
  * such as `futimes` run.
  */
 export function createFileSink(
-	path: string,
+	outPath: string,
+	root: string,
 	{ mode = 0o666, mtime }: SinkOptions = {},
 ): FileSink {
 	let state: SinkState = STATE_OPENING;
@@ -283,12 +286,38 @@ export function createFileSink(
 		finish();
 	};
 
+	// Keep the native fast path, but preserve portable behavior when it fails.
+	const validateParent = (next: () => void, native = true) => {
+		(native ? fs.realpath.native : fs.realpath)(
+			path.dirname(outPath),
+			(err, realParent) => {
+				if (native && err) return validateParent(next, false);
+				if (err) return fail(err);
+				try {
+					validateBounds(
+						realParent,
+						root,
+						`Path "${outPath}" changed during extraction.`,
+					);
+				} catch (error) {
+					return fail(error as Error);
+				}
+				next();
+			},
+		);
+	};
+
+	const open = (callback: typeof onOpen) =>
+		validateParent(() => fs.open(outPath, CREATE_FLAGS, mode, callback));
+
 	// Open immediately so callers can await waitDrain() before writing body data.
-	fs.open(path, CREATE_FLAGS, mode, (err, openFd) => {
+	open((err, openFd) => {
 		if (!err || err.code !== "EEXIST") return onOpen(err, openFd);
-		fs.rm(path, { force: true }, (rmErr) => {
-			if (rmErr) return fail(rmErr);
-			fs.open(path, CREATE_FLAGS, mode, onOpen);
+		validateParent(() => {
+			fs.rm(outPath, { force: true }, (rmErr) => {
+				if (rmErr) return fail(rmErr);
+				open(onOpen);
+			});
 		});
 	});
 	return { write, end, destroy, waitDrain };

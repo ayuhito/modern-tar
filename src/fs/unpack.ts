@@ -4,7 +4,6 @@ import { transformHeader } from "../tar/options";
 import { createUnpacker } from "../tar/unpacker";
 import { createOperationQueue } from "./concurrency";
 import type { FileSink } from "./file-sink";
-import { createFileSink } from "./file-sink";
 import { createPathCache } from "./path-cache";
 import type { UnpackOptionsFS } from "./types";
 
@@ -131,21 +130,12 @@ export function unpackTar(
 					}
 
 					// Prepare filesystem path before writing body.
-					const outPath = await opQueue.add(() =>
+					const fileStream = await opQueue.add(() =>
 						pathCache.preparePath(transformedHeader),
 					);
 
-					// Only file entries return a path for streaming.
-					if (outPath) {
-						// Strip SUID/SGID/Sticky bits from header mode for security (limit to 0o777).
-						const safeMode = transformedHeader.mode
-							? transformedHeader.mode & 0o777
-							: undefined;
-
-						const fileStream = createFileSink(outPath, {
-							mode: options.fmode ?? safeMode,
-							mtime: transformedHeader.mtime ?? undefined,
-						});
+					// Only file entries return a sink for streaming.
+					if (fileStream) {
 						await fileStream.waitDrain();
 
 						// Stream body from unpacker to file.

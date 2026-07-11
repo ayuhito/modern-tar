@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { DIRECTORY, FILE, LINK, SYMLINK } from "../tar/constants";
 import type { TarHeader } from "../tar/types";
 import { createCache } from "./cache";
+import { createFileSink, type FileSink } from "./file-sink";
 import { normalizeHeaderName, normalizeUnicode, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
@@ -179,9 +180,9 @@ export const createPathCache = (
 		 * Prepares a filesystem path for extraction based on TAR header.
 		 * Handles security validation, conflict detection, and path preparation.
 		 *
-		 * @returns The output path if the entry is a file that needs to be streamed.
+		 * @returns The file sink if the entry needs to be streamed.
 		 */
-		async preparePath(header: TarHeader): Promise<string | undefined> {
+		async preparePath(header: TarHeader): Promise<FileSink | undefined> {
 			const { name, linkname, type, mode, mtime } = header;
 
 			const normalizedName = normalizeHeaderName(name);
@@ -241,7 +242,11 @@ export const createPathCache = (
 				case FILE: {
 					pathConflicts.set(normalizedName, FILE);
 					await prepareDirectory(parentDir);
-					return outPath;
+					const safeMode = mode ? mode & 0o777 : undefined;
+					return createFileSink(outPath, destDir.real, {
+						mode: options.fmode ?? safeMode,
+						mtime,
+					});
 				}
 
 				case SYMLINK: {

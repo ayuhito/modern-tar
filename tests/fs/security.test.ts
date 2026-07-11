@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { finished, pipeline } from "node:stream/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar as packTarFS, type TarSource, unpackTar } from "../../src/fs";
+import { createFileSink } from "../../src/fs/file-sink";
 import { encoder } from "../../src/tar/encoding";
 import { packTar, type TarEntry } from "../../src/web";
 import { INVALID_TAR } from "../web/fixtures";
@@ -1085,27 +1086,23 @@ describe("security", () => {
 				await fs.mkdir(extractDir, { recursive: true });
 				await fs.mkdir(outsideDir, { recursive: true });
 
-				const tarBuffer = await packTar([
-					{
-						header: {
-							name: "dir/file.txt",
-							size: 5,
-							type: "file",
-						},
-						body: "pwned",
-					},
-				]);
-				const unpackStream = unpackTar(extractDir);
-
-				await writeChunk(unpackStream, tarBuffer.subarray(0, 512));
-				await fs.rm(path.join(extractDir, "dir"), {
+				const parentDir = path.join(extractDir, "dir");
+				await fs.mkdir(parentDir);
+				const root = await fs.realpath(extractDir);
+				await fs.rm(parentDir, {
 					recursive: true,
 					force: true,
 				});
-				await fs.symlink("../outside", path.join(extractDir, "dir"));
+				await fs.symlink("../outside", parentDir);
 
-				unpackStream.end(tarBuffer.subarray(512));
-				await finished(unpackStream).catch(() => undefined);
+				const fileStream = createFileSink(
+					path.join(parentDir, "file.txt"),
+					root,
+				);
+				fileStream.write("pwned");
+				await expect(fileStream.end()).rejects.toThrow(
+					"changed during extraction",
+				);
 
 				await expect(
 					fs.access(path.join(outsideDir, "file.txt")),
