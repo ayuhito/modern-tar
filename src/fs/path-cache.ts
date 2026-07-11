@@ -259,9 +259,29 @@ export const createPathCache = (
 
 					await prepareDirectory(parentDir);
 
-					// Create the symlink.
-					await fs.rm(outPath, { force: true });
-					await fs.symlink(linkname, outPath);
+					// Reject parent swaps between leaf removal and link creation.
+					const realParentDir = await fs.realpath(parentDir);
+					validateBounds(
+						realParentDir,
+						destDir.real,
+						"Symlink parent changed.",
+					);
+					validateBounds(
+						path.resolve(realParentDir, linkname),
+						destDir.real,
+						`Symlink "${linkname}" points outside the extraction directory.`,
+					);
+					const realOutPath = path.join(realParentDir, path.basename(outPath));
+
+					try {
+						await fs.symlink(linkname, realOutPath);
+					} catch (err) {
+						if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+						await fs.rm(realOutPath, { force: true });
+						if ((await fs.realpath(parentDir)) !== realParentDir)
+							throw new Error("Symlink parent changed.");
+						await fs.symlink(linkname, realOutPath);
+					}
 					(symlinks ??= new Map()).set(normalizedName, linkname);
 
 					// Empty and "." parts do not matter when only detecting "..".
