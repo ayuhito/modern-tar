@@ -264,9 +264,29 @@ export const createPathCache = (
 
 					await prepareDirectory(parentDir);
 
-					// Create the symlink.
-					await fs.rm(outPath, { force: true });
-					await fs.symlink(linkname, outPath);
+					// Reject parent swaps between leaf removal and link creation.
+					const realParentDir = await fs.realpath(parentDir);
+					validateBounds(
+						realParentDir,
+						destDir.real,
+						"Symlink parent changed.",
+					);
+					validateBounds(
+						path.resolve(realParentDir, linkname),
+						destDir.real,
+						`Symlink "${linkname}" points outside the extraction directory.`,
+					);
+					const realOutPath = path.join(realParentDir, path.basename(outPath));
+
+					try {
+						await fs.symlink(linkname, realOutPath);
+					} catch (err) {
+						if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+						await fs.rm(realOutPath, { force: true });
+						if ((await fs.realpath(parentDir)) !== realParentDir)
+							throw new Error("Symlink parent changed.");
+						await fs.symlink(linkname, realOutPath);
+					}
 					(symlinks ??= new Map()).set(normalizedName, linkname);
 
 					// Empty and "." parts do not matter when only detecting "..".
@@ -319,24 +339,37 @@ export const createPathCache = (
 		},
 
 		/**
-		 * Validates archive-created symlinks after all symlinks have been written.
+		 * Validates archive-created symlinks against the final destination state.
 		 *
 		 * Catches symlink chains whose final target changes after a later archive
 		 * entry creates another symlink.
 		 */
 		async checkSymlinks() {
-			if (!symlinks || symlinks.size < 2 || !hasParentRef) return;
+			if (!symlinks) return;
 
-			const destDir = (await destDirPromise).symbolic;
-			const destRoot = path.parse(destDir).root;
-			const destDepth = linkParts(destDir.slice(destRoot.length)).length;
+			const { symbolic: dest, real } = await destDirPromise;
+			const root = path.parse(dest).root;
+			const depth = linkParts(dest.slice(root.length)).length;
 			for (const [name, linkname] of symlinks) {
+				const outPath = path.join(dest, name);
+				const message = `Symlink "${linkname}" points outside the extraction directory.`;
+				try {
+					validateBounds(await fs.realpath(outPath), real, message);
+					continue;
+				} catch (err: unknown) {
+					if ((err as NodeJS.ErrnoException).code !== ENOENT) {
+						await fs.rm(outPath, { force: true });
+						throw err;
+					}
+				}
+				if (!hasParentRef) continue;
+
 				// Stored absolute linknames already passed the creation-time bounds check.
 				// Strip the destination prefix here while preserving later ".." parts.
 				let pendingParts: string[];
 				if (path.isAbsolute(linkname)) {
-					pendingParts = linkParts(linkname.slice(destRoot.length));
-					pendingParts.splice(0, destDepth);
+					pendingParts = linkParts(linkname.slice(root.length));
+					pendingParts.splice(0, depth);
 				} else {
 					pendingParts = linkParts(`${path.posix.dirname(name)}/${linkname}`);
 				}
@@ -348,10 +381,8 @@ export const createPathCache = (
 
 					if (part === "..") {
 						if (!resolvedParts.length) {
-							await fs.rm(path.join(destDir, name), { force: true });
-							throw new Error(
-								`Symlink "${linkname}" points outside the extraction directory.`,
-							);
+							await fs.rm(outPath, { force: true });
+							throw new Error(message);
 						}
 
 						resolvedParts.pop();
@@ -365,10 +396,8 @@ export const createPathCache = (
 
 					// More follows than archive-created symlinks means this graph is cycling.
 					if (++followedSymlinks > symlinks.size) {
-						await fs.rm(path.join(destDir, name), { force: true });
-						throw new Error(
-							`Symlink "${linkname}" points outside the extraction directory.`,
-						);
+						await fs.rm(outPath, { force: true });
+						throw new Error(message);
 					}
 
 					// Expand symlink components before applying following ".." parts, which
@@ -376,8 +405,8 @@ export const createPathCache = (
 					resolvedParts.pop();
 					if (path.isAbsolute(nextLink)) {
 						resolvedParts.length = 0;
-						const nextParts = linkParts(nextLink.slice(destRoot.length));
-						nextParts.splice(0, destDepth);
+						const nextParts = linkParts(nextLink.slice(root.length));
+						nextParts.splice(0, depth);
 						pendingParts.splice(i + 1, 0, ...nextParts);
 					} else {
 						pendingParts.splice(i + 1, 0, ...linkParts(nextLink));

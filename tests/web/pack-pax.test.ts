@@ -4,9 +4,9 @@ import { generatePax } from "../../src/tar/pax";
 import { packTar, type TarEntry, unpackTar } from "../../src/web";
 
 describe("PAX format support", () => {
-	it("uses PAX for filename > 100 chars", async () => {
+	it("uses PAX for filename > 100 chars containing equals signs", async () => {
 		// Use a filename that cannot be split e.g. component > 155 chars
-		const longComponent = "a".repeat(200);
+		const longComponent = `a=${"a".repeat(198)}`;
 		const fileName = `${longComponent}/test.txt`;
 
 		const entries: TarEntry[] = [
@@ -44,8 +44,8 @@ describe("PAX format support", () => {
 		expect(extracted[0].header.pax?.path).toBe(longPath);
 	});
 
-	it("uses PAX for long linkname", async () => {
-		const longLink = "a".repeat(150);
+	it("uses PAX for long linkname containing equals signs", async () => {
+		const longLink = `target=${"a".repeat(143)}`;
 		const entries: TarEntry[] = [
 			{
 				header: {

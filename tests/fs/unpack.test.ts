@@ -5,11 +5,12 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock fs/promises to introduce delay in mkdir for specific test case.
+// Mock fs/promises to control filesystem races.
 const originalFs =
 	await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
 let mkdirDelay: Promise<void> | null = null;
 let releaseMkdir: (() => void) | null = null;
+let afterSymlinkRm: (() => Promise<void>) | null = null;
 
 vi.mock("node:fs/promises", async () => {
 	const actual =
@@ -35,6 +36,13 @@ vi.mock("node:fs/promises", async () => {
 					return actual.mkdir(target, options);
 				},
 			),
+		rm: async (...args: Parameters<typeof actual.rm>) => {
+			const result = await actual.rm(...args);
+			if (String(args[0]).endsWith(`${path.sep}link.txt`))
+				await afterSymlinkRm?.();
+
+			return result;
+		},
 	};
 });
 
@@ -55,6 +63,7 @@ describe("extract", () => {
 	});
 
 	afterEach(async () => {
+		afterSymlinkRm = null;
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
@@ -238,6 +247,40 @@ describe("extract", () => {
 		const linkTarget = await fs.readlink(path.join(destDir, "testsymlink"));
 		expect(linkTarget).toBe("testdir");
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"rejects symlink parent swaps without writing outside",
+		async () => {
+			const destDir = path.join(tmpDir, "extracted");
+			const parentDir = path.join(destDir, "dir");
+			const outsideDir = path.join(tmpDir, "outside");
+			await fs.mkdir(parentDir, { recursive: true });
+			await fs.mkdir(outsideDir);
+			await fs.writeFile(path.join(parentDir, "link.txt"), "existing");
+
+			afterSymlinkRm = async () => {
+				afterSymlinkRm = null;
+				await originalFs.rm(parentDir, { recursive: true });
+				await originalFs.symlink(outsideDir, parentDir);
+			};
+
+			const tarBuffer = await packTarWeb([
+				{
+					header: {
+						name: "dir/link.txt",
+						size: 0,
+						type: "symlink",
+						linkname: "../target.txt",
+					},
+				},
+			]);
+
+			await expect(
+				pipeline(Readable.from([tarBuffer]), unpackTar(destDir)),
+			).rejects.toThrow("Symlink parent changed");
+			expect(await originalFs.readdir(outsideDir)).toEqual([]);
+		},
+	);
 
 	it("handles file permissions and timestamps correctly", async () => {
 		const destDir = path.join(tmpDir, "extracted");
