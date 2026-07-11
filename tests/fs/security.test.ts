@@ -558,6 +558,48 @@ describe("security", () => {
 		);
 
 		it.skipIf(process.platform === "win32")(
+			"prevents pre-existing symlink components from escaping the extraction directory",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.symlink(".", path.join(extractDir, "noop"));
+
+				const maliciousTar = await createTarWithSymlink("noop/..");
+				await expect(
+					pipeline(maliciousTar, unpackTar(extractDir)),
+				).rejects.toThrow(
+					'Symlink "noop/.." points outside the extraction directory.',
+				);
+
+				await expect(
+					fs.lstat(path.join(extractDir, "malicious-symlink")),
+				).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"prevents pre-existing symlinks from redirecting targets outside the extraction directory",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const outsideDir = path.join(tmpDir, "outside");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(outsideDir);
+				await fs.symlink(outsideDir, path.join(extractDir, "redirect"));
+
+				const maliciousTar = await createTarWithSymlink("redirect");
+				await expect(
+					pipeline(maliciousTar, unpackTar(extractDir)),
+				).rejects.toThrow(
+					'Symlink "redirect" points outside the extraction directory.',
+				);
+
+				await expect(
+					fs.lstat(path.join(extractDir, "malicious-symlink")),
+				).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
 			"prevents repeated symlink graph rewrites from escaping",
 			async () => {
 				const extractDir = path.join(tmpDir, "extract");
