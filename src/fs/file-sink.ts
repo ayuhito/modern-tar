@@ -286,20 +286,25 @@ export function createFileSink(
 		finish();
 	};
 
-	const validateParent = (next: () => void) => {
-		fs.realpath.native(path.dirname(outPath), (err, realParent) => {
-			if (err) return fail(err);
-			try {
-				validateBounds(
-					realParent,
-					root,
-					`Path "${outPath}" changed during extraction.`,
-				);
-			} catch (error) {
-				return fail(error as Error);
-			}
-			next();
-		});
+	// Native resolution is faster, but the portable implementation supports more runtimes.
+	const validateParent = (next: () => void, native = true) => {
+		(native ? fs.realpath.native : fs.realpath)(
+			path.dirname(outPath),
+			(err, realParent) => {
+				if (native && err) return validateParent(next, false);
+				if (err) return fail(err);
+				try {
+					validateBounds(
+						realParent,
+						root,
+						`Path "${outPath}" changed during extraction.`,
+					);
+				} catch (error) {
+					return fail(error as Error);
+				}
+				next();
+			},
+		);
 	};
 
 	// Open immediately so callers can await waitDrain() before writing body data.
