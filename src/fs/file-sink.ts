@@ -286,37 +286,31 @@ export function createFileSink(
 		finish();
 	};
 
-	// Keep the native fast path, but preserve portable behavior when it fails.
-	const validateParent = (next: () => void, native = true) => {
-		(native ? fs.realpath.native : fs.realpath)(
-			path.dirname(outPath),
-			(err, realParent) => {
-				if (native && err) return validateParent(next, false);
-				if (err) return fail(err);
-				try {
-					validateBounds(
-						realParent,
-						root,
-						`Path "${outPath}" changed during extraction.`,
-					);
-				} catch (error) {
-					return fail(error as Error);
-				}
-				next();
-			},
-		);
+	const validateParent = (next: () => void) => {
+		fs.realpath.native(path.dirname(outPath), (err, realParent) => {
+			if (err) return fail(err);
+			try {
+				validateBounds(
+					realParent,
+					root,
+					`Path "${outPath}" changed during extraction.`,
+				);
+			} catch (error) {
+				return fail(error as Error);
+			}
+			next();
+		});
 	};
 
-	const open = (callback: typeof onOpen) =>
-		validateParent(() => fs.open(outPath, CREATE_FLAGS, mode, callback));
-
 	// Open immediately so callers can await waitDrain() before writing body data.
-	open((err, openFd) => {
-		if (!err || err.code !== "EEXIST") return onOpen(err, openFd);
-		validateParent(() => {
-			fs.rm(outPath, { force: true }, (rmErr) => {
-				if (rmErr) return fail(rmErr);
-				open(onOpen);
+	validateParent(() => {
+		fs.open(outPath, CREATE_FLAGS, mode, (err, openFd) => {
+			if (!err || err.code !== "EEXIST") return onOpen(err, openFd);
+			validateParent(() => {
+				fs.rm(outPath, { force: true }, (rmErr) => {
+					if (rmErr) return fail(rmErr);
+					validateParent(() => fs.open(outPath, CREATE_FLAGS, mode, onOpen));
+				});
 			});
 		});
 	});

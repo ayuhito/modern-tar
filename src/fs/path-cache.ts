@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { DIRECTORY, FILE, LINK, SYMLINK } from "../tar/constants";
 import type { TarHeader } from "../tar/types";
 import { createCache } from "./cache";
-import { createFileSink, type FileSink } from "./file-sink";
+import { createFileSink } from "./file-sink";
 import { normalizeHeaderName, normalizeUnicode, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
@@ -182,7 +182,7 @@ export const createPathCache = (
 		 *
 		 * @returns The file sink if the entry needs to be streamed.
 		 */
-		async preparePath(header: TarHeader): Promise<FileSink | undefined> {
+		async preparePath(header: TarHeader) {
 			const { name, linkname, type, mode, mtime } = header;
 
 			const normalizedName = normalizeHeaderName(name);
