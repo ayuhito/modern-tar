@@ -209,9 +209,10 @@ export function parsePax(buffer: Uint8Array): HeaderOverrides {
 			buffer.subarray(spaceIndex + 1, recordEnd - 1),
 		);
 
-		// Split at the first '=' to get key and value.
-		const [key, value] = recordStr.split("=", 2);
-		if (key && value !== undefined) {
+		const equalsIndex = recordStr.indexOf("=");
+		if (equalsIndex > 0) {
+			const key = recordStr.slice(0, equalsIndex);
+			const value = recordStr.slice(equalsIndex + 1);
 			pax[key] = value;
 			isPax = true;
 
