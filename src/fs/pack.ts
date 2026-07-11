@@ -88,21 +88,30 @@ export function packTar(
 		} = options;
 
 		// Determine input type and resolve directory path if needed
-		const isDir = typeof sources === "string";
-		const directoryPath = isDir ? path.resolve(sources) : null;
+		let directoryPath: string | undefined;
 		let realBaseDir: string | undefined;
 
-		// Create initial job queue from directory contents or provided sources
-		const jobs: TarSource[] = isDir
-			? // biome-ignore lint/style/noNonNullAssertion: isDir matches this check.
-				(await fsp.readdir(directoryPath!, WITH_FILE_TYPES)).map((entry) => ({
-					type: entry.isDirectory() ? DIRECTORY : FILE,
-					// biome-ignore lint/style/noNonNullAssertion: Checked above.
-					source: path.join(directoryPath!, entry.name),
-					target: entry.name,
-				}))
-			: // Snapshot the sources array to avoid mutation during processing.
-				sources.map((source) => ({ ...source }));
+		// Create initial job queue from directory contents or provided sources.
+		let jobs: TarSource[];
+		if (typeof sources === "string") {
+			const source = path.resolve(sources);
+			directoryPath = source;
+			const before = await fsp.stat(source, BIGINT_STAT);
+			const entries = await fsp.readdir(source, WITH_FILE_TYPES);
+			const after = await fsp.stat(source, BIGINT_STAT);
+
+			jobs =
+				before.dev === after.dev && before.ino === after.ino
+					? entries.map((entry) => ({
+							type: entry.isDirectory() ? DIRECTORY : FILE,
+							source: path.join(source, entry.name),
+							target: entry.name,
+						}))
+					: [];
+		} else {
+			// Snapshot the sources array to avoid mutation during processing.
+			jobs = sources.map((source) => ({ ...source }));
+		}
 
 		const results = new Map<number, JobResult | null>();
 		// Resolvers is used to notify the writer when a job result is ready.
@@ -344,12 +353,17 @@ export function packTar(
 
 					// Enqueue children for processing.
 					try {
-						// Recheck before readdir so a swapped symlink cannot expose outside files.
-						const s = await fsp.lstat(source, BIGINT_STAT);
-						if (!s.isDirectory() || stat.dev !== s.dev || stat.ino !== s.ino)
+						const entries = await fsp.readdir(source, WITH_FILE_TYPES);
+						const after = await fsp.lstat(source, BIGINT_STAT);
+
+						if (
+							!after.isDirectory() ||
+							stat.dev !== after.dev ||
+							stat.ino !== after.ino
+						)
 							return;
 
-						for (const d of await fsp.readdir(source, WITH_FILE_TYPES)) {
+						for (const d of entries) {
 							jobs.push({
 								type: d.isDirectory() ? DIRECTORY : FILE,
 								source: path.join(source, d.name),

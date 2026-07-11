@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -335,6 +336,46 @@ describe("pack", () => {
 					},
 				}),
 			);
+
+			expect(swapped).toBe(true);
+			expect(archive).not.toContain("DIR-LEAK!");
+			expect(archive).not.toContain("secret.txt");
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"skips entries enumerated through a swapped directory",
+		async () => {
+			const sourceDir = path.join(tmpDir, "source");
+			const childDir = path.join(sourceDir, "child");
+			const outsideDir = path.join(tmpDir, "outside");
+
+			await fsp.mkdir(childDir, { recursive: true });
+			await fsp.mkdir(outsideDir);
+			await fsp.writeFile(path.join(outsideDir, "secret.txt"), "DIR-LEAK!");
+
+			const originalReaddir = fsp.readdir;
+			let swapped = false;
+			fs.promises.readdir = (async (
+				...args: Parameters<typeof originalReaddir>
+			) => {
+				if (args[0] === childDir && !swapped) {
+					swapped = true;
+					fs.rmSync(childDir, { recursive: true, force: true });
+					fs.symlinkSync(outsideDir, childDir);
+				}
+
+				return originalReaddir(...args);
+			}) as typeof originalReaddir;
+			syncBuiltinESMExports();
+
+			let archive: string;
+			try {
+				archive = await readArchiveText(packTar(sourceDir, { concurrency: 1 }));
+			} finally {
+				fs.promises.readdir = originalReaddir;
+				syncBuiltinESMExports();
+			}
 
 			expect(swapped).toBe(true);
 			expect(archive).not.toContain("DIR-LEAK!");
