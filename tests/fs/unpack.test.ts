@@ -903,6 +903,10 @@ describe("extract", () => {
 			const nextFilePath = path.join(destDir, "next-file.txt");
 			const nextFileContent = await fs.readFile(nextFilePath, "utf-8");
 			expect(nextFileContent).toBe("hello");
+			expect((await fs.readdir(destDir)).sort()).toEqual([
+				"next-file.txt",
+				"weird-dir",
+			]);
 		});
 
 		it("map filters out empty directory names", async () => {

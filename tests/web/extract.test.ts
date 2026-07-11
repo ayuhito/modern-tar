@@ -115,8 +115,72 @@ describe("unpackTar", () => {
 		]);
 		const [paxEntry] = await unpackTar(paxArchive, { strict: false });
 
-		expect(paxEntry.header.size).toBe(-1);
-		expect(paxEntry.data?.buffer.byteLength).toBe(0);
+		expect(paxEntry.header.size).toBe(1);
+		expect(decoder.decode(paxEntry.data)).toBe("x");
+	});
+
+	it("does not apply PAX size to a bodyless symlink", async () => {
+		const archive = await createBaseArchive([
+			{
+				header: {
+					name: "bodyless",
+					type: "symlink",
+					size: 0,
+					linkname: "target",
+					pax: { size: String(BLOCK_SIZE) },
+				},
+			},
+			{
+				header: { name: "visible.txt", type: "file", size: 1 },
+				body: "x",
+			},
+		]);
+		const entries = await unpackTar(archive);
+
+		expect(entries.map((entry) => entry.header.name)).toEqual([
+			"bodyless",
+			"visible.txt",
+		]);
+		expect(entries[0].header.size).toBe(0);
+	});
+
+	it("does not carry PAX size through GNU long-name metadata", async () => {
+		const paxArchive = await createBaseArchive([
+			{
+				header: {
+					name: "ignored",
+					type: "file",
+					size: 0,
+					pax: { size: String(BLOCK_SIZE) },
+				},
+			},
+		]);
+		const longName = `${"long/".repeat(20)}file.txt`;
+		const longNameBytes = encoder.encode(`${longName}\0`);
+		const longNameBlock = new Uint8Array(BLOCK_SIZE);
+		longNameBlock.set(longNameBytes);
+		const gnuHeader = createTarHeader({
+			name: "././@LongLink",
+			type: "gnu-long-name",
+			size: longNameBytes.length,
+		});
+		const fileArchive = await createBaseArchive([
+			{
+				header: { name: "short.txt", type: "file", size: 5 },
+				body: "hello",
+			},
+		]);
+		const archive = new Uint8Array(BLOCK_SIZE * 4 + fileArchive.length);
+		archive.set(paxArchive.subarray(0, BLOCK_SIZE * 2));
+		archive.set(gnuHeader, BLOCK_SIZE * 2);
+		archive.set(longNameBlock, BLOCK_SIZE * 3);
+		archive.set(fileArchive, BLOCK_SIZE * 4);
+
+		const [entry] = await unpackTar(archive);
+
+		expect(entry.header.name).toBe(longName);
+		expect(entry.header.size).toBe(5);
+		expect(decoder.decode(entry.data)).toBe("hello");
 	});
 
 	it("extracts a tar with various entry types (directory, symlink)", async () => {
