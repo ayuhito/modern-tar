@@ -23,5 +23,8 @@ export const createCache = <V>() => {
 			// biome-ignore lint/style/noNonNullAssertion: An item was just added.
 			if (m.set(k, v).size > 10000) m.delete(m.keys().next().value!);
 		},
+		clear(): void {
+			m.clear();
+		},
 	};
 };
