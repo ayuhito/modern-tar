@@ -1,3 +1,4 @@
+import { isBodyless } from "./body";
 import { createChunkQueue } from "./chunk-queue";
 import { BLOCK_SIZE, BLOCK_SIZE_MASK, DIRECTORY, FILE } from "./constants";
 import {
@@ -149,6 +150,8 @@ export function createUnpacker(options: DecoderOptions = {}) {
 					const overrides = metaParser(
 						metaBlock.subarray(0, internalHeader.size),
 					);
+					// Local PAX attributes apply only to the immediately following header.
+					if (nextEntryOverrides.pax) nextEntryOverrides = {};
 
 					// Store the overrides for the next entry or globally for PAX global headers.
 					const target =
@@ -171,8 +174,13 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				applyOverrides(header, paxGlobals);
 				applyOverrides(header, nextEntryOverrides);
 
-				if (header.name.endsWith("/") && header.type === FILE) {
+				let archiveSize = header.size;
+				if (isBodyless(header)) {
+					archiveSize = 0;
+					header.size = 0;
+				} else if (header.name.endsWith("/") && header.type === FILE) {
 					header.type = DIRECTORY;
+					header.size = 0;
 				}
 
 				nextEntryOverrides = {}; // Reset for the next entry.
@@ -180,8 +188,8 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				// Set up state for body processing.
 				currentEntry = {
 					header,
-					remaining: header.size,
-					padding: -header.size & BLOCK_SIZE_MASK,
+					remaining: archiveSize,
+					padding: -archiveSize & BLOCK_SIZE_MASK,
 				};
 
 				state = STATE_BODY;

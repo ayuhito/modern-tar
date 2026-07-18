@@ -154,8 +154,6 @@ export function parseUstarHeader(
 
 	const magic = readString(block, USTAR_MAGIC_OFFSET, USTAR_MAGIC_SIZE);
 
-	if (isBodyless(header)) header.size = 0;
-
 	// Both GNU and USTAR formats have uname and gname.
 	if (magic.trim() === "ustar") {
 		header.uname = readString(block, USTAR_UNAME_OFFSET, USTAR_UNAME_SIZE);
@@ -169,14 +167,16 @@ export function parseUstarHeader(
 
 	return header;
 }
-
 const PAX_MAPPING: Record<
 	string,
 	[keyof HeaderOverrides, (val: string) => number | string]
 > = {
 	path: ["name", (v) => v],
 	linkpath: ["linkname", (v) => v],
-	size: ["size", (v) => parseInt(v, 10)],
+	size: [
+		"size",
+		(v) => (/^\d+$/.test(v) && Number.isSafeInteger(+v) ? +v : NaN),
+	],
 	mtime: ["mtime", parseFloat],
 	uid: ["uid", (v) => parseInt(v, 10)],
 	gid: ["gid", (v) => parseInt(v, 10)],
