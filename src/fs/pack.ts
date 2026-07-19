@@ -381,17 +381,12 @@ export function packTar(
 					let linkname = stat.nlink > 1 ? seenInodes.get(stat.ino) : undefined;
 
 					try {
+						let after: fs.BigIntStats | undefined;
 						try {
 							if (header.size === 0 || linkname !== undefined) {
 								// Header-only entries still need a second identity check, but do not
 								// need an open descriptor because no file body will be read.
-								const after = await fsp.lstat(source, BIGINT_STAT);
-								if (
-									!after.isFile() ||
-									stat.dev !== after.dev ||
-									stat.ino !== after.ino
-								)
-									return;
+								after = await fsp.lstat(source, BIGINT_STAT);
 							} else {
 								// Reject final-component symlink swaps before opening a file body.
 								handleToClose = await fsp.open(
@@ -405,8 +400,16 @@ export function packTar(
 							throw error;
 						}
 
-						if (handleToClose) {
-							const { dev, ino } = await handleToClose.stat(BIGINT_STAT);
+						if (after) {
+							if (
+								!after.isFile() ||
+								stat.dev !== after.dev ||
+								stat.ino !== after.ino
+							)
+								return;
+						} else {
+							// biome-ignore lint/style/noNonNullAssertion: The open branch completed.
+							const { dev, ino } = await handleToClose!.stat(BIGINT_STAT);
 							// Read only if the opened fd still points at the inode validated by
 							// lstat. This catches replacement between check and open.
 							if (stat.dev !== dev || stat.ino !== ino) return;
