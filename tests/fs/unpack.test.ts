@@ -534,7 +534,9 @@ describe("extract", () => {
 	it.skipIf(process.platform === "win32")(
 		"retries when an existing hardlink output disappears",
 		async () => {
+			const targetPath = path.join(tmpDir, "target.txt");
 			const outPath = path.join(tmpDir, "link.txt");
+			await fs.writeFile(targetPath, "target");
 			await fs.writeFile(outPath, "existing");
 
 			let collisions = 0;
@@ -544,14 +546,6 @@ describe("extract", () => {
 			};
 
 			const tarBuffer = await packTarWeb([
-				{
-					header: {
-						name: "target.txt",
-						size: 6,
-						type: "file",
-					},
-					body: "target",
-				},
 				{
 					header: {
 						name: "link.txt",
@@ -565,7 +559,7 @@ describe("extract", () => {
 			await pipeline(Readable.from([tarBuffer]), unpackTar(tmpDir));
 
 			expect(collisions).toBe(1);
-			const targetStat = await fs.stat(path.join(tmpDir, "target.txt"));
+			const targetStat = await fs.stat(targetPath);
 			const linkStat = await fs.stat(outPath);
 			expect(linkStat.ino).toBe(targetStat.ino);
 		},
