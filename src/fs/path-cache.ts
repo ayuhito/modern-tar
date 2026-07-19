@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { DIRECTORY, FILE, LINK, SYMLINK } from "../tar/constants";
 import type { TarHeader } from "../tar/types";
 import { createCache } from "./cache";
+import type { createOperationQueue } from "./concurrency";
 import { normalizeHeaderName, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
@@ -27,6 +28,8 @@ const linkParts = (linkname: string): string[] =>
 export const createPathCache = (
 	destDirPath: string,
 	options: UnpackOptionsFS,
+	opQueue: ReturnType<typeof createOperationQueue>,
+	concurrency: number,
 ) => {
 	const { maxDepth = 1024, dmode } = options;
 	// Serializes directory creation operations within the same directory tree.
@@ -359,7 +362,11 @@ export const createPathCache = (
 				parts.splice(0, depth);
 				return parts;
 			};
-			for (const [name, storedLinkname] of symlinks) {
+			// Return errors as values so each batch can report them in archive order.
+			const getSymlinkError = async ([name, storedLinkname]: [
+				string,
+				string,
+			]): Promise<unknown | undefined> => {
 				const outPath = path.join(dest, name);
 				try {
 					try {
@@ -368,12 +375,12 @@ export const createPathCache = (
 							throw new Error(
 								`Symlink "${storedLinkname}" points outside the extraction directory.`,
 							);
-						continue;
+						return;
 					} catch (err: unknown) {
 						if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
 					}
 
-					if (!(await fs.lstat(outPath)).isSymbolicLink()) continue;
+					if (!(await fs.lstat(outPath)).isSymbolicLink()) return;
 					const linkname = await fs.readlink(outPath);
 					const message = `Symlink "${linkname}" points outside the extraction directory.`;
 					const realParent = await fs.realpath(path.dirname(outPath));
@@ -411,9 +418,20 @@ export const createPathCache = (
 						);
 					}
 				} catch (err: unknown) {
-					if ((err as NodeJS.ErrnoException).code === ENOENT) continue;
-					await fs.rm(outPath, { force: true });
-					throw err;
+					if ((err as NodeJS.ErrnoException).code !== ENOENT) return err;
+				}
+			};
+
+			// Validate concurrently without queuing the entire archive at once.
+			for (let start = 0; start < symlinks.length; start += concurrency) {
+				const batch = symlinks.slice(start, start + concurrency);
+				const errors = await Promise.all(
+					batch.map((symlink) => opQueue.add(() => getSymlinkError(symlink))),
+				);
+				for (const [i, error] of errors.entries()) {
+					if (error === undefined) continue;
+					await fs.rm(path.join(dest, batch[i][0]), { force: true });
+					throw error;
 				}
 			}
 		},
