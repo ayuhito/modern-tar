@@ -381,36 +381,31 @@ export function packTar(
 					let linkname = stat.nlink > 1 ? seenInodes.get(stat.ino) : undefined;
 
 					try {
-						if (header.size === 0 || linkname !== undefined) {
-							// Header-only entries still need a second identity check, but do not
-							// need an open descriptor because no file body will be read.
-							let after: fs.BigIntStats;
-							try {
-								after = await fsp.lstat(source, BIGINT_STAT);
-							} catch (error) {
-								const code = (error as { code?: string }).code;
-								if (code === "ELOOP" || code === "ENOENT") return;
-								throw error;
-							}
-							if (
-								!after.isFile() ||
-								stat.dev !== after.dev ||
-								stat.ino !== after.ino
-							)
-								return;
-						} else {
-							// Reject final-component symlink swaps before opening a file body.
-							try {
+						try {
+							if (header.size === 0 || linkname !== undefined) {
+								// Header-only entries still need a second identity check, but do not
+								// need an open descriptor because no file body will be read.
+								const after = await fsp.lstat(source, BIGINT_STAT);
+								if (
+									!after.isFile() ||
+									stat.dev !== after.dev ||
+									stat.ino !== after.ino
+								)
+									return;
+							} else {
+								// Reject final-component symlink swaps before opening a file body.
 								handleToClose = await fsp.open(
 									source,
 									fs.constants.O_NOFOLLOW ?? 0,
 								);
-							} catch (error) {
-								const code = (error as { code?: string }).code;
-								if (code === "ELOOP" || code === "ENOENT") return;
-								throw error;
 							}
+						} catch (error) {
+							const code = (error as { code?: string }).code;
+							if (code === "ELOOP" || code === "ENOENT") return;
+							throw error;
+						}
 
+						if (handleToClose) {
 							const { dev, ino } = await handleToClose.stat(BIGINT_STAT);
 							// Read only if the opened fd still points at the inode validated by
 							// lstat. This catches replacement between check and open.

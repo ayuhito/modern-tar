@@ -191,56 +191,32 @@ describe("pack", () => {
 	it.skipIf(process.platform === "win32")(
 		"skips files swapped after validation",
 		async () => {
-			const sourceDir = path.join(tmpDir, "source");
-			await fsp.mkdir(sourceDir);
-
-			const file = path.join(sourceDir, "file.txt");
+			const emptyFile = path.join(tmpDir, "empty.txt");
+			const file = path.join(tmpDir, "file.txt");
 			const secret = path.join(tmpDir, "secret.txt");
-
+			await fsp.writeFile(emptyFile, "");
 			await fsp.writeFile(file, "SAFE12345678");
 			await fsp.writeFile(secret, "LEAK12345678");
 
-			let swapped = false;
 			const archive = await readArchiveText(
-				packTar([{ type: "file", source: file, target: "file.txt" }], {
-					concurrency: 1,
-					filter: (filePath) => {
-						if (filePath === file && !swapped) {
-							swapped = true;
-							fs.unlinkSync(file);
-							fs.symlinkSync(secret, file);
-						}
-
-						return true;
+				packTar(
+					[
+						{ type: "file", source: emptyFile, target: "empty.txt" },
+						{ type: "file", source: file, target: "file.txt" },
+					],
+					{
+						concurrency: 1,
+						filter: (filePath) => {
+							fs.unlinkSync(filePath);
+							fs.symlinkSync(secret, filePath);
+							return true;
+						},
 					},
-				}),
-			);
-
-			expect(swapped).toBe(true);
-			expect(archive).not.toContain("LEAK12345678");
-			expect(archive).not.toContain("file.txt");
-		},
-	);
-
-	it.skipIf(process.platform === "win32")(
-		"skips empty files swapped after validation",
-		async () => {
-			const file = path.join(tmpDir, "file.txt");
-			const secret = path.join(tmpDir, "secret.txt");
-			await fsp.writeFile(file, "");
-			await fsp.writeFile(secret, "LEAK12345678");
-
-			const archive = await readArchiveText(
-				packTar([{ type: "file", source: file, target: "file.txt" }], {
-					filter: () => {
-						fs.unlinkSync(file);
-						fs.symlinkSync(secret, file);
-						return true;
-					},
-				}),
+				),
 			);
 
 			expect(archive).not.toContain("LEAK12345678");
+			expect(archive).not.toContain("empty.txt");
 			expect(archive).not.toContain("file.txt");
 		},
 	);
