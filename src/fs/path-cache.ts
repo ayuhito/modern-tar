@@ -234,7 +234,15 @@ export const createPathCache = (
 				case FILE: {
 					pathConflicts.set(normalizedName, FILE);
 					await prepareDirectory(parentDir);
-					return outPath;
+					// Anchor the file to its validated real parent before its open
+					// overlaps later entries.
+					return path.join(
+						await getRealDir(
+							parentDir,
+							`File "${name}" points outside the extraction directory.`,
+						),
+						path.basename(outPath),
+					);
 				}
 
 				case SYMLINK: {

@@ -11,6 +11,21 @@ const originalFs =
 let mkdirDelay: Promise<void> | null = null;
 let releaseMkdir: (() => void) | null = null;
 let afterSymlinkRm: (() => Promise<void>) | null = null;
+let interceptOpen: ((target: string, run: () => void) => boolean) | null = null;
+let releaseOpen: (() => void) | null = null;
+
+vi.mock("node:fs", async () => {
+	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+	return {
+		...actual,
+		open: ((...args: unknown[]) => {
+			const resumeOpen = () => {
+				Reflect.apply(actual.open, actual, args);
+			};
+			if (!interceptOpen?.(String(args[0]), resumeOpen)) resumeOpen();
+		}) as typeof actual.open,
+	};
+});
 
 vi.mock("node:fs/promises", async () => {
 	const actual =
@@ -64,6 +79,9 @@ describe("extract", () => {
 
 	afterEach(async () => {
 		afterSymlinkRm = null;
+		releaseOpen?.();
+		interceptOpen = null;
+		releaseOpen = null;
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
@@ -311,6 +329,75 @@ describe("extract", () => {
 			await expect(
 				pipeline(Readable.from([tarBuffer]), unpackTar(destDir)),
 			).rejects.toThrow("Symlink parent changed");
+			expect(await originalFs.readdir(outsideDir)).toEqual([]);
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"keeps same-chunk parent replacement from redirecting pending file opens",
+		async () => {
+			const destDir = path.join(tmpDir, "extracted");
+			const safeDir = path.join(destDir, "safe");
+			const outsideDir = path.join(tmpDir, "outside");
+			await fs.mkdir(safeDir, { recursive: true });
+			await fs.mkdir(outsideDir, { recursive: true });
+			await fs.symlink("safe", path.join(destDir, "cached"));
+			await fs.symlink("../outside", path.join(destDir, "redirect"));
+
+			const expectedOpenPath = path.join(
+				await originalFs.realpath(safeDir),
+				"inside.txt",
+			);
+			const openStarted = new Promise<string>((resolve) => {
+				interceptOpen = (target, resumeOpen) => {
+					if (path.basename(target) !== "inside.txt") return false;
+					interceptOpen = null;
+					releaseOpen = resumeOpen;
+					resolve(target);
+					return true;
+				};
+			});
+
+			const tarBuffer = await packTarWeb([
+				{
+					header: {
+						name: "cached/inside.txt",
+						size: 5,
+						type: "file",
+					},
+					body: "hello",
+				},
+				{
+					header: {
+						name: "cached",
+						size: 0,
+						type: "symlink",
+						linkname: "redirect",
+					},
+				},
+			]);
+			const pipelinePromise = expect(
+				pipeline(
+					Readable.from([tarBuffer]),
+					unpackTar(destDir, { concurrency: 2 }),
+				),
+			).rejects.toThrow("points outside the extraction directory");
+
+			expect(await openStarted).toBe(expectedOpenPath);
+			await vi.waitFor(async () => {
+				expect(await originalFs.readlink(path.join(destDir, "cached"))).toBe(
+					"redirect",
+				);
+			});
+			if (!releaseOpen) throw new Error("Open was not delayed");
+			const release = releaseOpen;
+			releaseOpen = null;
+			release();
+
+			await pipelinePromise;
+			expect(
+				await originalFs.readFile(path.join(safeDir, "inside.txt"), "utf8"),
+			).toBe("hello");
 			expect(await originalFs.readdir(outsideDir)).toEqual([]);
 		},
 	);
