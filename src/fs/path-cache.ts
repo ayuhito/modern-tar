@@ -342,6 +342,9 @@ export const createPathCache = (
 			if (!symlinks) return;
 
 			const { symbolic: dest, real } = await destDirPromise;
+			// realpath results are canonical, so reuse one boundary prefix instead of
+			// resolving both paths again for every symlink.
+			const realPrefix = real + path.sep;
 			const root = path.parse(real).root;
 			const depth = linkParts(real.slice(root.length)).length;
 			const targetParts = (
@@ -358,10 +361,13 @@ export const createPathCache = (
 			};
 			for (const [name, storedLinkname] of symlinks) {
 				const outPath = path.join(dest, name);
-				const storedMessage = `Symlink "${storedLinkname}" points outside the extraction directory.`;
 				try {
 					try {
-						validateBounds(await fs.realpath(outPath), real, storedMessage);
+						const resolved = await fs.realpath(outPath);
+						if (resolved !== real && !resolved.startsWith(realPrefix))
+							throw new Error(
+								`Symlink "${storedLinkname}" points outside the extraction directory.`,
+							);
 						continue;
 					} catch (err: unknown) {
 						if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
