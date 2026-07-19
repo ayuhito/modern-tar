@@ -11,6 +11,8 @@ const originalFs =
 let mkdirDelay: Promise<void> | null = null;
 let releaseMkdir: (() => void) | null = null;
 let afterSymlinkRm: (() => Promise<void>) | null = null;
+let beforeLink: (() => Promise<void>) | null = null;
+let afterLinkExists: (() => Promise<void>) | null = null;
 let interceptOpen: ((target: string, run: () => void) => boolean) | null = null;
 let releaseOpen: (() => void) | null = null;
 
@@ -58,6 +60,16 @@ vi.mock("node:fs/promises", async () => {
 
 			return result;
 		},
+		link: async (...args: Parameters<typeof actual.link>) => {
+			await beforeLink?.();
+			try {
+				return await actual.link(...args);
+			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code === "EEXIST")
+					await afterLinkExists?.();
+				throw err;
+			}
+		},
 	};
 });
 
@@ -79,6 +91,8 @@ describe("extract", () => {
 
 	afterEach(async () => {
 		afterSymlinkRm = null;
+		beforeLink = null;
+		afterLinkExists = null;
 		releaseOpen?.();
 		interceptOpen = null;
 		releaseOpen = null;
@@ -516,6 +530,68 @@ describe("extract", () => {
 			'Hardlink "/absolute/target" points outside the extraction directory.',
 		);
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"retries when an existing hardlink output disappears",
+		async () => {
+			const targetPath = path.join(tmpDir, "target.txt");
+			const outPath = path.join(tmpDir, "link.txt");
+			await fs.writeFile(targetPath, "target");
+			await fs.writeFile(outPath, "existing");
+
+			let collisions = 0;
+			afterLinkExists = async () => {
+				collisions++;
+				await originalFs.rm(outPath, { force: true });
+			};
+
+			const tarBuffer = await packTarWeb([
+				{
+					header: {
+						name: "link.txt",
+						size: 0,
+						type: "link",
+						linkname: "target.txt",
+					},
+				},
+			]);
+
+			await pipeline(Readable.from([tarBuffer]), unpackTar(tmpDir));
+
+			expect(collisions).toBe(1);
+			const targetStat = await fs.stat(targetPath);
+			const linkStat = await fs.stat(outPath);
+			expect(linkStat.ino).toBe(targetStat.ino);
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"keeps an existing hardlink when its target path disappears",
+		async () => {
+			const targetPath = path.join(tmpDir, "target.txt");
+			const outPath = path.join(tmpDir, "link.txt");
+			await fs.writeFile(targetPath, "target");
+			await fs.link(targetPath, outPath);
+
+			beforeLink = () => originalFs.rm(targetPath, { force: true });
+
+			const tarBuffer = await packTarWeb([
+				{
+					header: {
+						name: "link.txt",
+						size: 0,
+						type: "link",
+						linkname: "target.txt",
+					},
+				},
+			]);
+
+			await pipeline(Readable.from([tarBuffer]), unpackTar(tmpDir));
+
+			await expect(fs.access(targetPath)).rejects.toThrow();
+			expect(await fs.readFile(outPath, "utf8")).toBe("target");
+		},
+	);
 
 	it("handles timestamps on symlinks", async () => {
 		const destDir = path.join(tmpDir, "extracted");
