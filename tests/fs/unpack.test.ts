@@ -19,10 +19,10 @@ vi.mock("node:fs", async () => {
 	return {
 		...actual,
 		open: ((...args: unknown[]) => {
-			const run = () => {
+			const resumeOpen = () => {
 				Reflect.apply(actual.open, actual, args);
 			};
-			if (!interceptOpen?.(String(args[0]), run)) run();
+			if (!interceptOpen?.(String(args[0]), resumeOpen)) resumeOpen();
 		}) as typeof actual.open,
 	};
 });
@@ -344,16 +344,16 @@ describe("extract", () => {
 			await fs.symlink("safe", path.join(destDir, "cached"));
 			await fs.symlink("../outside", path.join(destDir, "redirect"));
 
-			const delayedOpenPath = path.join(
+			const expectedOpenPath = path.join(
 				await originalFs.realpath(safeDir),
 				"inside.txt",
 			);
-			const openStarted = new Promise<void>((resolve) => {
-				interceptOpen = (target, run) => {
-					if (target !== delayedOpenPath) return false;
+			const openStarted = new Promise<string>((resolve) => {
+				interceptOpen = (target, resumeOpen) => {
+					if (path.basename(target) !== "inside.txt") return false;
 					interceptOpen = null;
-					releaseOpen = run;
-					resolve();
+					releaseOpen = resumeOpen;
+					resolve(target);
 					return true;
 				};
 			});
@@ -383,13 +383,12 @@ describe("extract", () => {
 				),
 			).rejects.toThrow("points outside the extraction directory");
 
-			await openStarted;
+			expect(await openStarted).toBe(expectedOpenPath);
 			await vi.waitFor(async () => {
 				expect(await originalFs.readlink(path.join(destDir, "cached"))).toBe(
 					"redirect",
 				);
 			});
-			expect(await originalFs.readdir(outsideDir)).toEqual([]);
 			if (!releaseOpen) throw new Error("Open was not delayed");
 			const release = releaseOpen;
 			releaseOpen = null;

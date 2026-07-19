@@ -62,6 +62,8 @@ export function unpackTar(
 
 	const writable = new Writable({
 		async write(chunk, _, cb) {
+			// File opens overlap within this write. Every exit reaches `finally`,
+			// which waits for them to settle before calling `cb`.
 			const pendingFileOpens: Promise<Error | undefined>[] = [];
 			let writeError: Error | undefined;
 			try {
