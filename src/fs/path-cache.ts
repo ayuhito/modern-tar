@@ -449,18 +449,25 @@ export const createPathCache = (
 					const realOutPath = path.join(realOutDir, path.basename(outPath));
 
 					try {
-						const outStat = await fs.lstat(realOutPath);
-						if (
-							outStat.dev === targetStat.dev &&
-							outStat.ino === targetStat.ino
-						)
-							continue;
+						await fs.link(realTarget, realOutPath);
 					} catch (err: unknown) {
-						if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
-					}
+						const code = (err as NodeJS.ErrnoException).code;
+						if (code !== "EEXIST" && code !== ENOENT) throw err;
 
-					await fs.rm(realOutPath, { force: true });
-					await fs.link(realTarget, realOutPath);
+						try {
+							const outStat = await fs.lstat(realOutPath);
+							if (
+								outStat.dev === targetStat.dev &&
+								outStat.ino === targetStat.ino
+							)
+								continue;
+							await fs.rm(realOutPath, { force: true });
+						} catch (err: unknown) {
+							if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
+						}
+
+						await fs.link(realTarget, realOutPath);
+					}
 
 					const linkStat = await fs.lstat(realOutPath);
 					if (

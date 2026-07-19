@@ -191,36 +191,111 @@ describe("pack", () => {
 	it.skipIf(process.platform === "win32")(
 		"skips files swapped after validation",
 		async () => {
-			const sourceDir = path.join(tmpDir, "source");
-			await fsp.mkdir(sourceDir);
-
-			const file = path.join(sourceDir, "file.txt");
+			const emptyFile = path.join(tmpDir, "empty.txt");
+			const file = path.join(tmpDir, "file.txt");
 			const secret = path.join(tmpDir, "secret.txt");
-
+			await fsp.writeFile(emptyFile, "");
 			await fsp.writeFile(file, "SAFE12345678");
 			await fsp.writeFile(secret, "LEAK12345678");
 
-			let swapped = false;
 			const archive = await readArchiveText(
-				packTar([{ type: "file", source: file, target: "file.txt" }], {
-					concurrency: 1,
-					filter: (filePath) => {
-						if (filePath === file && !swapped) {
-							swapped = true;
-							fs.unlinkSync(file);
-							fs.symlinkSync(secret, file);
-						}
-
-						return true;
+				packTar(
+					[
+						{ type: "file", source: emptyFile, target: "empty.txt" },
+						{ type: "file", source: file, target: "file.txt" },
+					],
+					{
+						concurrency: 1,
+						filter: (filePath) => {
+							fs.unlinkSync(filePath);
+							fs.symlinkSync(secret, filePath);
+							return true;
+						},
 					},
-				}),
+				),
 			);
 
-			expect(swapped).toBe(true);
 			expect(archive).not.toContain("LEAK12345678");
+			expect(archive).not.toContain("empty.txt");
 			expect(archive).not.toContain("file.txt");
 		},
 	);
+
+	it("reads only the file size captured in its header", async () => {
+		const file = path.join(tmpDir, "file.txt");
+		await fsp.writeFile(file, "SAFE");
+
+		const destDir = path.join(tmpDir, "extracted");
+		await pipeline(
+			packTar([{ type: "file", source: file, target: "file.txt" }], {
+				filter: () => {
+					fs.appendFileSync(file, "CHANGED");
+					return true;
+				},
+			}),
+			unpackTar(destDir),
+		);
+
+		expect(await fsp.readFile(path.join(destDir, "file.txt"), "utf8")).toBe(
+			"SAFE",
+		);
+	});
+
+	it("handles partial reads from small files", async () => {
+		const file = path.join(tmpDir, "file.txt");
+		await fsp.writeFile(file, "partial reads");
+
+		const originalOpen = fsp.open;
+		fs.promises.open = (async (...args: Parameters<typeof originalOpen>) => {
+			const handle = await originalOpen(...args);
+			const originalRead = handle.read.bind(handle);
+			handle.read = ((
+				buffer: Buffer,
+				offset: number,
+				length: number,
+				position: number,
+			) =>
+				originalRead(
+					buffer,
+					offset,
+					Math.min(length, 2),
+					position,
+				)) as typeof handle.read;
+			return handle;
+		}) as typeof originalOpen;
+		syncBuiltinESMExports();
+
+		const destDir = path.join(tmpDir, "extracted");
+		try {
+			await pipeline(
+				packTar([{ type: "file", source: file, target: "file.txt" }]),
+				unpackTar(destDir),
+			);
+		} finally {
+			fs.promises.open = originalOpen;
+			syncBuiltinESMExports();
+		}
+
+		expect(await fsp.readFile(path.join(destDir, "file.txt"), "utf8")).toBe(
+			"partial reads",
+		);
+	});
+
+	it("rejects small files truncated after their header is captured", async () => {
+		const file = path.join(tmpDir, "file.txt");
+		await fsp.writeFile(file, "SAFE");
+
+		await expect(
+			readArchiveText(
+				packTar([{ type: "file", source: file, target: "file.txt" }], {
+					filter: () => {
+						fs.truncateSync(file, 2);
+						return true;
+					},
+				}),
+			),
+		).rejects.toThrow('Size mismatch for "file.txt".');
+	});
 
 	it.skipIf(process.platform === "win32")(
 		"does not follow dereferenced symlink swaps outside the base",
