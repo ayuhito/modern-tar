@@ -1,25 +1,4 @@
 import * as path from "node:path";
-import { createCache } from "./cache";
-
-const unicodeCache = createCache<string>();
-
-// This implements a simple LRU cache for normalized non-ASCII strings.
-export const normalizeUnicode = (s: string): string => {
-	// Iterate through the string to check for non-ASCII characters.
-	for (let i = 0; i < s.length; i++)
-		// Only if a non-ASCII character is found, then we rely on caching.
-		if (s.charCodeAt(i) >= 128) {
-			const cached = unicodeCache.get(s);
-			if (cached !== undefined) return cached;
-
-			const normalized = s.normalize("NFD");
-			unicodeCache.set(s, normalized);
-			return normalized;
-		}
-
-	// Otherwise, fast path for ASCII-only strings.
-	return s;
-};
 
 // Validates that the given target path is within the destination directory and does not escape.
 export function validateBounds(
@@ -27,7 +6,7 @@ export function validateBounds(
 	destDir: string,
 	errorMessage: string,
 ): void {
-	const target = normalizeUnicode(path.resolve(targetPath));
+	const target = path.resolve(targetPath);
 	const dest = path.resolve(destDir);
 	if (target !== dest && !target.startsWith(dest + path.sep))
 		throw new Error(errorMessage);
@@ -74,7 +53,7 @@ export function normalizeName(name: string): string {
 	return relative;
 }
 
-// Normalizes a header name by stripping trailing slashes and normalizing Unicode.
+// Normalizes a header name without changing its Unicode spelling.
 export const normalizeHeaderName = (s: string) =>
 	// Strip trailing slashes.
-	normalizeUnicode(normalizeName(s.replace(/\/+$/, "")));
+	normalizeName(s.replace(/\/+$/, ""));

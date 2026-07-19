@@ -113,6 +113,39 @@ describe("extract", () => {
 		expect(files.includes(".gitignore")).toBe(false);
 	});
 
+	it("preserves Unicode spelling in the destination and entry name", async () => {
+		const destDir = path.join(tmpDir, "Masaüstü", "project");
+		const decomposedDest = destDir.normalize("NFD");
+		const fileName = "café.txt";
+		await fs.mkdir(destDir, { recursive: true });
+
+		let aliasesDecomposedPath = false;
+		try {
+			const [destStat, decomposedStat] = await Promise.all([
+				fs.lstat(destDir),
+				fs.lstat(decomposedDest),
+			]);
+			aliasesDecomposedPath = destStat.ino === decomposedStat.ino;
+		} catch {
+			// Byte-preserving filesystems do not expose the decomposed spelling yet.
+		}
+
+		const tarBuffer = await packTarWeb([
+			{
+				header: { name: fileName, size: 5, type: "file" },
+				body: "hello",
+			},
+		]);
+		await pipeline(Readable.from([tarBuffer]), unpackTar(destDir));
+
+		expect(await fs.readFile(path.join(destDir, fileName), "utf8")).toBe(
+			"hello",
+		);
+		expect(await fs.readdir(destDir)).toEqual([fileName]);
+		if (!aliasesDecomposedPath && decomposedDest !== destDir)
+			await expect(fs.lstat(decomposedDest)).rejects.toThrow();
+	});
+
 	it("waits for destination directory creation when all entries are filtered", async () => {
 		const destDir = path.join(tmpDir, "delayed-extracted");
 

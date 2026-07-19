@@ -1,12 +1,14 @@
+import type { Stats } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { DIRECTORY, FILE, LINK, SYMLINK } from "../tar/constants";
 import type { TarHeader } from "../tar/types";
 import { createCache } from "./cache";
-import { normalizeHeaderName, normalizeUnicode, validateBounds } from "./path";
+import { normalizeHeaderName, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
 const ENOENT = "ENOENT";
+const MAX_SYMLINKS = 64;
 
 // On Windows, both forward and backward slashes are valid path separators.
 const linkSep = process.platform === "win32" ? /[/\\]/ : "/";
@@ -33,16 +35,14 @@ export const createPathCache = (
 	const pathConflicts = new Map<string, TarHeader["type"]>();
 	// Stores hardlinks to be created after all files are written.
 	const deferredLinks: Array<{ linkTarget: string; outPath: string }> = [];
-	// Stores archive-created symlinks for final graph validation.
-	let symlinks: Map<string, string> | undefined;
-	// Without a real ".." component, symlink expansion cannot climb out.
-	let hasParentRef = false;
+	// Stores archive-created symlinks for final validation.
+	let symlinks: Array<[string, string]> | undefined;
 	// Caches resolved real paths for symlinked directories.
 	const realDirCache = createCache<Promise<string>>();
 
 	// Initializes the destination directory.
 	const initializeDestDir = async (destDirPath: string) => {
-		const symbolic = normalizeUnicode(path.resolve(destDirPath));
+		const symbolic = path.resolve(destDirPath);
 		try {
 			await fs.mkdir(symbolic, { recursive: true });
 		} catch (err: unknown) {
@@ -188,13 +188,6 @@ export const createPathCache = (
 			const destDir = await destDirPromise;
 			const outPath = path.join(destDir.symbolic, normalizedName);
 
-			// Validate path doesn't escape extraction directory.
-			validateBounds(
-				outPath,
-				destDir.symbolic,
-				`Entry "${name}" points outside the extraction directory.`,
-			);
-
 			// Enforce maximum directory depth to prevent DoS attacks.
 			if (maxDepth !== Infinity) {
 				let depth = 1;
@@ -282,11 +275,10 @@ export const createPathCache = (
 							throw new Error("Symlink parent changed.");
 						await fs.symlink(linkname, realOutPath);
 					}
-					(symlinks ??= new Map()).set(normalizedName, linkname);
-
-					// Empty and "." parts do not matter when only detecting "..".
-					hasParentRef ||=
-						linkname.includes("..") && linkname.split(linkSep).includes("..");
+					(symlinks ??= []).push([normalizedName, linkname]);
+					// A symlink can change the meaning of any cached descendant path.
+					dirPromises.clear();
+					realDirCache.clear();
 
 					// Set symlink modification time.
 					if (mtime)
@@ -304,14 +296,13 @@ export const createPathCache = (
 					if (!linkname) return;
 
 					// Hardlinks must be relative paths.
-					const normalizedLink = normalizeUnicode(linkname);
-					if (path.isAbsolute(normalizedLink))
+					if (path.isAbsolute(linkname))
 						throw new Error(
 							`Hardlink "${linkname}" points outside the extraction directory.`,
 						);
 
 					// Build and validate hardlink target path.
-					const linkTarget = path.join(destDir.symbolic, normalizedLink);
+					const linkTarget = path.join(destDir.symbolic, linkname);
 					validateBounds(
 						linkTarget,
 						destDir.symbolic,
@@ -343,69 +334,72 @@ export const createPathCache = (
 			if (!symlinks) return;
 
 			const { symbolic: dest, real } = await destDirPromise;
-			const root = path.parse(dest).root;
-			const depth = linkParts(dest.slice(root.length)).length;
-			for (const [name, linkname] of symlinks) {
+			const root = path.parse(real).root;
+			const depth = linkParts(real.slice(root.length)).length;
+			const targetParts = (
+				linkname: string,
+				resolvedParts: string[],
+				message: string,
+			) => {
+				if (!path.isAbsolute(linkname)) return linkParts(linkname);
+				validateBounds(linkname, real, message);
+				resolvedParts.length = 0;
+				const parts = linkParts(linkname.slice(root.length));
+				parts.splice(0, depth);
+				return parts;
+			};
+			for (const [name, storedLinkname] of symlinks) {
 				const outPath = path.join(dest, name);
-				const message = `Symlink "${linkname}" points outside the extraction directory.`;
+				const storedMessage = `Symlink "${storedLinkname}" points outside the extraction directory.`;
 				try {
-					validateBounds(await fs.realpath(outPath), real, message);
-					continue;
-				} catch (err: unknown) {
-					if ((err as NodeJS.ErrnoException).code !== ENOENT) {
-						await fs.rm(outPath, { force: true });
-						throw err;
+					try {
+						validateBounds(await fs.realpath(outPath), real, storedMessage);
+						continue;
+					} catch (err: unknown) {
+						if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
 					}
-				}
-				if (!hasParentRef) continue;
 
-				// Stored absolute linknames already passed the creation-time bounds check.
-				// Strip the destination prefix here while preserving later ".." parts.
-				let pendingParts: string[];
-				if (path.isAbsolute(linkname)) {
-					pendingParts = linkParts(linkname.slice(root.length));
-					pendingParts.splice(0, depth);
-				} else {
-					pendingParts = linkParts(`${path.posix.dirname(name)}/${linkname}`);
-				}
-				const resolvedParts: string[] = [];
-				let followedSymlinks = 0;
+					if (!(await fs.lstat(outPath)).isSymbolicLink()) continue;
+					const linkname = await fs.readlink(outPath);
+					const message = `Symlink "${linkname}" points outside the extraction directory.`;
+					const realParent = await fs.realpath(path.dirname(outPath));
+					validateBounds(realParent, real, message);
+					const resolvedParts = linkParts(path.relative(real, realParent));
+					const pendingParts = targetParts(linkname, resolvedParts, message);
+					let followedSymlinks = 0;
 
-				for (let i = 0; i < pendingParts.length; i++) {
-					const part = pendingParts[i];
-
-					if (part === "..") {
-						if (!resolvedParts.length) {
-							await fs.rm(outPath, { force: true });
-							throw new Error(message);
+					for (let i = 0; i < pendingParts.length; i++) {
+						const part = pendingParts[i];
+						if (part === "..") {
+							if (!resolvedParts.length) throw new Error(message);
+							resolvedParts.pop();
+							continue;
 						}
 
+						resolvedParts.push(part);
+						const nextPath = path.join(real, ...resolvedParts);
+						let nextStat: Stats;
+						try {
+							nextStat = await fs.lstat(nextPath);
+						} catch (err: unknown) {
+							if ((err as NodeJS.ErrnoException).code === ENOENT) continue;
+							throw err;
+						}
+						if (!nextStat.isSymbolicLink()) continue;
+						if (++followedSymlinks > MAX_SYMLINKS) throw new Error(message);
+
+						const nextLink = await fs.readlink(nextPath);
 						resolvedParts.pop();
-						continue;
+						pendingParts.splice(
+							i + 1,
+							0,
+							...targetParts(nextLink, resolvedParts, message),
+						);
 					}
-
-					resolvedParts.push(part);
-
-					const nextLink = symlinks.get(resolvedParts.join("/"));
-					if (!nextLink) continue;
-
-					// More follows than archive-created symlinks means this graph is cycling.
-					if (++followedSymlinks > symlinks.size) {
-						await fs.rm(outPath, { force: true });
-						throw new Error(message);
-					}
-
-					// Expand symlink components before applying following ".." parts, which
-					// matches filesystem lookup order and catches "noop/.." chain attacks.
-					resolvedParts.pop();
-					if (path.isAbsolute(nextLink)) {
-						resolvedParts.length = 0;
-						const nextParts = linkParts(nextLink.slice(root.length));
-						nextParts.splice(0, depth);
-						pendingParts.splice(i + 1, 0, ...nextParts);
-					} else {
-						pendingParts.splice(i + 1, 0, ...linkParts(nextLink));
-					}
+				} catch (err: unknown) {
+					if ((err as NodeJS.ErrnoException).code === ENOENT) continue;
+					await fs.rm(outPath, { force: true });
+					throw err;
 				}
 			}
 		},
@@ -439,6 +433,17 @@ export const createPathCache = (
 						`Hardlink "${outPath}" points outside the extraction directory.`,
 					);
 					const realOutPath = path.join(realOutDir, path.basename(outPath));
+
+					try {
+						const outStat = await fs.lstat(realOutPath);
+						if (
+							outStat.dev === targetStat.dev &&
+							outStat.ino === targetStat.ino
+						)
+							continue;
+					} catch (err: unknown) {
+						if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
+					}
 
 					await fs.rm(realOutPath, { force: true });
 					await fs.link(realTarget, realOutPath);
