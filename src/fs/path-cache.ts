@@ -8,7 +8,6 @@ import { normalizeHeaderName, validateBounds } from "./path";
 import type { UnpackOptionsFS } from "./types";
 
 const ENOENT = "ENOENT";
-const EEXIST = "EEXIST";
 const MAX_SYMLINKS = 64;
 
 // On Windows, both forward and backward slashes are valid path separators.
@@ -447,7 +446,7 @@ export const createPathCache = (
 						await fs.link(realTarget, realOutPath);
 					} catch (err: unknown) {
 						const code = (err as NodeJS.ErrnoException).code;
-						if (code !== EEXIST && code !== ENOENT) throw err;
+						if (code !== "EEXIST" && code !== ENOENT) throw err;
 
 						try {
 							const outStat = await fs.lstat(realOutPath);
