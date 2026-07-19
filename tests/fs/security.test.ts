@@ -684,6 +684,31 @@ describe("security", () => {
 		);
 
 		it.skipIf(process.platform === "win32")(
+			"rejects canonical sibling paths that share the destination prefix",
+			async () => {
+				const extractDir = path.join(tmpDir, "extract");
+				const siblingDir = path.join(tmpDir, "extract-sibling");
+				await fs.mkdir(extractDir, { recursive: true });
+				await fs.mkdir(siblingDir);
+				await fs.writeFile(path.join(siblingDir, "target.txt"), "outside");
+				await fs.symlink(
+					"../extract-sibling",
+					path.join(extractDir, "redirect"),
+				);
+
+				const tarBuffer = await packTar([
+					symlinkEntry("root", "redirect/target.txt"),
+				]);
+				await expect(
+					pipeline(Readable.from([tarBuffer]), unpackTar(extractDir)),
+				).rejects.toThrow(
+					'Symlink "redirect/target.txt" points outside the extraction directory.',
+				);
+				await expect(fs.lstat(path.join(extractDir, "root"))).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
 			"prevents repeated symlink graph rewrites from escaping",
 			async () => {
 				const extractDir = path.join(tmpDir, "extract");
