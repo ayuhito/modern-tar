@@ -1,10 +1,18 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
+import { packTar as packTarWeb } from "../../src/web";
+
+const linkEntry = (
+	type: "link" | "symlink",
+	name: string,
+	linkname: string,
+) => ({ header: { name, linkname, size: 0, type } });
 
 describe("links", () => {
 	let tmpDir: string;
@@ -44,6 +52,33 @@ describe("links", () => {
 		const linkTarget = await fs.readlink(copiedLinkPath);
 		expect(linkTarget).toBe(".gitignore");
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"reports symlink validation errors in archive order",
+		async () => {
+			const destDir = path.join(tmpDir, "extracted");
+			const tarBuffer = await packTarWeb([
+				linkEntry("symlink", "first", "first-hop/.."),
+				linkEntry("symlink", "second", "second-hop/.."),
+				linkEntry("symlink", "first-hop", "."),
+				linkEntry("symlink", "second-hop", "."),
+			]);
+
+			await expect(
+				pipeline(
+					Readable.from([tarBuffer]),
+					unpackTar(destDir, { concurrency: 2 }),
+				),
+			).rejects.toThrow(
+				'Symlink "first-hop/.." points outside the extraction directory.',
+			);
+
+			await expect(fs.lstat(path.join(destDir, "first"))).rejects.toThrow();
+			expect(await fs.readlink(path.join(destDir, "second"))).toBe(
+				"second-hop/..",
+			);
+		},
+	);
 
 	it.skipIf(process.platform === "win32")(
 		"dereferences symlinks when specified",

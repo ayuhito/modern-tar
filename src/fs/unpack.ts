@@ -44,10 +44,14 @@ export function unpackTar(
 	options: UnpackOptionsFS = {},
 ): Writable {
 	const unpacker = createUnpacker(options);
-	const opQueue = createOperationQueue(
-		options.concurrency || cpus().length || 8,
+	const concurrency = options.concurrency || cpus().length || 8;
+	const opQueue = createOperationQueue(concurrency);
+	const pathCache = createPathCache(
+		directoryPath,
+		options,
+		opQueue,
+		concurrency,
 	);
-	const pathCache = createPathCache(directoryPath, options);
 
 	// Track current file stream across write() calls for handling backpressure
 	let currentFileStream: FileSink | null = null;
