@@ -268,6 +268,8 @@ export function createUnpacker(options: DecoderOptions = {}) {
 // Instead of checking each byte individually (512 iterations), we can check
 // 8 bytes at a time using BigUint64Array (64 iterations).
 function isZeroBlock(block: Uint8Array): boolean {
+	if (block[0] !== 0) return false;
+
 	// If the block's offset within its underlying buffer is 8-byte aligned, we can safely
 	// use BigUint64Array for a fast path check.
 	if (block.byteOffset % 8 === 0) {
