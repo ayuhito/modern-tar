@@ -9,7 +9,7 @@ import {
 	writeOctal,
 	writeString,
 } from "../../src/tar/encoding";
-import { createTarHeader } from "../../src/tar/header";
+import { createTarHeader, parsePax } from "../../src/tar/header";
 import { createUnpacker } from "../../src/tar/unpacker";
 import { streamToBuffer } from "../../src/web/stream-utils";
 
@@ -472,5 +472,9 @@ describe("tar utilities", () => {
 				"Tar metadata entry exceeds maximum size.",
 			);
 		}
+	});
+
+	it("ignores negative PAX record lengths", () => {
+		expect(parsePax(encoder.encode("-100 path=value\n"))).toEqual({});
 	});
 });

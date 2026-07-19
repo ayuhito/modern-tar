@@ -202,7 +202,7 @@ export function parsePax(buffer: Uint8Array): HeaderOverrides {
 			10,
 		);
 
-		if (Number.isNaN(length) || length === 0) break;
+		if (!(length > 0)) break;
 
 		const recordEnd = offset + length;
 		const recordStr = decoder.decode(
