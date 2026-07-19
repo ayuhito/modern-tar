@@ -33,6 +33,18 @@ describe("pack", () => {
 		await fsp.rm(tmpDir, { recursive: true, force: true });
 	});
 
+	it("rejects invalid concurrency", async () => {
+		for (const concurrency of [0, -1, 0.5, NaN, Infinity]) {
+			await expect(
+				readArchiveText(
+					packTar([{ type: "content", target: "file", content: "x" }], {
+						concurrency,
+					}),
+				),
+			).rejects.toThrow("Concurrency must be a positive integer");
+		}
+	});
+
 	it("packs and extracts a directory with a single file", async () => {
 		const sourceDir = path.join(FIXTURES_DIR, "a");
 		const destDir = path.join(tmpDir, "extracted");

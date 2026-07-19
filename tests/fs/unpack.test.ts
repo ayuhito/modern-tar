@@ -99,6 +99,14 @@ describe("extract", () => {
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
+	it("rejects invalid concurrency", () => {
+		for (const concurrency of [0, -1, 0.5, NaN, Infinity]) {
+			expect(() => unpackTar(tmpDir, { concurrency })).toThrow(
+				"Concurrency must be a positive integer",
+			);
+		}
+	});
+
 	it("strips path components on extract", async () => {
 		const sourceDir = path.join(FIXTURES_DIR, "b");
 		const destDir = path.join(tmpDir, "extracted");

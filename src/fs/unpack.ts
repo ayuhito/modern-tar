@@ -1,8 +1,7 @@
-import { cpus } from "node:os";
 import { Writable } from "node:stream";
 import { transformHeader } from "../tar/options";
 import { createUnpacker } from "../tar/unpacker";
-import { createOperationQueue } from "./concurrency";
+import { createOperationQueue, resolveConcurrency } from "./concurrency";
 import type { FileSink } from "./file-sink";
 import { createFileSink } from "./file-sink";
 import { createPathCache } from "./path-cache";
@@ -44,7 +43,7 @@ export function unpackTar(
 	options: UnpackOptionsFS = {},
 ): Writable {
 	const unpacker = createUnpacker(options);
-	const concurrency = options.concurrency || cpus().length || 8;
+	const concurrency = resolveConcurrency(options.concurrency);
 	const opQueue = createOperationQueue(concurrency);
 	const pathCache = createPathCache(
 		directoryPath,

@@ -1,13 +1,13 @@
 import * as fs from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import * as fsp from "node:fs/promises";
-import { cpus } from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { normalizeBody } from "../tar/body";
 import { DIRECTORY, FILE, LINK, SYMLINK } from "../tar/constants";
 import { createTarPacker } from "../tar/packer";
 import type { TarHeader } from "../tar/types";
+import { resolveConcurrency } from "./concurrency";
 import { normalizeName } from "./path";
 import type { PackOptionsFS, TarSource } from "./types";
 
@@ -79,13 +79,8 @@ export function packTar(
 			() => stream.push(null),
 		);
 
-		const {
-			dereference = false,
-			filter,
-			map,
-			baseDir,
-			concurrency = cpus().length || 8,
-		} = options;
+		const { dereference = false, filter, map, baseDir } = options;
+		const concurrency = resolveConcurrency(options.concurrency);
 
 		// Determine input type and resolve directory path if needed
 		let directoryPath: string | undefined;

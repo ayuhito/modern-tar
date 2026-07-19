@@ -1,3 +1,11 @@
+import { cpus } from "node:os";
+
+export const resolveConcurrency = (concurrency = cpus().length || 8) => {
+	if (!Number.isInteger(concurrency) || concurrency < 1)
+		throw new RangeError("Concurrency must be a positive integer");
+	return concurrency;
+};
+
 /** Create a concurrency limited operation queue. */
 export const createOperationQueue = (concurrency: number) => {
 	let active = 0;
