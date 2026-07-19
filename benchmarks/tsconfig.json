@@ -2,7 +2,7 @@
 	"compilerOptions": {
 		"target": "ES2022",
 		"module": "ESNext",
-		"moduleResolution": "node",
+		"moduleResolution": "bundler",
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,
 		"strict": true,
@@ -13,7 +13,6 @@
 		"noEmit": true,
 		"lib": ["ES2022", "DOM"],
 		"types": ["node"],
-		"baseUrl": ".",
 		"paths": {
 			"modern-tar": ["../dist/web/index.d.ts"],
 			"modern-tar/fs": ["../dist/fs/index.d.ts"]
