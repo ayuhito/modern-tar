@@ -234,7 +234,13 @@ export const createPathCache = (
 				case FILE: {
 					pathConflicts.set(normalizedName, FILE);
 					await prepareDirectory(parentDir);
-					return outPath;
+					return path.join(
+						await getRealDir(
+							parentDir,
+							`File "${name}" points outside the extraction directory.`,
+						),
+						path.basename(outPath),
+					);
 				}
 
 				case SYMLINK: {

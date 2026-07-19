@@ -62,6 +62,8 @@ export function unpackTar(
 
 	const writable = new Writable({
 		async write(chunk, _, cb) {
+			const pendingFileOpens: Promise<Error | undefined>[] = [];
+			let writeError: Error | undefined;
 			try {
 				unpacker.write(chunk);
 
@@ -80,15 +82,13 @@ export function unpackTar(
 								if (needsDrain) {
 									await currentFileStream.waitDrain();
 								} else {
-									cb(); // Need more data.
-									return;
+									return; // Need more data.
 								}
 							}
 						}
 
 						// Body complete, skip padding.
 						while (!unpacker.skipPadding()) {
-							cb();
 							return;
 						}
 
@@ -102,8 +102,7 @@ export function unpackTar(
 					} else {
 						// Otherwise, just discard the entry body.
 						if (!unpacker.skipEntry()) {
-							cb(); // Need more data
-							return;
+							return; // Need more data
 						}
 					}
 				}
@@ -114,7 +113,6 @@ export function unpackTar(
 
 					// EOF shouldn't happen in write(), but handle it.
 					if (header === undefined || header === null) {
-						cb();
 						return;
 					}
 
@@ -123,13 +121,11 @@ export function unpackTar(
 					// Filtered out.
 					if (!transformedHeader) {
 						if (!unpacker.skipEntry()) {
-							cb();
 							return;
 						}
 
 						continue;
 					}
-
 					// Prepare filesystem path before writing body.
 					const outPath = await opQueue.add(() =>
 						pathCache.preparePath(transformedHeader),
@@ -146,7 +142,9 @@ export function unpackTar(
 							mode: options.fmode ?? safeMode,
 							mtime: transformedHeader.mtime ?? undefined,
 						});
-						await fileStream.waitDrain();
+						pendingFileOpens.push(
+							fileStream.waitDrain().catch((error: Error) => error),
+						);
 
 						// Stream body from unpacker to file.
 						let needsDrain = false;
@@ -167,7 +165,6 @@ export function unpackTar(
 									// Need more data, so save state to continue later.
 									currentFileStream = fileStream;
 									currentWriteCallback = writeCallback;
-									cb();
 									return;
 								}
 							}
@@ -178,7 +175,6 @@ export function unpackTar(
 							// Need more data, so save state to continue later.
 							currentFileStream = fileStream;
 							currentWriteCallback = writeCallback;
-							cb();
 							return;
 						}
 
@@ -187,13 +183,17 @@ export function unpackTar(
 					} else {
 						// No body data or already handled.
 						if (!unpacker.skipEntry()) {
-							cb();
 							return;
 						}
 					}
 				}
 			} catch (err) {
-				cb(err as Error);
+				writeError = err as Error;
+			} finally {
+				const openError = pendingFileOpens.length
+					? (await Promise.all(pendingFileOpens)).find((error) => error)
+					: undefined;
+				cb(openError ?? writeError);
 			}
 		},
 
