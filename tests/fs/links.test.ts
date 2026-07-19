@@ -148,6 +148,32 @@ describe("links", () => {
 	});
 
 	it.skipIf(process.platform === "win32")(
+		"creates hardlink chains with concurrency one",
+		async () => {
+			const destDir = path.join(tmpDir, "extracted");
+			const tarBuffer = await packTarWeb([
+				{
+					header: { name: "target.txt", size: 6, type: "file" },
+					body: "target",
+				},
+				linkEntry("link", "first.txt", "target.txt"),
+				linkEntry("link", "second.txt", "first.txt"),
+			]);
+
+			await pipeline(
+				Readable.from([tarBuffer]),
+				unpackTar(destDir, { concurrency: 1 }),
+			);
+
+			const targetStat = await fs.stat(path.join(destDir, "target.txt"));
+			const firstStat = await fs.stat(path.join(destDir, "first.txt"));
+			const secondStat = await fs.stat(path.join(destDir, "second.txt"));
+			expect(firstStat.ino).toBe(targetStat.ino);
+			expect(secondStat.ino).toBe(targetStat.ino);
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
 		"preserves symlink timestamps",
 		async () => {
 			const sourceDir = path.join(tmpDir, "source");

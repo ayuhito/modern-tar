@@ -454,11 +454,19 @@ export const createPathCache = (
 						realTargetDir,
 						path.basename(linkTarget),
 					);
-					const targetStat = await fs.lstat(realTarget);
+					// These reads are independent. Queue and settle both to preserve the
+					// configured concurrency and error order.
+					const [targetResult, outDirResult] = await Promise.allSettled([
+						opQueue.add(() => fs.lstat(realTarget)),
+						opQueue.add(() => fs.realpath(path.dirname(outPath))),
+					]);
+					if (targetResult.status === "rejected") throw targetResult.reason;
+					const targetStat = targetResult.value;
 					if (targetStat.isSymbolicLink())
 						throw new Error(`Hardlink "${linkTarget}" is a symlink.`);
 
-					const realOutDir = await fs.realpath(path.dirname(outPath));
+					if (outDirResult.status === "rejected") throw outDirResult.reason;
+					const realOutDir = outDirResult.value;
 					validateBounds(
 						realOutDir,
 						destRoot,
