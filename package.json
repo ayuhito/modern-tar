@@ -38,10 +38,10 @@
 		"vitest": "4.1.10"
 	},
 	"scripts": {
-		"build": "tsdown --config-loader unrun",
-		"dev": "tsdown --config-loader unrun --watch",
+		"build": "tsdown",
+		"dev": "tsdown --watch",
 		"test": "vitest",
-		"test:workers": "tsdown --config-loader unrun && vitest --config vitest.workers.config.ts --run",
+		"test:workers": "tsdown && vitest --config vitest.workers.config.ts --run",
 		"coverage": "vitest run --coverage",
 		"check": "biome check --write",
 		"typecheck": "tsc --noEmit",
