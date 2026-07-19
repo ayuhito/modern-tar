@@ -392,7 +392,12 @@ export function packTar(
 								if (code === "ELOOP" || code === "ENOENT") return;
 								throw error;
 							}
-							if (stat.dev !== after.dev || stat.ino !== after.ino) return;
+							if (
+								!after.isFile() ||
+								stat.dev !== after.dev ||
+								stat.ino !== after.ino
+							)
+								return;
 						} else {
 							// Reject final-component symlink swaps before opening a file body.
 							try {
