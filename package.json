@@ -33,15 +33,14 @@
 		"playwright": "^1.61.1",
 		"tsdown": "^0.22.11",
 		"typescript": "^6.0.3",
-		"unrun": "0.2.39",
 		"vite": "^8.1.5",
 		"vitest": "4.1.10"
 	},
 	"scripts": {
-		"build": "tsdown",
-		"dev": "tsdown --watch",
+		"build": "tsdown --config-loader native",
+		"dev": "tsdown --config-loader native --watch",
 		"test": "vitest",
-		"test:workers": "tsdown && vitest --config vitest.workers.config.ts --run",
+		"test:workers": "tsdown --config-loader native && vitest --config vitest.workers.config.ts --run",
 		"coverage": "vitest run --coverage",
 		"check": "biome check --write",
 		"typecheck": "tsc --noEmit",

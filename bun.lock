@@ -13,7 +13,6 @@
         "playwright": "^1.61.1",
         "tsdown": "^0.22.11",
         "typescript": "^6.0.3",
-        "unrun": "0.2.39",
         "vite": "^8.1.5",
         "vitest": "4.1.10",
       },
