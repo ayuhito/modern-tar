@@ -377,36 +377,71 @@ export function packTar(
 					header.linkname = await fsp.readlink(job.source);
 				} else if (stat.isFile()) {
 					header.size = Number(stat.size);
-					let handle: FileHandle;
-					try {
-						// Reject final-component symlink swaps before opening a file body.
-						handle = await fsp.open(source, fs.constants.O_NOFOLLOW ?? 0);
-					} catch (error) {
-						const code = (error as { code?: string }).code;
-						if (code === "ELOOP" || code === "ENOENT") return;
-						throw error;
-					}
-					let handleToClose: FileHandle | undefined = handle;
+					let handleToClose: FileHandle | undefined;
+					let linkname = stat.nlink > 1 ? seenInodes.get(stat.ino) : undefined;
 
 					try {
-						const { dev, ino } = await handle.stat(BIGINT_STAT);
-						// Read only if the opened fd still points at the inode validated by
-						// lstat. This catches replacement between check and open.
-						if (stat.dev !== dev || stat.ino !== ino) return;
+						if (header.size === 0 || linkname !== undefined) {
+							// Header-only entries still need a second identity check, but do not
+							// need an open descriptor because no file body will be read.
+							let after: fs.BigIntStats;
+							try {
+								after = await fsp.lstat(source, BIGINT_STAT);
+							} catch (error) {
+								const code = (error as { code?: string }).code;
+								if (code === "ELOOP" || code === "ENOENT") return;
+								throw error;
+							}
+							if (stat.dev !== after.dev || stat.ino !== after.ino) return;
+						} else {
+							// Reject final-component symlink swaps before opening a file body.
+							try {
+								handleToClose = await fsp.open(
+									source,
+									fs.constants.O_NOFOLLOW ?? 0,
+								);
+							} catch (error) {
+								const code = (error as { code?: string }).code;
+								if (code === "ELOOP" || code === "ENOENT") return;
+								throw error;
+							}
+
+							const { dev, ino } = await handleToClose.stat(BIGINT_STAT);
+							// Read only if the opened fd still points at the inode validated by
+							// lstat. This catches replacement between check and open.
+							if (stat.dev !== dev || stat.ino !== ino) return;
+						}
 
 						// Deduplicate hard links with inode number.
-						if (stat.nlink > 1 && seenInodes.has(stat.ino)) {
+						if (stat.nlink > 1) linkname = seenInodes.get(stat.ino);
+						if (linkname !== undefined) {
 							header.type = LINK;
-							// biome-ignore lint/style/noNonNullAssertion: .has check above.
-							header.linkname = seenInodes.get(stat.ino)!;
+							header.linkname = linkname;
 							header.size = 0;
 						} else {
 							// Else handle as a regular file.
 							if (stat.nlink > 1) seenInodes.set(stat.ino, target);
 							if (header.size > 0) {
+								// biome-ignore lint/style/noNonNullAssertion: A body requires an opened handle.
+								const handle = handleToClose!;
 								// If the file is small (< 32KB), read it into a buffer immediately.
 								if (header.size < 32 * 1024) {
-									body = await handle.readFile();
+									const buffer = Buffer.allocUnsafe(header.size);
+									let offset = 0;
+									while (offset < buffer.length) {
+										const { bytesRead } = await handle.read(
+											buffer,
+											offset,
+											buffer.length - offset,
+											offset,
+										);
+										if (bytesRead === 0) break;
+										offset += bytesRead;
+									}
+									body =
+										offset === buffer.length
+											? buffer
+											: buffer.subarray(0, offset);
 								} else {
 									// The writer owns and closes this descriptor once it streams.
 									body = {

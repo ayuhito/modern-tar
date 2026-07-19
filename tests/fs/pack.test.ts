@@ -223,6 +223,105 @@ describe("pack", () => {
 	);
 
 	it.skipIf(process.platform === "win32")(
+		"skips empty files swapped after validation",
+		async () => {
+			const file = path.join(tmpDir, "file.txt");
+			const secret = path.join(tmpDir, "secret.txt");
+			await fsp.writeFile(file, "");
+			await fsp.writeFile(secret, "LEAK12345678");
+
+			const archive = await readArchiveText(
+				packTar([{ type: "file", source: file, target: "file.txt" }], {
+					filter: () => {
+						fs.unlinkSync(file);
+						fs.symlinkSync(secret, file);
+						return true;
+					},
+				}),
+			);
+
+			expect(archive).not.toContain("LEAK12345678");
+			expect(archive).not.toContain("file.txt");
+		},
+	);
+
+	it("reads only the file size captured in its header", async () => {
+		const file = path.join(tmpDir, "file.txt");
+		await fsp.writeFile(file, "SAFE");
+
+		const destDir = path.join(tmpDir, "extracted");
+		await pipeline(
+			packTar([{ type: "file", source: file, target: "file.txt" }], {
+				filter: () => {
+					fs.appendFileSync(file, "CHANGED");
+					return true;
+				},
+			}),
+			unpackTar(destDir),
+		);
+
+		expect(await fsp.readFile(path.join(destDir, "file.txt"), "utf8")).toBe(
+			"SAFE",
+		);
+	});
+
+	it("handles partial reads from small files", async () => {
+		const file = path.join(tmpDir, "file.txt");
+		await fsp.writeFile(file, "partial reads");
+
+		const originalOpen = fsp.open;
+		fs.promises.open = (async (...args: Parameters<typeof originalOpen>) => {
+			const handle = await originalOpen(...args);
+			const originalRead = handle.read.bind(handle);
+			handle.read = ((
+				buffer: Buffer,
+				offset: number,
+				length: number,
+				position: number,
+			) =>
+				originalRead(
+					buffer,
+					offset,
+					Math.min(length, 2),
+					position,
+				)) as typeof handle.read;
+			return handle;
+		}) as typeof originalOpen;
+		syncBuiltinESMExports();
+
+		const destDir = path.join(tmpDir, "extracted");
+		try {
+			await pipeline(
+				packTar([{ type: "file", source: file, target: "file.txt" }]),
+				unpackTar(destDir),
+			);
+		} finally {
+			fs.promises.open = originalOpen;
+			syncBuiltinESMExports();
+		}
+
+		expect(await fsp.readFile(path.join(destDir, "file.txt"), "utf8")).toBe(
+			"partial reads",
+		);
+	});
+
+	it("rejects small files truncated after their header is captured", async () => {
+		const file = path.join(tmpDir, "file.txt");
+		await fsp.writeFile(file, "SAFE");
+
+		await expect(
+			readArchiveText(
+				packTar([{ type: "file", source: file, target: "file.txt" }], {
+					filter: () => {
+						fs.truncateSync(file, 2);
+						return true;
+					},
+				}),
+			),
+		).rejects.toThrow('Size mismatch for "file.txt".');
+	});
+
+	it.skipIf(process.platform === "win32")(
 		"does not follow dereferenced symlink swaps outside the base",
 		async () => {
 			const sourceDir = path.join(tmpDir, "source");
