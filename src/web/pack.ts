@@ -108,17 +108,25 @@ export interface TarPackController {
  * ```
  */
 export function createTarPacker(): {
-	readable: ReadableStream<Uint8Array>;
+	readable: ReadableStream<Uint8Array<ArrayBuffer>>;
 	controller: TarPackController;
 } {
-	let streamController: ReadableStreamController<Uint8Array>;
+	let streamController: ReadableStreamController<Uint8Array<ArrayBuffer>>;
 	let packer: ReturnType<typeof createPacker>;
 
-	const readable = new ReadableStream<Uint8Array>({
+	const readable = new ReadableStream<Uint8Array<ArrayBuffer>>({
 		start(controller) {
 			streamController = controller;
 			packer = createPacker(
-				controller.enqueue.bind(controller),
+				(chunk) => {
+					// Native BufferSource consumers require fixed ArrayBuffer views.
+					const buffer = chunk.buffer;
+					controller.enqueue(
+						buffer instanceof ArrayBuffer && !Reflect.get(buffer, "resizable")
+							? (chunk as Uint8Array<ArrayBuffer>)
+							: new Uint8Array(chunk),
+					);
+				},
 				controller.error.bind(controller),
 				controller.close.bind(controller),
 			);

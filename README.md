@@ -6,7 +6,7 @@ Zero-dependency, cross-platform, streaming tar archive library for every JavaScr
 
 - 🚀 **Streaming Architecture** - Supports large archives without loading everything into memory.
 - 📋 **Standards Compliant** - Full USTAR format support with PAX extensions. Compatible with GNU tar, BSD tar, and other standard implementations.
-- 🗜️ **Compression** - Includes helpers for gzip compression/decompression.
+- 🗜️ **Compression** - Supports gzip compression and decompression with native compression streams.
 - 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation.
 - ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size.
 - 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes.
@@ -101,11 +101,11 @@ for await (const entry of decodedStream) {
 #### Compression/Decompression (gzip)
 
 ```typescript
-import { createGzipEncoder, createTarPacker } from 'modern-tar';
+import { createTarPacker } from 'modern-tar';
 
 // Create and compress a tar archive
 const { readable, controller } = createTarPacker();
-const compressedStream = readable.pipeThrough(createGzipEncoder());
+const compressedStream = readable.pipeThrough(new CompressionStream('gzip'));
 
 // Add entries...
 const fileStream = controller.add({ name: "file.txt", size: 5, type: "file" });
@@ -123,27 +123,18 @@ await fetch('/api/upload', {
 ```
 
 ```typescript
-import { createGzipDecoder, createTarDecoder, unpackTar } from 'modern-tar';
+import { createTarDecoder } from 'modern-tar';
 
 // Download and process a .tar.gz file
 const response = await fetch('https://api.example.com/archive.tar.gz');
 if (!response.body) throw new Error('No response body');
 
-// Buffer entire archive
-const entries = await unpackTar(response.body.pipeThrough(createGzipDecoder()));
-
-for (const entry of entries) {
-	console.log(`Extracted: ${entry.header.name}`);
-	const content = new TextDecoder().decode(entry.data);
-	console.log(`Content: ${content}`);
-}
-
-// Or chain decompression and tar parsing using streams
-const entries = response.body
-  .pipeThrough(createGzipDecoder())
+// Chain decompression and tar parsing using native streams
+const entryStream = response.body
+  .pipeThrough(new DecompressionStream('gzip'))
   .pipeThrough(createTarDecoder());
 
-for await (const entry of entries) {
+for await (const entry of entryStream) {
   console.log(`Extracted: ${entry.header.name}`);
   // Process entry.body ReadableStream as needed
 }
@@ -262,11 +253,12 @@ See the [Results](./benchmarks/README.md).
 The core library uses the [Web Streams API](https://caniuse.com/streams) and requires:
 
 - **Node.js**: 18.0+
-- **Browsers**: Modern browsers with Web Streams support
-  - Chrome 71+
+- **TypeScript**: 5.7+ when consuming the bundled declarations
+- **Browsers**: Baseline Widely available
+  - Chrome 85+
+  - Edge 85+
   - Firefox 102+
   - Safari 14.1+
-  - Edge 79+
 
 ## Acknowledgements
 
