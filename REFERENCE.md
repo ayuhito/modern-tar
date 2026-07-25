@@ -2,7 +2,7 @@
 
 ## Core API (`modern-tar`)
 
-### `packTar(entries: TarEntry[]): Promise<Uint8Array>`
+### `packTar(entries: TarEntry[]): Promise<Uint8Array<ArrayBuffer>>`
 
 Pack an array of entries into a tar archive buffer.
 
@@ -38,12 +38,12 @@ const filteredEntries = await unpackTar(tarBuffer, {
 });
 ```
 
-### `createTarPacker(): { readable, controller }`
+### `createTarPacker(): { readable: ReadableStream<Uint8Array<ArrayBuffer>>, controller }`
 
 Create a streaming tar packer for dynamic entry creation.
 
 - **Returns**: An object containing:
-  - `readable` - `ReadableStream` outputting tar archive bytes.
+  - `readable` - `ReadableStream<Uint8Array<ArrayBuffer>>` outputting tar archive bytes.
   - `controller` - `TarPackController` for adding entries.
 
 **Example:**
@@ -60,12 +60,12 @@ const stream2 = controller.add({ name: "file2.txt", size: 4 });
 controller.finalize();
 ```
 
-### `createTarDecoder(options?: DecoderOptions): TransformStream<Uint8Array, ParsedTarEntry>`
+### `createTarDecoder(options?: DecoderOptions): ReadableWritablePair<ParsedTarEntry, Uint8Array>`
 
-Create a transform stream that parses tar bytes into entries.
+Create a readable/writable stream pair that parses tar bytes into entries.
 
 - **`options`**: Optional decoder configuration (see `DecoderOptions`).
-- **Returns**: `TransformStream` that converts tar archive bytes to `ParsedTarEntry` objects.
+- **Returns**: A readable/writable pair that converts tar archive bytes to `ParsedTarEntry` objects.
 
 **Example:**
 
@@ -93,26 +93,20 @@ for await (const entry of entriesStream) {
 }
 ```
 
-### `createGzipEncoder(): CompressionStream`
+### Native gzip compression
 
-Create a gzip compression stream for `.tar.gz` creation.
+Use the platform's Compression Streams API directly. `createTarPacker()` emits
+fixed `ArrayBuffer`-backed chunks that are accepted by `CompressionStream`
+without a type assertion.
 
 **Example:**
 
 ```typescript
 const tarStream = /* ... */;
-const compressedStream = tarStream.pipeThrough(createGzipEncoder());
-```
-
-### `createGzipDecoder(): DecompressionStream`
-
-Create a gzip decompression stream for `.tar.gz` extraction.
-
-**Example:**
-
-```typescript
-const gzipStream = /* ... */;
-const tarStream = gzipStream.pipeThrough(createGzipDecoder());
+const compressedStream = tarStream.pipeThrough(new CompressionStream('gzip'));
+const decompressedStream = compressedStream.pipeThrough(
+  new DecompressionStream('gzip')
+);
 ```
 
 ## Node.js Filesystem API (`modern-tar/fs`)
@@ -214,7 +208,7 @@ interface ParsedTarEntry {
 // Output entry from a buffered unpack function
 interface ParsedTarEntryWithData {
 	header: TarHeader;
-	data: Uint8Array;
+	data?: Uint8Array<ArrayBuffer>;
 }
 
 // Platform-neutral configuration for unpacking

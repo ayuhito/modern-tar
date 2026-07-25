@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-	createGzipDecoder,
 	createTarDecoder,
 	type ParsedTarEntryWithData,
 	unpackTar,
@@ -19,7 +18,7 @@ async function extractTgz(filePath: string): Promise<ParsedTarEntryWithData[]> {
 	// @ts-expect-error ReadableStream.from is supported in Node tests
 	const fileStream = ReadableStream.from(fs.createReadStream(filePath));
 
-	const tarStream = fileStream.pipeThrough(createGzipDecoder());
+	const tarStream = fileStream.pipeThrough(new DecompressionStream("gzip"));
 	const tarBuffer = await streamToBuffer(tarStream);
 
 	return unpackTar(tarBuffer);
@@ -119,7 +118,7 @@ describe("real world examples", () => {
 		);
 
 		const entryStream = fileStream
-			.pipeThrough(createGzipDecoder())
+			.pipeThrough(new DecompressionStream("gzip"))
 			.pipeThrough(createTarDecoder());
 
 		let count = 0;
@@ -149,7 +148,7 @@ describe("real world examples", () => {
 		);
 
 		const entryStream = fileStream
-			.pipeThrough(createGzipDecoder())
+			.pipeThrough(new DecompressionStream("gzip"))
 			.pipeThrough(createTarDecoder());
 
 		let count = 0;

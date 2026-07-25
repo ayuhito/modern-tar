@@ -6,7 +6,7 @@ Zero-dependency, cross-platform, streaming tar archive library for every JavaScr
 
 - 🚀 **Streaming Architecture** - Supports large archives without loading everything into memory.
 - 📋 **Standards Compliant** - Full USTAR format support with PAX extensions. Compatible with GNU tar, BSD tar, and other standard implementations.
-- 🗜️ **Compression** - Includes helpers for gzip compression/decompression.
+- 🗜️ **Compression** - Supports gzip compression and decompression with native compression streams.
 - 📝 **TypeScript First** - Full type safety with detailed TypeDoc documentation.
 - ⚡ **Zero Dependencies** - No external dependencies, minimal bundle size.
 - 🌐 **Cross-Platform** - Works in browsers, Node.js, Cloudflare Workers, and other JavaScript runtimes.
@@ -34,118 +34,86 @@ These APIs use the Web Streams API and can be used in any modern JavaScript envi
 ```typescript
 import { packTar, unpackTar } from 'modern-tar';
 
-// Pack entries into a tar buffer
-const entries = [
+// Entry bodies can be strings, bytes, Blobs, or ReadableStreams.
+const archive = await packTar([
 	{ header: { name: "file.txt", size: 5 }, body: "hello" },
 	{ header: { name: "dir/", type: "directory", size: 0 } },
 	{ header: { name: "dir/nested.txt", size: 3 }, body: new Uint8Array([97, 98, 99]) } // "abc"
-];
-
-// Accepts string, Uint8Array, Blob, ReadableStream<Uint8Array> and more...
-const tarBuffer = await packTar(entries);
+]);
 
 // Unpack tar buffer into entries
-const entries = await unpackTar(tarBuffer);
-for (const entry of entries) {
-	console.log(`File: ${entry.header.name}`);
-	const content = new TextDecoder().decode(entry.data);
-	console.log(`Content: ${content}`);
+const extracted = await unpackTar(archive);
+const decoder = new TextDecoder();
+
+for (const { header, data } of extracted) {
+	if (data) {
+		console.log(`${header.name}: ${decoder.decode(data)}`);
+	} else {
+		console.log(`${header.type}: ${header.name}`);
+	}
 }
 ```
 
 #### Streaming
 
 ```typescript
-import { createTarPacker, createTarDecoder } from 'modern-tar';
+import { createTarDecoder } from 'modern-tar';
 
-// Create a tar packer
-const { readable, controller } = createTarPacker();
+const response = await fetch('/archive.tar');
+if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+if (!response.body) throw new Error('No response body');
 
-// Add entries dynamically
-const fileStream = controller.add({
-	name: "dynamic.txt",
-	size: 5,
-	type: "file"
-});
-
-// Write content to the stream
-const writer = fileStream.getWriter();
-await writer.write(new TextEncoder().encode("hello"));
-await writer.close();
-
-// When done adding entries, finalize the archive
-controller.finalize();
-
-// Pipe the archive right into a decoder
-const decodedStream = readable.pipeThrough(createTarDecoder());
-for await (const entry of decodedStream) {
-	console.log(`Decoded: ${entry.header.name}`);
-
-	const shouldSkip = entry.header.name.endsWith(".md");
-	if (shouldSkip) {
-		// You MUST drain the body with cancel() to proceed to the next entry or read it fully,
-		// otherwise the stream will stall.
+const entries = response.body.pipeThrough(createTarDecoder());
+for await (const entry of entries) {
+	if (!entry.header.name.endsWith(".txt")) {
+		// You MUST read each entry body completely before advancing.
+		// If an entry is not needed, cancel its body so the stream does not stall.
 		await entry.body.cancel();
 		continue;
 	}
 
-	const reader = entry.body.getReader();
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		processChunk(value);
-	}
+	const text = await new Response(entry.body).text();
+	console.log(`${entry.header.name}: ${text}`);
 }
 ```
 
 #### Compression/Decompression (gzip)
 
 ```typescript
-import { createGzipEncoder, createTarPacker } from 'modern-tar';
+import { createTarPacker } from 'modern-tar';
 
-// Create and compress a tar archive
 const { readable, controller } = createTarPacker();
-const compressedStream = readable.pipeThrough(createGzipEncoder());
+const gzipResponse = new Response(
+  readable.pipeThrough(new CompressionStream('gzip')),
+  { headers: { 'Content-Type': 'application/gzip' } }
+);
 
-// Add entries...
-const fileStream = controller.add({ name: "file.txt", size: 5, type: "file" });
-const writer = fileStream.getWriter();
-await writer.write(new TextEncoder().encode("hello"));
+const body = controller.add({ name: 'hello.txt', size: 5 });
+const writer = body.getWriter();
+await writer.write(new TextEncoder().encode('hello'));
 await writer.close();
 controller.finalize();
 
-// Upload compressed .tar.gz
-await fetch('/api/upload', {
-  method: 'POST',
-  body: compressedStream,
-  headers: { 'Content-Type': 'application/gzip' }
-});
+// Return gzipResponse from your server or Worker handler.
 ```
 
 ```typescript
-import { createGzipDecoder, createTarDecoder, unpackTar } from 'modern-tar';
+import { unpackTar } from 'modern-tar';
 
-// Download and process a .tar.gz file
+// Download and unpack a .tar.gz without buffering the compressed archive
 const response = await fetch('https://api.example.com/archive.tar.gz');
+if (!response.ok) throw new Error(`Download failed: ${response.status}`);
 if (!response.body) throw new Error('No response body');
 
-// Buffer entire archive
-const entries = await unpackTar(response.body.pipeThrough(createGzipDecoder()));
+const entries = await unpackTar(
+  response.body.pipeThrough(new DecompressionStream('gzip'))
+);
+const decoder = new TextDecoder();
 
-for (const entry of entries) {
-	console.log(`Extracted: ${entry.header.name}`);
-	const content = new TextDecoder().decode(entry.data);
-	console.log(`Content: ${content}`);
-}
-
-// Or chain decompression and tar parsing using streams
-const entries = response.body
-  .pipeThrough(createGzipDecoder())
-  .pipeThrough(createTarDecoder());
-
-for await (const entry of entries) {
-  console.log(`Extracted: ${entry.header.name}`);
-  // Process entry.body ReadableStream as needed
+for (const { header, data } of entries) {
+  if (data) {
+    console.log(`${header.name}: ${decoder.decode(data)}`);
+  }
 }
 ```
 
@@ -262,11 +230,15 @@ See the [Results](./benchmarks/README.md).
 The core library uses the [Web Streams API](https://caniuse.com/streams) and requires:
 
 - **Node.js**: 18.0+
-- **Browsers**: Modern browsers with Web Streams support
-  - Chrome 71+
+- **TypeScript**: 5.7+ when consuming the bundled declarations
+- **Browsers**: Baseline Widely available
+  - Chrome 85+
+  - Edge 85+
   - Firefox 102+
   - Safari 14.1+
-  - Edge 79+
+
+If you use `CompressionStream` or `DecompressionStream`, Firefox 113+ and
+Safari 16.4+ are required.
 
 ## Acknowledgements
 

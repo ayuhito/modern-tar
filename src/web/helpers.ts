@@ -44,7 +44,7 @@ import { createTarDecoder } from "./unpack";
  */
 export async function packTar(
 	entries: readonly (TarEntry | ParsedTarEntryWithData)[],
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
 	const { readable, controller } = createTarPacker();
 
 	// This promise runs the packing process in the background.
@@ -152,37 +152,48 @@ export async function unpackTar(
 
 	const results: ParsedTarEntryWithData[] = [];
 	const entryStream = archive.pipeThrough(createTarDecoder(options));
+	const reader = entryStream.getReader();
 
-	for await (const entry of entryStream) {
-		let processedHeader: TarHeader | null;
-		try {
-			processedHeader = transformHeader(entry.header, options);
-		} catch (error) {
-			// If filter/map functions throw, cancel the body stream and re-throw.
-			await entry.body.cancel();
-			throw error;
+	try {
+		while (true) {
+			const { done, value: entry } = await reader.read();
+			if (done) break;
+
+			let processedHeader: TarHeader | null;
+			try {
+				processedHeader = transformHeader(entry.header, options);
+			} catch (error) {
+				// If filter/map functions throw, cancel the body stream and re-throw.
+				await entry.body.cancel();
+				throw error;
+			}
+
+			// Entry is filtered out or stripped, so we drain its body stream.
+			if (processedHeader === null) {
+				await drain(entry.body);
+				continue;
+			}
+
+			// Check if this entry should have no body data
+			const bodyless = isBodyless(processedHeader);
+
+			// For bodyless entries (directories, symlinks, links), drain the body stream and use undefined.
+			if (bodyless) {
+				await drain(entry.body);
+				results.push({ header: processedHeader });
+			} else {
+				// Fully buffer the entry body for files
+				results.push({
+					header: processedHeader,
+					data: await streamToBuffer(entry.body),
+				});
+			}
 		}
-
-		// Entry is filtered out or stripped, so we drain its body stream.
-		if (processedHeader === null) {
-			await drain(entry.body);
-			continue;
-		}
-
-		// Check if this entry should have no body data
-		const bodyless = isBodyless(processedHeader);
-
-		// For bodyless entries (directories, symlinks, links), drain the body stream and use undefined.
-		if (bodyless) {
-			await drain(entry.body);
-			results.push({ header: processedHeader });
-		} else {
-			// Fully buffer the entry body for files
-			results.push({
-				header: processedHeader,
-				data: await streamToBuffer(entry.body),
-			});
-		}
+	} catch (error) {
+		await reader.cancel(error).catch(() => {});
+		throw error;
+	} finally {
+		reader.releaseLock();
 	}
 
 	return results;

@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { decoder } from "../../src/tar/encoding";
-import { createGzipDecoder, unpackTar } from "../../src/web";
+import { unpackTar } from "../../src/web";
 import {
 	BASE_256_SIZE,
 	BASE_256_UID_GID,
@@ -160,7 +160,7 @@ describe("tar format fixtures", () => {
 		it("streams wasm package with filtering without hanging", async () => {
 			// @ts-expect-error ReadableStream.from is available in Node tests
 			const fileStream = ReadableStream.from(createReadStream(TSGO_WASM_TGZ));
-			const tarStream = fileStream.pipeThrough(createGzipDecoder());
+			const tarStream = fileStream.pipeThrough(new DecompressionStream("gzip"));
 
 			const [wasm] = await unpackTar(tarStream, {
 				strip: 1,
@@ -202,7 +202,7 @@ describe("tar format fixtures", () => {
 					controller.enqueue(invalidGzipData);
 					controller.close();
 				},
-			}).pipeThrough(createGzipDecoder());
+			}).pipeThrough(new DecompressionStream("gzip"));
 
 			// Should reject when trying to decompress invalid gzip data
 			await expect(unpackTar(decompressedStream)).rejects.toThrow();
@@ -217,7 +217,7 @@ describe("tar format fixtures", () => {
 					controller.enqueue(buffer);
 					controller.close();
 				},
-			}).pipeThrough(createGzipDecoder());
+			}).pipeThrough(new DecompressionStream("gzip"));
 
 			// This should now work efficiently (was previously causing hangs)
 			const entries = await unpackTar(decompressedStream);
@@ -239,7 +239,7 @@ describe("tar format fixtures", () => {
 					controller.enqueue(buffer);
 					controller.close();
 				},
-			}).pipeThrough(createGzipDecoder());
+			}).pipeThrough(new DecompressionStream("gzip"));
 
 			// Should complete in reasonable time and extract all entries
 			const startTime = Date.now();

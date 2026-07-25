@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-	createGzipDecoder,
-	createGzipEncoder,
 	createTarDecoder,
 	packTar,
 	type TarEntry,
@@ -47,7 +45,7 @@ describe("unpack tar", () => {
 
 		// Compress the tar buffer
 		const compressedChunks: Uint8Array[] = [];
-		const encoder = createGzipEncoder();
+		const encoder = new CompressionStream("gzip");
 		const writer = encoder.writable.getWriter();
 		const reader = encoder.readable.getReader();
 
@@ -75,7 +73,9 @@ describe("unpack tar", () => {
 			},
 		});
 
-		const decompressed = compressed.pipeThrough(createGzipDecoder());
+		const decompressed = compressed.pipeThrough(
+			new DecompressionStream("gzip"),
+		);
 		const [wasm] = await unpackTar(decompressed, {
 			strip: 1,
 			filter: (header) => header.name === "tsgo.wasm",
@@ -129,7 +129,9 @@ describe("unpack tar", () => {
 		const response = await fetch(TSGO_WASM_URL);
 		if (!response.body) throw new Error("No response body");
 
-		const tarStream = response.body.pipeThrough(createGzipDecoder());
+		const tarStream = response.body.pipeThrough(
+			new DecompressionStream("gzip"),
+		);
 		const entryStream = tarStream.pipeThrough(createTarDecoder());
 		const reader = entryStream.getReader();
 
@@ -179,7 +181,9 @@ describe("unpack tar", () => {
 		const response = await fetch(TSGO_WASM_URL);
 		if (!response.body) throw new Error("No response body");
 
-		const tarStream = response.body.pipeThrough(createGzipDecoder());
+		const tarStream = response.body.pipeThrough(
+			new DecompressionStream("gzip"),
+		);
 
 		const { entries, durationMs } = await Promise.race([
 			(async () => {

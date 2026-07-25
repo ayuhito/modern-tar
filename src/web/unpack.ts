@@ -3,10 +3,10 @@ import { createUnpacker } from "../tar/unpacker";
 import type { ParsedTarEntry } from "./types";
 
 /**
- * Create a transform stream that parses tar bytes into entries.
+ * Create a readable/writable stream pair that parses tar bytes into entries.
  *
  * @param options - Optional configuration for the decoder using {@link DecoderOptions}.
- * @returns `TransformStream` that converts tar archive bytes to {@link ParsedTarEntry} objects.
+ * @returns A readable/writable pair that converts tar archive bytes to {@link ParsedTarEntry} objects.
  * @example
  * ```typescript
  * import { createTarDecoder } from 'modern-tar';
@@ -35,7 +35,7 @@ import type { ParsedTarEntry } from "./types";
  */
 export function createTarDecoder(
 	options: DecoderOptions = {},
-): TransformStream<Uint8Array, ParsedTarEntry> {
+): ReadableWritablePair<ParsedTarEntry, Uint8Array> {
 	const unpacker = createUnpacker(options);
 	const strict = options.strict ?? false;
 
