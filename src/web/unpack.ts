@@ -227,15 +227,17 @@ export function createTarDecoder(
 		),
 
 		writable: new WritableStream<Uint8Array>({
-			write(chunk) {
+			write(chunk, controller) {
 				try {
 					if (eofReached && strict && chunk.some((byte) => byte !== 0))
 						throw new Error("Invalid EOF.");
 
 					unpacker.write(chunk);
 					pump();
-					if (blocked && unpacker.available() >= BUFFER_LIMIT)
+					if (blocked && unpacker.available() >= BUFFER_LIMIT) {
+						controller.signal.onabort = unblock;
 						return new Promise<void>((resolve) => (resume = resolve));
+					}
 				} catch (error) {
 					fail(error);
 					throw error;
