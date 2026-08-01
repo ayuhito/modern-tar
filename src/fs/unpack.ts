@@ -46,6 +46,7 @@ export function unpackTar(
 	const unpacker = createUnpacker(options);
 	const concurrency = options.concurrency || cpus().length || 8;
 	const opQueue = createOperationQueue(concurrency);
+	let cancelError: Error | undefined;
 	const pathCache = createPathCache(
 		directoryPath,
 		options,
@@ -55,6 +56,8 @@ export function unpackTar(
 
 	// Track current file stream across write() calls for handling backpressure
 	let currentFileStream: FileSink | null = null;
+	// File closes overlap parsing, so cancellation must own detached sinks too.
+	const fileStreams = new Set<FileSink>();
 	let needsDrain = false;
 	const writeCurrent = (chunk: Uint8Array) => {
 		// biome-ignore lint/style/noNonNullAssertion: Called only while a file entry is active.
@@ -62,12 +65,22 @@ export function unpackTar(
 		if (!writeOk) needsDrain = true;
 		return writeOk;
 	};
-	// Detached file closes must still fail extraction if they error later.
-	let queuedError: Error | null = null;
-
-	const onQueuedError = (err: Error) => {
-		queuedError ??= err;
+	const onFileError = (err: Error) => {
 		if (!writable.destroyed) writable.destroy(err);
+	};
+	const closeCurrent = () => {
+		// biome-ignore lint/style/noNonNullAssertion: Called only while a file entry is active.
+		const stream = currentFileStream!;
+		currentFileStream = null;
+		opQueue
+			.add(() => stream.end())
+			.then(
+				() => fileStreams.delete(stream),
+				(err) => {
+					fileStreams.delete(stream);
+					onFileError(err);
+				},
+			);
 	};
 
 	const writable = new Writable({
@@ -95,11 +108,7 @@ export function unpackTar(
 						if (!unpacker.skipPadding()) return;
 
 						// Padding complete, close file.
-						const streamToClose = currentFileStream;
-						if (streamToClose)
-							opQueue.add(() => streamToClose.end()).catch(onQueuedError);
-
-						currentFileStream = null;
+						closeCurrent();
 					} else {
 						// Otherwise, just discard the entry body.
 						if (!unpacker.skipEntry()) {
@@ -131,6 +140,7 @@ export function unpackTar(
 					const outPath = await opQueue.add(() =>
 						pathCache.preparePath(transformedHeader),
 					);
+					if (cancelError) throw cancelError;
 
 					// Only file entries return a path for streaming.
 					if (outPath) {
@@ -145,8 +155,9 @@ export function unpackTar(
 								mode: options.fmode ?? safeMode,
 								mtime: transformedHeader.mtime ?? undefined,
 							},
-							onQueuedError,
+							onFileError,
 						);
+						fileStreams.add(currentFileStream);
 						(pendingFileOpens ??= []).push(
 							currentFileStream.waitDrain().catch((error: Error) => error),
 						);
@@ -164,10 +175,7 @@ export function unpackTar(
 						if (!unpacker.skipPadding()) return; // Need more data.
 
 						// Close without await.
-						const streamToClose = currentFileStream;
-						if (streamToClose)
-							opQueue.add(() => streamToClose.end()).catch(onQueuedError);
-						currentFileStream = null;
+						closeCurrent();
 					} else {
 						// No body data or already handled.
 						if (!unpacker.skipEntry()) {
@@ -181,7 +189,7 @@ export function unpackTar(
 				const openError = pendingFileOpens
 					? (await Promise.all(pendingFileOpens)).find((error) => error)
 					: undefined;
-				cb(openError ?? writeError);
+				cb(cancelError ?? openError ?? writeError);
 			}
 		},
 
@@ -194,7 +202,7 @@ export function unpackTar(
 				await pathCache.ready();
 				// Wait for all file ops to complete.
 				await opQueue.onIdle();
-				if (queuedError) throw queuedError;
+				if (cancelError) throw cancelError;
 				// Validate symlink targets after all archive-created symlinks exist.
 				await pathCache.checkSymlinks();
 				// Now that all files are written, create the hardlinks.
@@ -206,24 +214,19 @@ export function unpackTar(
 		},
 
 		destroy(error, callback) {
-			// Handle stream destruction asynchronously to prevent blocking
-			(async () => {
-				// Clean up any active file stream and reset state.
-				if (currentFileStream) {
-					currentFileStream.destroy(error ?? undefined);
-					currentFileStream = null;
-				}
-
-				// Drain active file operations.
-				await opQueue.onIdle();
-			})().then(
-				() => callback(error ?? null),
-				// If there is an error during cleanup, pass it to the callback instead.
-				(e) =>
-					callback(
-						error ?? (e instanceof Error ? e : new Error("Stream destroyed")),
-					),
-			);
+			const hasWork =
+				fileStreams.size > 0 ||
+				writable.writableLength > 0 ||
+				(writable.writableEnded && !writable.writableFinished);
+			if (!error && !hasWork) {
+				callback(null);
+				return;
+			}
+			cancelError = error ?? (AbortSignal.abort().reason as Error);
+			for (const stream of fileStreams) stream.destroy(cancelError);
+			fileStreams.clear();
+			currentFileStream = null;
+			callback(cancelError);
 		},
 	});
 

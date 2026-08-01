@@ -319,8 +319,10 @@ export function createFileSink(
 	// Open immediately so callers can await waitDrain() before writing body data.
 	fs.open(path, CREATE_FLAGS, mode, (err, openFd) => {
 		if (err?.code !== "EEXIST") return onOpen(err, openFd);
+		if (state !== STATE_OPENING) return;
 		fs.rm(path, { force: true }, (rmErr) => {
 			if (rmErr) return fail(rmErr);
+			if (state !== STATE_OPENING) return;
 			fs.open(path, CREATE_FLAGS, mode, onOpen);
 		});
 	});
