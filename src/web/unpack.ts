@@ -215,6 +215,7 @@ export function createTarDecoder(
 				},
 				pull: pump,
 				cancel(reason) {
+					unpacker.end();
 					if (reason !== undefined) fail(reason);
 					else finish();
 				},

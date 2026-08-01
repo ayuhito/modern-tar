@@ -376,7 +376,7 @@ describe("createTarDecoder", () => {
 		expect(finalRead.done).toBe(true);
 	});
 
-	it("propagates unread body backpressure to the source", async () => {
+	it("propagates unread body backpressure and cancellation to the source", async () => {
 		const body = new Uint8Array(8 * 1024 * 1024).fill(97);
 		const archive = await createBaseArchive([
 			{
@@ -387,6 +387,10 @@ describe("createTarDecoder", () => {
 		const chunkSize = 64 * 1024;
 		let pulledChunks = 0;
 		let offset = 0;
+		let cancelSource!: () => void;
+		const sourceCanceled = new Promise<void>((resolve) => {
+			cancelSource = resolve;
+		});
 		const source = new ReadableStream<Uint8Array>({
 			pull(controller) {
 				if (offset >= archive.length) return controller.close();
@@ -394,6 +398,7 @@ describe("createTarDecoder", () => {
 				controller.enqueue(archive.subarray(offset, offset + chunkSize));
 				offset += chunkSize;
 			},
+			cancel: () => cancelSource(),
 		});
 		const reader = source.pipeThrough(createTarDecoder()).getReader();
 		const result = await reader.read();
@@ -401,12 +406,15 @@ describe("createTarDecoder", () => {
 		const bodyReader = result.value.body.getReader();
 
 		await expectToStayPending(bodyReader.closed);
-		const pulledBeforeDrain = pulledChunks;
-		await bodyReader.cancel();
+		const pulledBeforeCancel = pulledChunks;
 		await reader.cancel();
+		await readWithTimeout(
+			sourceCanceled,
+			"Timed out waiting for source cancellation",
+		);
 
 		const maxBufferedChunks = (1024 * 1024) / chunkSize;
-		expect(pulledBeforeDrain).toBeLessThanOrEqual(maxBufferedChunks + 2);
+		expect(pulledBeforeCancel).toBeLessThanOrEqual(maxBufferedChunks + 2);
 	});
 
 	it("aborts while an unread body backpressures the writable side", async () => {
