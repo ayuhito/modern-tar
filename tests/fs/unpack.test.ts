@@ -10,9 +10,12 @@ const originalFs =
 	await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
 let mkdirDelay: Promise<void> | null = null;
 let releaseMkdir: (() => void) | null = null;
+let finishDelayedMkdir: (() => void) | null = null;
 let afterSymlinkRm: (() => Promise<void>) | null = null;
 let beforeLink: (() => Promise<void>) | null = null;
 let afterLinkExists: (() => Promise<void>) | null = null;
+let beforeLstat: ((target: string) => Promise<void>) | null = null;
+let releaseLstat: (() => void) | null = null;
 let interceptOpen: ((target: string, run: () => void) => boolean) | null = null;
 let releaseOpen: (() => void) | null = null;
 let interceptWrite:
@@ -57,16 +60,19 @@ vi.mock("node:fs/promises", async () => {
 					target: string,
 					options?: Parameters<typeof actual.mkdir>[1],
 				) => {
-					if (
-						mkdirDelay &&
-						typeof target === "string" &&
-						target.includes("delayed-extracted")
-					) {
-						await mkdirDelay;
-					}
-					return actual.mkdir(target, options);
+					const delayed = Boolean(
+						mkdirDelay && target.includes("delayed-extracted"),
+					);
+					if (delayed) await mkdirDelay;
+					const result = await actual.mkdir(target, options);
+					if (delayed) finishDelayedMkdir?.();
+					return result;
 				},
 			),
+		lstat: async (...args: Parameters<typeof actual.lstat>) => {
+			await beforeLstat?.(String(args[0]));
+			return actual.lstat(...args);
+		},
 		rm: async (...args: Parameters<typeof actual.rm>) => {
 			const result = await actual.rm(...args);
 			if (String(args[0]).endsWith(`${path.sep}link.txt`))
@@ -107,12 +113,16 @@ describe("extract", () => {
 		afterSymlinkRm = null;
 		beforeLink = null;
 		afterLinkExists = null;
+		beforeLstat = null;
+		releaseLstat?.();
+		releaseLstat = null;
 		releaseOpen?.();
 		interceptOpen = null;
 		releaseOpen = null;
 		interceptWrite = null;
 		releaseWrite?.();
 		releaseWrite = null;
+		finishDelayedMkdir = null;
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
@@ -186,6 +196,141 @@ describe("extract", () => {
 		failWrite?.(writeError);
 		await expect(extraction).rejects.toBe(writeError);
 	});
+
+	it("rejects clean cancellation while file writes are backpressured", async () => {
+		const body = new Uint8Array(16 * 1024 * 1024).fill(97);
+		const archive = await packTarWeb([
+			{
+				header: { name: "large.bin", type: "file", size: body.length },
+				body,
+			},
+		]);
+		interceptWrite = (resumeWrite) => {
+			releaseWrite = resumeWrite;
+			return true;
+		};
+		const destDir = path.join(tmpDir, "cancelled-backpressure");
+		const unpackStream = unpackTar(destDir);
+		const extraction = pipeline(Readable.from([archive]), unpackStream);
+		await vi.waitFor(() => expect(releaseWrite).toBeTypeOf("function"));
+
+		unpackStream.destroy();
+		await expect(extraction).rejects.toMatchObject({ name: "AbortError" });
+
+		const release = releaseWrite;
+		interceptWrite = null;
+		releaseWrite = null;
+		release?.();
+		await vi.waitFor(async () => {
+			expect((await fs.stat(path.join(destDir, "large.bin"))).size).toBe(0);
+		});
+	});
+
+	it("cancels detached file writes without waiting for their callbacks", async () => {
+		const body = new Uint8Array(256 * 1024).fill(97);
+		const archive = await packTarWeb([
+			{
+				header: { name: "detached.bin", type: "file", size: body.length },
+				body,
+			},
+		]);
+		interceptWrite = (resumeWrite) => {
+			releaseWrite = resumeWrite;
+			return true;
+		};
+		const destDir = path.join(tmpDir, "cancelled-detached");
+		const unpackStream = unpackTar(destDir);
+		const extraction = pipeline(Readable.from([archive]), unpackStream);
+		await vi.waitFor(() => expect(releaseWrite).toBeTypeOf("function"));
+
+		const cancelError = new Error("cancel detached write");
+		unpackStream.destroy(cancelError);
+		await expect(extraction).rejects.toBe(cancelError);
+
+		const release = releaseWrite;
+		interceptWrite = null;
+		releaseWrite = null;
+		release?.();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+	});
+
+	it("does not open an entry after path preparation is cancelled", async () => {
+		const archive = await packTarWeb([
+			{
+				header: { name: "late.txt", type: "file", size: 4 },
+				body: "late",
+			},
+		]);
+		mkdirDelay = new Promise<void>((resolve) => {
+			releaseMkdir = resolve;
+		});
+		const mkdirFinished = new Promise<void>((resolve) => {
+			finishDelayedMkdir = resolve;
+		});
+		const destDir = path.join(tmpDir, "delayed-extracted-cancelled");
+		const unpackStream = unpackTar(destDir);
+		const extraction = pipeline(Readable.from([archive]), unpackStream);
+		await vi.waitFor(() =>
+			expect(unpackStream.writableLength).toBeGreaterThan(0),
+		);
+
+		const cancelError = new Error("cancel path preparation");
+		unpackStream.destroy(cancelError);
+		await expect(extraction).rejects.toBe(cancelError);
+		releaseMkdir?.();
+		await mkdirFinished;
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		await expect(fs.access(path.join(destDir, "late.txt"))).rejects.toThrow();
+		mkdirDelay = null;
+		releaseMkdir = null;
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"does not apply deferred hardlinks after cancellation",
+		async () => {
+			const archive = await packTarWeb([
+				{
+					header: { name: "target.txt", type: "file", size: 6 },
+					body: "target",
+				},
+				{
+					header: {
+						name: "late-link.txt",
+						type: "link",
+						size: 0,
+						linkname: "target.txt",
+					},
+				},
+			]);
+			const destDir = path.join(tmpDir, "cancelled-links");
+			const targetPath = path.join(destDir, "target.txt");
+			const lstatStarted = new Promise<void>((resolveStarted) => {
+				beforeLstat = async (target) => {
+					if (path.basename(target) !== path.basename(targetPath)) return;
+					beforeLstat = null;
+					resolveStarted();
+					await new Promise<void>((resolve) => {
+						releaseLstat = resolve;
+					});
+				};
+			});
+			const unpackStream = unpackTar(destDir);
+			const extraction = pipeline(Readable.from([archive]), unpackStream);
+			await lstatStarted;
+
+			const cancelError = new Error("cancel deferred links");
+			unpackStream.destroy(cancelError);
+			await expect(extraction).rejects.toBe(cancelError);
+			releaseLstat?.();
+			releaseLstat = null;
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			await expect(
+				fs.access(path.join(destDir, "late-link.txt")),
+			).rejects.toThrow();
+		},
+	);
 
 	it("strips path components on extract", async () => {
 		const sourceDir = path.join(FIXTURES_DIR, "b");
