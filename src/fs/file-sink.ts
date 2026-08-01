@@ -6,7 +6,7 @@ interface SinkOptions {
 }
 
 export interface FileSink {
-	write(chunk: Buffer | Uint8Array | string): boolean;
+	write(chunk: Uint8Array): boolean;
 	end(): Promise<void>;
 	destroy(error?: Error): void;
 	waitDrain(): Promise<void>;
@@ -56,8 +56,8 @@ export function createFileSink(
 	let state: SinkState = STATE_OPENING;
 	let flushing = false;
 	let fd: number | null = null;
-	let queue: Buffer[] = []; // Buffers waiting to be written out (current batch).
-	let spare: Buffer[] = []; // Recycled array swapped in while writev is in flight.
+	let queue: Uint8Array[] = []; // Chunks waiting to be written out (current batch).
+	let spare: Uint8Array[] = []; // Recycled array swapped in while writev is in flight.
 	let bytes = 0;
 	let storedError: Error | null = null;
 	let failedFd: number | null = null;
@@ -229,7 +229,7 @@ export function createFileSink(
 	const onOpen = (err: NodeJS.ErrnoException | null, openFd: number) => {
 		if (err) return fail(err);
 
-		if (state === STATE_CLOSED || state === STATE_FAILED) {
+		if (state >= STATE_CLOSED) {
 			fs.close(openFd);
 			return;
 		}
@@ -241,27 +241,18 @@ export function createFileSink(
 			// end() ran before open() resolved, so finish work immediately.
 			if (queue.length > 0) flush();
 			else close();
-		} else if (bytes >= BATCH_BYTES && !flushing) {
+		} else if (bytes >= BATCH_BYTES) {
 			flush();
 		} else {
 			settleDrain();
 		}
 	};
 
-	const write = (chunk: Buffer | Uint8Array | string): boolean => {
-		if (storedError || state >= STATE_CLOSED || endResolve) return false;
+	const write = (chunk: Uint8Array): boolean => {
+		if (state >= STATE_CLOSED || endResolve) return false;
 
-		// Normalize chunk to Buffer.
-		const buf = Buffer.isBuffer(chunk)
-			? chunk
-			: chunk instanceof Uint8Array
-				? Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)
-				: Buffer.from(chunk);
-
-		if (buf.length === 0) return bytes < BUFFER_LIMIT;
-
-		queue.push(buf);
-		bytes += buf.length;
+		queue.push(chunk);
+		bytes += chunk.length;
 
 		if (state === STATE_OPEN && !flushing && bytes >= BATCH_BYTES) flush();
 
@@ -310,7 +301,7 @@ export function createFileSink(
 		}
 
 		// Normal close.
-		if (state >= STATE_CLOSED || storedError) return;
+		if (state >= STATE_CLOSED) return;
 
 		// Otherwise clean up.
 		resetBuffers();

@@ -232,20 +232,6 @@ describe("createFileSink", () => {
 		}
 	});
 
-	it("should skip empty writes", async () => {
-		const filePath = `${testDir}/skip-empty.txt`;
-		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
-		const stream = createFileSink(filePath);
-
-		stream.write(Buffer.from("")); // Empty - should be skipped
-		stream.write(Buffer.from("hello")); // Real data
-		stream.write(Buffer.from("")); // Empty - should be skipped
-		await stream.end(); // Await async end
-
-		const content = await readFile(filePath, "utf-8");
-		expect(content).toBe("hello");
-	});
-
 	it("should handle streaming writes efficiently", async () => {
 		const filePath = `${testDir}/streaming.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
@@ -303,7 +289,7 @@ describe("createFileSink", () => {
 		await stream.waitDrain();
 
 		nextPartialWrite = 5;
-		stream.write("hello world");
+		stream.write(Buffer.from("hello world"));
 		await stream.end();
 
 		expect(await readFile(filePath, "utf8")).toBe("hello world");
@@ -315,9 +301,9 @@ describe("createFileSink", () => {
 		await stream.waitDrain();
 
 		nextPartialWrite = 7;
-		stream.write("hello");
-		stream.write(" world");
-		stream.write("!");
+		stream.write(Buffer.from("hello"));
+		stream.write(Buffer.from(" world"));
+		stream.write(Buffer.from("!"));
 		await stream.end();
 
 		expect(await readFile(filePath, "utf8")).toBe("hello world!");
@@ -339,7 +325,7 @@ describe("createFileSink", () => {
 		const testMtime = new Date("2023-01-15T10:30:00Z");
 		const stream = createFileSink(filePath, { mtime: testMtime });
 
-		stream.write("test content");
+		stream.write(Buffer.from("test content"));
 		await stream.end();
 
 		// Verify file was created and mtime was set
@@ -383,7 +369,7 @@ describe("createFileSink", () => {
 		const filePath = join(testDir, "no-mtime-test.txt");
 		const stream = createFileSink(filePath); // No mtime option
 
-		stream.write("content without mtime");
+		stream.write(Buffer.from("content without mtime"));
 		await stream.end();
 
 		// Verify file was created
