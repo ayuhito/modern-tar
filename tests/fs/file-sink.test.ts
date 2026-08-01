@@ -4,19 +4,78 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFileSink } from "../../src/fs/file-sink";
 
 let nextWriteError: Error | null = null;
+let nextPartialWrite: number | null = null;
+let nextFutimesError: Error | null = null;
+let failedFutimesFd: number | null = null;
+let closedFds: number[] = [];
 
 vi.mock("node:fs", async () => {
 	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
 	const write = (...args: unknown[]) => {
 		const error = nextWriteError;
-		if (!error) return Reflect.apply(actual.write, actual, args);
-		nextWriteError = null;
-		const callback = args.at(-1) as (error: Error, written: number) => void;
-		queueMicrotask(() => callback(error, 0));
+		const callback = args.at(-1) as (
+			error: Error | null,
+			written: number,
+		) => void;
+		if (error) {
+			nextWriteError = null;
+			queueMicrotask(() => callback(error, 0));
+			return;
+		}
+		if (nextPartialWrite === null)
+			return Reflect.apply(actual.write, actual, args);
+		const written = Math.min(nextPartialWrite, args[3] as number);
+		nextPartialWrite = null;
+		if (written === 0) {
+			queueMicrotask(() => callback(null, 0));
+			return;
+		}
+		return actual.write(
+			args[0] as number,
+			args[1] as Buffer,
+			args[2] as number,
+			written,
+			args[4] as number | null,
+			callback,
+		);
+	};
+	const writev = (...args: unknown[]) => {
+		if (nextPartialWrite === null)
+			return Reflect.apply(actual.writev, actual, args);
+		const callback = args.at(-1) as (
+			error: Error | null,
+			written: number,
+		) => void;
+		let remaining = nextPartialWrite;
+		nextPartialWrite = null;
+		if (remaining === 0) {
+			queueMicrotask(() => callback(null, 0));
+			return;
+		}
+		const buffers: Uint8Array[] = [];
+		for (const buffer of args[1] as Uint8Array[]) {
+			if (remaining === 0) break;
+			buffers.push(buffer.subarray(0, remaining));
+			remaining -= Math.min(remaining, buffer.length);
+		}
+		return actual.writev(args[0] as number, buffers, callback);
 	};
 	return {
 		...actual,
+		close: ((...args: unknown[]) => {
+			closedFds.push(args[0] as number);
+			return Reflect.apply(actual.close, actual, args);
+		}) as typeof actual.close,
+		futimes: ((...args: unknown[]) => {
+			const error = nextFutimesError;
+			if (!error) return Reflect.apply(actual.futimes, actual, args);
+			nextFutimesError = null;
+			failedFutimesFd = args[0] as number;
+			const callback = args.at(-1) as (error: Error) => void;
+			queueMicrotask(() => callback(error));
+		}) as typeof actual.futimes,
 		write: write as typeof actual.write,
+		writev: writev as typeof actual.writev,
 	};
 });
 
@@ -29,6 +88,10 @@ describe("createFileSink", () => {
 
 	afterEach(async () => {
 		nextWriteError = null;
+		nextPartialWrite = null;
+		nextFutimesError = null;
+		failedFutimesFd = null;
+		closedFds = [];
 		await rm(testDir, { recursive: true, force: true });
 	});
 
@@ -204,12 +267,13 @@ describe("createFileSink", () => {
 		expect(elapsed).toBeLessThan(100); // Should be well under 100ms
 	});
 
-	it("should resolve waitDrain after flushing backlog", async () => {
+	it("should resolve waitDrain after partially flushing backlog", async () => {
 		const filePath = `${testDir}/wait-drain.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
 		const oversized = Buffer.alloc(8 * 1024 * 1024 + 1, 0x61);
+		nextPartialWrite = 1024;
 		expect(stream.write(oversized)).toBe(false);
 
 		await stream.waitDrain();
@@ -231,6 +295,43 @@ describe("createFileSink", () => {
 
 		await expect(stream.waitDrain()).rejects.toBe(writeError);
 		await expect(stream.end()).rejects.toBe(writeError);
+	});
+
+	it("should retry the unwritten suffix of a partial write", async () => {
+		const filePath = `${testDir}/partial-write.txt`;
+		const stream = createFileSink(filePath);
+		await stream.waitDrain();
+
+		nextPartialWrite = 5;
+		stream.write("hello world");
+		await stream.end();
+
+		expect(await readFile(filePath, "utf8")).toBe("hello world");
+	});
+
+	it("should retry the unwritten suffix of a partial writev", async () => {
+		const filePath = `${testDir}/partial-writev.txt`;
+		const stream = createFileSink(filePath);
+		await stream.waitDrain();
+
+		nextPartialWrite = 7;
+		stream.write("hello");
+		stream.write(" world");
+		stream.write("!");
+		await stream.end();
+
+		expect(await readFile(filePath, "utf8")).toBe("hello world!");
+	});
+
+	it("should reject a write that makes no progress", async () => {
+		const filePath = `${testDir}/zero-write.txt`;
+		const stream = createFileSink(filePath);
+		await stream.waitDrain();
+
+		nextPartialWrite = 0;
+		stream.write(Buffer.alloc(256 * 1024));
+
+		await expect(stream.end()).rejects.toThrow("made no progress");
 	});
 
 	it("should handle mtime option with fs.futimes", async () => {
@@ -265,6 +366,17 @@ describe("createFileSink", () => {
 		// Verify file is empty
 		const content = await readFile(filePath, "utf8");
 		expect(content).toBe("");
+	});
+
+	it("should close the file descriptor when futimes fails", async () => {
+		const filePath = join(testDir, "mtime-error.txt");
+		const stream = createFileSink(filePath, { mtime: new Date() });
+		await stream.waitDrain();
+		const futimesError = new Error("futimes failed");
+		nextFutimesError = futimesError;
+
+		await expect(stream.end()).rejects.toBe(futimesError);
+		expect(closedFds).toContain(failedFutimesFd);
 	});
 
 	it("should work without mtime option (no futimes call)", async () => {
