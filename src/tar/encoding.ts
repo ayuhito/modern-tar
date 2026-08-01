@@ -35,6 +35,8 @@ export function readString(
 	offset: number,
 	size: number,
 ): string {
+	if (view[offset] === 0) return "";
+
 	// Find the first NUL byte within the specified size.
 	const end = view.indexOf(0, offset);
 
