@@ -56,7 +56,9 @@ export const createPathCache = (
 				if (parentDir === symbolic) throw err;
 
 				// Ensure parent exists, then retry creating target directory.
+				checkCancelled();
 				await fs.mkdir(parentDir, { recursive: true });
+				checkCancelled();
 				await fs.mkdir(symbolic, { recursive: true });
 			} else {
 				throw err;

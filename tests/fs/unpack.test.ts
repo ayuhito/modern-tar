@@ -11,6 +11,7 @@ const originalFs =
 let mkdirDelay: Promise<void> | null = null;
 let releaseMkdir: (() => void) | null = null;
 let finishDelayedMkdir: (() => void) | null = null;
+let beforeMkdir: ((target: string) => Promise<void>) | null = null;
 let afterSymlinkRm: (() => Promise<void>) | null = null;
 let beforeLink: (() => Promise<void>) | null = null;
 let afterLinkExists: (() => Promise<void>) | null = null;
@@ -60,6 +61,7 @@ vi.mock("node:fs/promises", async () => {
 					target: string,
 					options?: Parameters<typeof actual.mkdir>[1],
 				) => {
+					await beforeMkdir?.(String(target));
 					const delayed = Boolean(
 						mkdirDelay && target.includes("delayed-extracted"),
 					);
@@ -110,6 +112,10 @@ describe("extract", () => {
 	});
 
 	afterEach(async () => {
+		mkdirDelay = null;
+		beforeMkdir = null;
+		releaseMkdir?.();
+		releaseMkdir = null;
 		afterSymlinkRm = null;
 		beforeLink = null;
 		afterLinkExists = null;
@@ -284,6 +290,47 @@ describe("extract", () => {
 		await expect(fs.access(path.join(destDir, "late.txt"))).rejects.toThrow();
 		mkdirDelay = null;
 		releaseMkdir = null;
+	});
+
+	it("does not retry destination creation after cancellation", async () => {
+		const archive = await packTarWeb([
+			{
+				header: { name: "late.txt", type: "file", size: 4 },
+				body: "late",
+			},
+		]);
+		const destDir = path.join(tmpDir, "retry-cancelled", "dest");
+		const mkdirTargets: string[] = [];
+		let releaseFirstMkdir: (() => void) | null = null;
+		let finishFirstMkdir: (() => void) | null = null;
+		const firstMkdirStarted = new Promise<void>((resolveStarted) => {
+			beforeMkdir = async (target) => {
+				mkdirTargets.push(target);
+				if (mkdirTargets.length !== 1) return;
+				resolveStarted();
+				await new Promise<void>((resolve) => {
+					releaseFirstMkdir = resolve;
+				});
+				finishFirstMkdir?.();
+				throw Object.assign(new Error("parent removed"), { code: "ENOENT" });
+			};
+		});
+		const firstMkdirFinished = new Promise<void>((resolve) => {
+			finishFirstMkdir = resolve;
+		});
+		const unpackStream = unpackTar(destDir);
+		const extraction = pipeline(Readable.from([archive]), unpackStream);
+		await firstMkdirStarted;
+
+		const cancelError = new Error("cancel destination retry");
+		unpackStream.destroy(cancelError);
+		await expect(extraction).rejects.toBe(cancelError);
+		releaseFirstMkdir?.();
+		await firstMkdirFinished;
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		expect(mkdirTargets).toEqual([destDir]);
+		await expect(fs.access(destDir)).rejects.toThrow();
 	});
 
 	it.skipIf(process.platform === "win32")(
