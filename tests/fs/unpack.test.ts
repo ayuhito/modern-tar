@@ -282,6 +282,25 @@ describe("extract", () => {
 		releaseMkdir = null;
 	});
 
+	it("flushes a partial file when non-strict input ends mid-entry", async () => {
+		const archive = await packTarWeb([
+			{
+				header: { name: "partial.txt", type: "file", size: 3 },
+				body: "abc",
+			},
+		]);
+		const destDir = path.join(tmpDir, "non-strict-partial");
+
+		await pipeline(
+			Readable.from([archive.subarray(0, 515)]),
+			unpackTar(destDir, { strict: false }),
+		);
+
+		expect(await fs.readFile(path.join(destDir, "partial.txt"), "utf8")).toBe(
+			"abc",
+		);
+	});
+
 	it("strips path components on extract", async () => {
 		const sourceDir = path.join(FIXTURES_DIR, "b");
 		const destDir = path.join(tmpDir, "extracted");
