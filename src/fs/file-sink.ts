@@ -6,14 +6,15 @@ interface SinkOptions {
 }
 
 export interface FileSink {
-	write(chunk: Buffer | Uint8Array | string): boolean;
+	write(chunk: Uint8Array): boolean;
 	end(): Promise<void>;
 	destroy(error?: Error): void;
 	waitDrain(): Promise<void>;
 }
 
-/** Maximum number of bytes to buffer before applying backpressure. */
-const BATCH_BYTES = 256 * 1024; // 256KB
+/** Flush and backpressure thresholds for bounded, overlapping writes. */
+const BATCH_BYTES = 256 * 1024;
+const BUFFER_LIMIT = 8 * 1024 * 1024;
 const OPEN_FLAGS =
 	fs.constants.O_WRONLY |
 	fs.constants.O_CREAT |
@@ -34,6 +35,7 @@ type SinkState =
 	| typeof STATE_FAILED;
 
 const DRAINED_PROMISE: Promise<void> = Promise.resolve();
+const discardFile = (fd: number) => fs.ftruncate(fd, 0, () => fs.close(fd));
 
 /**
  * Creates a lightweight file writer for tar extraction.
@@ -42,45 +44,42 @@ const DRAINED_PROMISE: Promise<void> = Promise.resolve();
  * uses async `fs` calls, so we have to include this sink to keep the parser
  * and the filesystem in sync without dragging in a full Writable stream.
  *
- * The sink buffers at most 256KB of data before flushing with write calls and
- * handles backpressure appropriately. After writes complete, metadata updates
+ * The sink flushes each 256 KiB and applies backpressure at 8 MiB while write
+ * calls overlap. After writes complete, metadata updates
  * such as `futimes` run.
  */
 export function createFileSink(
 	path: string,
 	{ mode = 0o666, mtime }: SinkOptions = {},
+	onError?: (error: Error) => void,
 ): FileSink {
 	let state: SinkState = STATE_OPENING;
 	let flushing = false;
 	let fd: number | null = null;
-	let queue: Buffer[] = []; // Buffers waiting to be written out (current batch).
-	let spare: Buffer[] = []; // Recycled array swapped in while writev is in flight.
+	let queue: Uint8Array[] = []; // Chunks waiting to be written out (current batch).
+	let spare: Uint8Array[] = []; // Recycled array swapped in while writev is in flight.
 	let bytes = 0;
 	let storedError: Error | null = null;
+	let failedFd: number | null = null;
 
 	// Used to track end() state.
 	let endPromise: Promise<void> | null = null;
 	let endResolve: (() => void) | null = null;
 	let endReject: ((error: Error) => void) | null = null;
 
-	// Every pending waitDrain promise parks a pair of callbacks here.
-	const waitResolves: Array<() => void> = [];
-	const waitRejects: Array<(error: Error) => void> = [];
-
-	// Resolves all pending waitDrain promises.
-	const settleWaiters = () => {
-		if (waitResolves.length === 0) return;
-		for (let i = 0; i < waitResolves.length; i++) waitResolves[i]();
-		waitResolves.length = 0;
-		waitRejects.length = 0;
-	};
-
-	// Rejects all pending waitDrain promises with the given error.
-	const failWaiters = (error: Error) => {
-		if (waitRejects.length === 0) return;
-		for (let i = 0; i < waitRejects.length; i++) waitRejects[i](error);
-		waitRejects.length = 0;
-		waitResolves.length = 0;
+	// All callers wait for the same open/drain transition.
+	let drainPromise: Promise<void> | null = null;
+	let drainResolve: (() => void) | null = null;
+	let drainReject: ((error: Error) => void) | null = null;
+	const settleDrain = (error?: Error) => {
+		if (!drainPromise) return;
+		const resolve = drainResolve;
+		const reject = drainReject;
+		drainPromise = null;
+		drainResolve = null;
+		drainReject = null;
+		if (error) reject?.(error);
+		else resolve?.();
 	};
 
 	const resetBuffers = () => {
@@ -90,19 +89,10 @@ export function createFileSink(
 	};
 
 	const finish = () => {
+		if (state === STATE_FAILED) return;
 		state = STATE_CLOSED;
 		endResolve?.();
-		settleWaiters();
-	};
-
-	// While writev is in-flight, we swap in a fresh array to collect new writes
-	// to prevent stalling.
-	const swapQueues = () => {
-		const current = queue;
-		queue = spare;
-		spare = current;
-		queue.length = 0;
-		return current;
+		settleDrain();
 	};
 
 	const fail = (error: Error) => {
@@ -111,19 +101,23 @@ export function createFileSink(
 		// After a write() failure we block all further writes to keep the state consistent.
 		storedError = error;
 		state = STATE_FAILED;
+		const writePending = flushing;
 		resetBuffers();
-		flushing = false;
 
 		const fdToClose = fd;
 		fd = null;
 
 		// Hard-fail truncation keeps partially written files from leaking on disk.
-		if (fdToClose !== null)
-			fs.ftruncate(fdToClose, 0, () => fs.close(fdToClose));
+		if (fdToClose !== null) {
+			if (writePending) failedFd = fdToClose;
+			else discardFile(fdToClose);
+		}
+		flushing = false;
 
-		endReject?.(error);
+		if (endReject) endReject(error);
+		else onError?.(error);
 		// Unblock callers waiting on waitDrain so they surface the same failure.
-		failWaiters(error);
+		settleDrain(error);
 		// We intentionally leave endResolve unset so end() continues to reject.
 	};
 
@@ -139,14 +133,23 @@ export function createFileSink(
 		if (mtime) {
 			// Apply mtime before closing so corpus diffing stays deterministic.
 			fs.futimes(fdToClose, mtime, mtime, (err) => {
-				if (err) return fail(err);
+				if (state !== STATE_OPEN) {
+					fs.close(fdToClose);
+					return;
+				}
+				if (err) {
+					fs.close(fdToClose, () => fail(err));
+					return;
+				}
 				fs.close(fdToClose, (closeErr) => {
+					if (state !== STATE_OPEN) return;
 					if (closeErr) fail(closeErr);
 					else finish();
 				});
 			});
 		} else {
 			fs.close(fdToClose, (err) => {
+				if (state !== STATE_OPEN) return;
 				if (err) fail(err);
 				else finish();
 			});
@@ -157,18 +160,56 @@ export function createFileSink(
 		if (flushing || queue.length === 0 || state !== STATE_OPEN) return;
 
 		flushing = true;
-		const bufs = swapQueues();
+		let bufs = queue;
+		queue = spare;
+		spare = bufs;
+		queue.length = 0;
+		let pendingBytes = bytes;
 
 		// writev callback is small enough that passing a pre-declared function is slower.
 		const onDone = (err: Error | null, written = 0) => {
-			if (err) return fail(err);
+			if (state !== STATE_OPEN) {
+				if (failedFd !== null) {
+					const fdToClose = failedFd;
+					failedFd = null;
+					discardFile(fdToClose);
+				}
+				return;
+			}
+			if (err) {
+				flushing = false;
+				fail(err);
+				return;
+			}
+			if (written <= 0 || written > pendingBytes) {
+				flushing = false;
+				fail(new Error("File write made no progress."));
+				return;
+			}
+
+			bytes -= written;
+			pendingBytes -= written;
+			if (pendingBytes > 0) {
+				let skipped = written;
+				let index = 0;
+				while (skipped >= bufs[index].length) skipped -= bufs[index++].length;
+				bufs = bufs.slice(index);
+				if (skipped > 0) bufs[0] = bufs[0].subarray(skipped);
+				if (bufs.length === 1) {
+					const buf = bufs[0];
+					// biome-ignore lint/style/noNonNullAssertion: Checked before flushing.
+					fs.write(fd!, buf, 0, buf.length, null, onDone);
+				} else {
+					// biome-ignore lint/style/noNonNullAssertion: Checked before flushing.
+					fs.writev(fd!, bufs, onDone);
+				}
+				return;
+			}
 
 			flushing = false;
-			bytes -= written;
 			spare.length = 0; // Reset recycled array so the next flush starts empty.
-
 			// If we drained below the threshold, resolve waiters.
-			if (bytes < BATCH_BYTES) settleWaiters();
+			if (bytes < BUFFER_LIMIT) settleDrain();
 
 			// Otherwise, flush more data if available.
 			if (queue.length > 0) flush();
@@ -177,10 +218,10 @@ export function createFileSink(
 
 		if (bufs.length === 1) {
 			const buf = bufs[0];
-			// biome-ignore lint/style/noNonNullAssertion: Checked above.
+			// biome-ignore lint/style/noNonNullAssertion: Checked before flushing.
 			fs.write(fd!, buf, 0, buf.length, null, onDone);
 		} else {
-			// biome-ignore lint/style/noNonNullAssertion: Checked above.
+			// biome-ignore lint/style/noNonNullAssertion: Checked before flushing.
 			fs.writev(fd!, bufs, onDone);
 		}
 	};
@@ -188,7 +229,7 @@ export function createFileSink(
 	const onOpen = (err: NodeJS.ErrnoException | null, openFd: number) => {
 		if (err) return fail(err);
 
-		if (state === STATE_CLOSED || state === STATE_FAILED) {
+		if (state >= STATE_CLOSED) {
 			fs.close(openFd);
 			return;
 		}
@@ -200,50 +241,42 @@ export function createFileSink(
 			// end() ran before open() resolved, so finish work immediately.
 			if (queue.length > 0) flush();
 			else close();
-		} else if (bytes >= BATCH_BYTES && !flushing) {
+		} else if (bytes >= BATCH_BYTES) {
 			flush();
 		} else {
-			settleWaiters();
+			settleDrain();
 		}
 	};
 
-	const write = (chunk: Buffer | Uint8Array | string): boolean => {
-		if (storedError || state >= STATE_CLOSED || endResolve) return false;
+	const write = (chunk: Uint8Array): boolean => {
+		if (state >= STATE_CLOSED || endResolve) return false;
 
-		// Normalize chunk to Buffer.
-		const buf = Buffer.isBuffer(chunk)
-			? chunk
-			: chunk instanceof Uint8Array
-				? Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)
-				: Buffer.from(chunk);
-
-		if (buf.length === 0) return bytes < BATCH_BYTES;
-
-		queue.push(buf);
-		bytes += buf.length;
+		queue.push(chunk);
+		bytes += chunk.length;
 
 		if (state === STATE_OPEN && !flushing && bytes >= BATCH_BYTES) flush();
 
 		// Return false to apply backpressure.
-		return bytes < BATCH_BYTES;
+		return bytes < BUFFER_LIMIT;
 	};
 
 	const waitDrain = () => {
+		if (storedError) return Promise.reject(storedError);
 		if (
 			state === STATE_OPENING ||
-			(state === STATE_OPEN && bytes >= BATCH_BYTES)
+			(state === STATE_OPEN && bytes >= BUFFER_LIMIT)
 		)
-			return new Promise<void>((resolve, reject) => {
-				waitResolves.push(resolve);
-				waitRejects.push(reject);
-			});
+			return (drainPromise ??= new Promise<void>((resolve, reject) => {
+				drainResolve = resolve;
+				drainReject = reject;
+			}));
 
 		return DRAINED_PROMISE;
 	};
 
 	const end = (): Promise<void> => {
-		if (state >= STATE_CLOSED) return DRAINED_PROMISE;
 		if (storedError) return Promise.reject(storedError);
+		if (state >= STATE_CLOSED) return DRAINED_PROMISE;
 		if (endPromise) return endPromise;
 
 		endPromise = new Promise((resolve, reject) => {
@@ -268,7 +301,7 @@ export function createFileSink(
 		}
 
 		// Normal close.
-		if (state >= STATE_CLOSED || storedError) return;
+		if (state >= STATE_CLOSED) return;
 
 		// Otherwise clean up.
 		resetBuffers();
@@ -285,7 +318,7 @@ export function createFileSink(
 
 	// Open immediately so callers can await waitDrain() before writing body data.
 	fs.open(path, CREATE_FLAGS, mode, (err, openFd) => {
-		if (!err || err.code !== "EEXIST") return onOpen(err, openFd);
+		if (err?.code !== "EEXIST") return onOpen(err, openFd);
 		fs.rm(path, { force: true }, (rmErr) => {
 			if (rmErr) return fail(rmErr);
 			fs.open(path, CREATE_FLAGS, mode, onOpen);

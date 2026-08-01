@@ -15,9 +15,19 @@ let beforeLink: (() => Promise<void>) | null = null;
 let afterLinkExists: (() => Promise<void>) | null = null;
 let interceptOpen: ((target: string, run: () => void) => boolean) | null = null;
 let releaseOpen: (() => void) | null = null;
+let interceptWrite:
+	| ((run: () => void, fail: (error: Error) => void) => boolean)
+	| null = null;
+let releaseWrite: (() => void) | null = null;
 
 vi.mock("node:fs", async () => {
 	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+	const runWrite = (method: "write" | "writev", args: unknown[]) => {
+		const resumeWrite = () => Reflect.apply(actual[method], actual, args);
+		const failWrite = (error: Error) =>
+			(args.at(-1) as (error: Error, written: number) => void)(error, 0);
+		if (!interceptWrite?.(resumeWrite, failWrite)) resumeWrite();
+	};
 	return {
 		...actual,
 		open: ((...args: unknown[]) => {
@@ -26,6 +36,10 @@ vi.mock("node:fs", async () => {
 			};
 			if (!interceptOpen?.(String(args[0]), resumeOpen)) resumeOpen();
 		}) as typeof actual.open,
+		write: ((...args: unknown[]) =>
+			runWrite("write", args)) as typeof actual.write,
+		writev: ((...args: unknown[]) =>
+			runWrite("writev", args)) as typeof actual.writev,
 	};
 });
 
@@ -96,7 +110,81 @@ describe("extract", () => {
 		releaseOpen?.();
 		interceptOpen = null;
 		releaseOpen = null;
+		interceptWrite = null;
+		releaseWrite?.();
+		releaseWrite = null;
 		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	it("propagates file write backpressure to the source", async () => {
+		const body = new Uint8Array(16 * 1024 * 1024).fill(97);
+		const archive = await packTarWeb([
+			{
+				header: { name: "large.bin", type: "file", size: body.length },
+				body,
+			},
+		]);
+		const chunkSize = 64 * 1024;
+		const maxBufferedChunks = (8 * 1024 * 1024) / chunkSize;
+		let pulledChunks = 0;
+		function* chunks() {
+			for (let offset = 0; offset < archive.length; offset += chunkSize) {
+				pulledChunks++;
+				yield archive.subarray(offset, offset + chunkSize);
+			}
+		}
+
+		interceptWrite = (resumeWrite) => {
+			releaseWrite = resumeWrite;
+			return true;
+		};
+		const destDir = path.join(tmpDir, "backpressured");
+		const extraction = pipeline(
+			Readable.from(chunks(), { highWaterMark: 1 }),
+			unpackTar(destDir),
+		);
+		await vi.waitFor(() => expect(releaseWrite).toBeTypeOf("function"));
+		await vi.waitFor(() =>
+			expect(pulledChunks).toBeGreaterThanOrEqual(maxBufferedChunks),
+		);
+		const pulledBeforeRelease = pulledChunks;
+		const release = releaseWrite;
+		interceptWrite = null;
+		releaseWrite = null;
+		release?.();
+		await extraction;
+
+		expect(pulledBeforeRelease).toBeLessThanOrEqual(maxBufferedChunks + 2);
+		expect((await fs.stat(path.join(destDir, "large.bin"))).size).toBe(
+			body.length,
+		);
+	});
+
+	it("rejects an active asynchronous file write error", async () => {
+		const body = new Uint8Array(256 * 1024 + 1).fill(97);
+		const archive = await packTarWeb([
+			{
+				header: { name: "write-error.bin", type: "file", size: body.length },
+				body,
+			},
+		]);
+		let failWrite: ((error: Error) => void) | null = null;
+		interceptWrite = (_, fail) => {
+			failWrite = fail;
+			return true;
+		};
+		const source = new Readable({ read() {} });
+		const unpackStream = unpackTar(path.join(tmpDir, "write-error"));
+		const extraction = pipeline(source, unpackStream);
+
+		source.push(archive.subarray(0, 513));
+		await vi.waitFor(() => expect(unpackStream.writableLength).toBe(0));
+		source.push(archive.subarray(513, 512 + body.length));
+		await vi.waitFor(() => expect(failWrite).toBeTypeOf("function"));
+
+		const writeError = new Error("disk write failed");
+		failWrite?.(writeError);
+		await expect(extraction).rejects.toBe(writeError);
 	});
 
 	it("strips path components on extract", async () => {
