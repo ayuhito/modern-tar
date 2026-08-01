@@ -376,6 +376,39 @@ describe("createTarDecoder", () => {
 		expect(finalRead.done).toBe(true);
 	});
 
+	it("propagates unread body backpressure to the source", async () => {
+		const body = new Uint8Array(8 * 1024 * 1024).fill(97);
+		const archive = await createBaseArchive([
+			{
+				header: { name: "large.bin", type: "file", size: body.length },
+				body,
+			},
+		]);
+		const chunkSize = 64 * 1024;
+		let pulledChunks = 0;
+		let offset = 0;
+		const source = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (offset >= archive.length) return controller.close();
+				pulledChunks++;
+				controller.enqueue(archive.subarray(offset, offset + chunkSize));
+				offset += chunkSize;
+			},
+		});
+		const reader = source.pipeThrough(createTarDecoder()).getReader();
+		const result = await reader.read();
+		if (!result.value) throw new Error("Expected first entry");
+		const bodyReader = result.value.body.getReader();
+
+		await expectToStayPending(bodyReader.closed);
+		const pulledBeforeDrain = pulledChunks;
+		await bodyReader.cancel();
+		await reader.cancel();
+
+		const maxBufferedChunks = (1024 * 1024) / chunkSize;
+		expect(pulledBeforeDrain).toBeLessThanOrEqual(maxBufferedChunks + 2);
+	});
+
 	it("continues serving buffered headers before the source closes", async () => {
 		const archive = await createBaseArchive([
 			{ header: { name: "one/", type: "directory", size: 0 } },

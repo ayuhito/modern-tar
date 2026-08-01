@@ -52,6 +52,9 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				? Math.min(currentEntry.remaining, available())
 				: 0,
 
+		/** Number of bytes currently buffered. */
+		available,
+
 		/** Add data to the internal buffer. */
 		write(chunk: Uint8Array): void {
 			if (ended) throw new Error("Archive already ended.");
