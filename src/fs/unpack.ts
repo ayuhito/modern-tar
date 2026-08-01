@@ -46,7 +46,7 @@ export function unpackTar(
 	const unpacker = createUnpacker(options);
 	const concurrency = options.concurrency || cpus().length || 8;
 	const opQueue = createOperationQueue(concurrency);
-	let cancelError: Error | null = null;
+	let cancelError: Error | undefined;
 	const pathCache = createPathCache(
 		directoryPath,
 		options,
@@ -69,8 +69,8 @@ export function unpackTar(
 		if (!writable.destroyed) writable.destroy(err);
 	};
 	const closeCurrent = () => {
-		const stream = currentFileStream;
-		if (!stream) return;
+		// biome-ignore lint/style/noNonNullAssertion: Called only while a file entry is active.
+		const stream = currentFileStream!;
 		currentFileStream = null;
 		opQueue
 			.add(() => stream.end())
@@ -222,11 +222,11 @@ export function unpackTar(
 				callback(null);
 				return;
 			}
-			cancelError ??= error ?? (AbortSignal.abort().reason as Error);
+			cancelError = error ?? (AbortSignal.abort().reason as Error);
 			for (const stream of fileStreams) stream.destroy(cancelError);
 			fileStreams.clear();
 			currentFileStream = null;
-			callback(error ?? (hasWork ? cancelError : null));
+			callback(cancelError);
 		},
 	});
 
