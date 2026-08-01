@@ -69,11 +69,7 @@ export function unpackTar(
 		if (!writeOk) needsDrain = true;
 		return writeOk;
 	};
-	// Detached file closes must still fail extraction if they error later.
-	let queuedError: Error | null = null;
-
-	const onQueuedError = (err: Error) => {
-		queuedError ??= err;
+	const onFileError = (err: Error) => {
 		if (!writable.destroyed) writable.destroy(err);
 	};
 	const closeCurrent = () => {
@@ -86,7 +82,7 @@ export function unpackTar(
 				() => fileStreams.delete(stream),
 				(err) => {
 					fileStreams.delete(stream);
-					onQueuedError(err);
+					onFileError(err);
 				},
 			);
 	};
@@ -160,10 +156,14 @@ export function unpackTar(
 							? transformedHeader.mode & 0o777
 							: undefined;
 
-						currentFileStream = createFileSink(outPath, {
-							mode: options.fmode ?? safeMode,
-							mtime: transformedHeader.mtime ?? undefined,
-						});
+						currentFileStream = createFileSink(
+							outPath,
+							{
+								mode: options.fmode ?? safeMode,
+								mtime: transformedHeader.mtime ?? undefined,
+							},
+							onFileError,
+						);
 						fileStreams.add(currentFileStream);
 						pendingFileOpens.push(
 							currentFileStream.waitDrain().catch((error: Error) => error),
@@ -207,12 +207,13 @@ export function unpackTar(
 				// Close out remaining buffered data and flush the async operation queue.
 				unpacker.end();
 				unpacker.validateEOF();
+				// Non-strict archives may end mid-entry, so flush the bytes received.
+				closeCurrent();
 				// Ensure all paths are prepared before cleanup.
 				await pathCache.ready();
 				// Wait for all file ops to complete.
 				await opQueue.onIdle();
 				checkCancelled();
-				if (queuedError) throw queuedError;
 				// Validate symlink targets after all archive-created symlinks exist.
 				await pathCache.checkSymlinks();
 				// Now that all files are written, create the hardlinks.
@@ -228,6 +229,10 @@ export function unpackTar(
 				fileStreams.size > 0 ||
 				writable.writableLength > 0 ||
 				(writable.writableEnded && !writable.writableFinished);
+			if (!error && !hasWork) {
+				callback(null);
+				return;
+			}
 			cancelError ??= error ?? (AbortSignal.abort().reason as Error);
 			for (const stream of fileStreams) stream.destroy(cancelError);
 			fileStreams.clear();

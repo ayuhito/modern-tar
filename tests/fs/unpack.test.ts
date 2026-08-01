@@ -11,6 +11,7 @@ const originalFs =
 let mkdirDelay: Promise<void> | null = null;
 let releaseMkdir: (() => void) | null = null;
 let finishDelayedMkdir: (() => void) | null = null;
+let beforeMkdir: ((target: string) => Promise<void>) | null = null;
 let afterSymlinkRm: (() => Promise<void>) | null = null;
 let beforeLink: (() => Promise<void>) | null = null;
 let afterLinkExists: (() => Promise<void>) | null = null;
@@ -18,14 +19,18 @@ let beforeLstat: ((target: string) => Promise<void>) | null = null;
 let releaseLstat: (() => void) | null = null;
 let interceptOpen: ((target: string, run: () => void) => boolean) | null = null;
 let releaseOpen: (() => void) | null = null;
-let interceptWrite: ((run: () => void) => boolean) | null = null;
+let interceptWrite:
+	| ((run: () => void, fail: (error: Error) => void) => boolean)
+	| null = null;
 let releaseWrite: (() => void) | null = null;
 
 vi.mock("node:fs", async () => {
 	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
 	const runWrite = (method: "write" | "writev", args: unknown[]) => {
 		const resumeWrite = () => Reflect.apply(actual[method], actual, args);
-		if (!interceptWrite?.(resumeWrite)) resumeWrite();
+		const failWrite = (error: Error) =>
+			(args.at(-1) as (error: Error, written: number) => void)(error, 0);
+		if (!interceptWrite?.(resumeWrite, failWrite)) resumeWrite();
 	};
 	return {
 		...actual,
@@ -56,6 +61,7 @@ vi.mock("node:fs/promises", async () => {
 					target: string,
 					options?: Parameters<typeof actual.mkdir>[1],
 				) => {
+					await beforeMkdir?.(String(target));
 					const delayed = Boolean(
 						mkdirDelay && target.includes("delayed-extracted"),
 					);
@@ -107,6 +113,7 @@ describe("extract", () => {
 
 	afterEach(async () => {
 		mkdirDelay = null;
+		beforeMkdir = null;
 		releaseMkdir?.();
 		releaseMkdir = null;
 		afterSymlinkRm = null;
@@ -167,6 +174,33 @@ describe("extract", () => {
 		expect((await fs.stat(path.join(destDir, "large.bin"))).size).toBe(
 			body.length,
 		);
+	});
+
+	it("rejects an active asynchronous file write error", async () => {
+		const body = new Uint8Array(256 * 1024 + 1).fill(97);
+		const archive = await packTarWeb([
+			{
+				header: { name: "write-error.bin", type: "file", size: body.length },
+				body,
+			},
+		]);
+		let failWrite: ((error: Error) => void) | null = null;
+		interceptWrite = (_, fail) => {
+			failWrite = fail;
+			return true;
+		};
+		const source = new Readable({ read() {} });
+		const unpackStream = unpackTar(path.join(tmpDir, "write-error"));
+		const extraction = pipeline(source, unpackStream);
+
+		source.push(archive.subarray(0, 513));
+		await vi.waitFor(() => expect(unpackStream.writableLength).toBe(0));
+		source.push(archive.subarray(513, 512 + body.length));
+		await vi.waitFor(() => expect(failWrite).toBeTypeOf("function"));
+
+		const writeError = new Error("disk write failed");
+		failWrite?.(writeError);
+		await expect(extraction).rejects.toBe(writeError);
 	});
 
 	it("rejects clean cancellation while file writes are backpressured", async () => {
@@ -258,6 +292,66 @@ describe("extract", () => {
 		await expect(fs.access(path.join(destDir, "late.txt"))).rejects.toThrow();
 		mkdirDelay = null;
 		releaseMkdir = null;
+	});
+
+	it("does not retry destination creation after cancellation", async () => {
+		const archive = await packTarWeb([
+			{
+				header: { name: "late.txt", type: "file", size: 4 },
+				body: "late",
+			},
+		]);
+		const destDir = path.join(tmpDir, "retry-cancelled", "dest");
+		const mkdirTargets: string[] = [];
+		let releaseFirstMkdir: (() => void) | null = null;
+		let finishFirstMkdir: (() => void) | null = null;
+		const firstMkdirStarted = new Promise<void>((resolveStarted) => {
+			beforeMkdir = async (target) => {
+				mkdirTargets.push(target);
+				if (mkdirTargets.length !== 1) return;
+				resolveStarted();
+				await new Promise<void>((resolve) => {
+					releaseFirstMkdir = resolve;
+				});
+				finishFirstMkdir?.();
+				throw Object.assign(new Error("parent removed"), { code: "ENOENT" });
+			};
+		});
+		const firstMkdirFinished = new Promise<void>((resolve) => {
+			finishFirstMkdir = resolve;
+		});
+		const unpackStream = unpackTar(destDir);
+		const extraction = pipeline(Readable.from([archive]), unpackStream);
+		await firstMkdirStarted;
+
+		const cancelError = new Error("cancel destination retry");
+		unpackStream.destroy(cancelError);
+		await expect(extraction).rejects.toBe(cancelError);
+		releaseFirstMkdir?.();
+		await firstMkdirFinished;
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		expect(mkdirTargets).toEqual([destDir]);
+		await expect(fs.access(destDir)).rejects.toThrow();
+	});
+
+	it("flushes a partial file when non-strict input ends mid-entry", async () => {
+		const archive = await packTarWeb([
+			{
+				header: { name: "partial.txt", type: "file", size: 3 },
+				body: "abc",
+			},
+		]);
+		const destDir = path.join(tmpDir, "non-strict-partial");
+
+		await pipeline(
+			Readable.from([archive.subarray(0, 515)]),
+			unpackTar(destDir, { strict: false }),
+		);
+
+		expect(await fs.readFile(path.join(destDir, "partial.txt"), "utf8")).toBe(
+			"abc",
+		);
 	});
 
 	it.skipIf(process.platform === "win32")(

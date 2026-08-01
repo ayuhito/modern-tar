@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFileSink } from "../../src/fs/file-sink";
@@ -8,6 +8,12 @@ let nextPartialWrite: number | null = null;
 let nextFutimesError: Error | null = null;
 let failedFutimesFd: number | null = null;
 let closedFds: number[] = [];
+let delayExistingOpen = false;
+let releaseExistingOpen: (() => void) | null = null;
+let delayRemove = false;
+let releaseRemove: (() => void) | null = null;
+let openCalls = 0;
+let removeCalls = 0;
 
 vi.mock("node:fs", async () => {
 	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -74,6 +80,36 @@ vi.mock("node:fs", async () => {
 			const callback = args.at(-1) as (error: Error) => void;
 			queueMicrotask(() => callback(error));
 		}) as typeof actual.futimes,
+		open: ((...args: unknown[]) => {
+			openCalls++;
+			const callback = args.at(-1) as (
+				error: NodeJS.ErrnoException | null,
+				fd: number,
+			) => void;
+			const onOpen = (error: NodeJS.ErrnoException | null, fd: number) => {
+				if (delayExistingOpen && error?.code === "EEXIST") {
+					delayExistingOpen = false;
+					releaseExistingOpen = () => callback(error, fd);
+					return;
+				}
+				callback(error, fd);
+			};
+			return Reflect.apply(actual.open, actual, [...args.slice(0, -1), onOpen]);
+		}) as typeof actual.open,
+		rm: ((...args: unknown[]) => {
+			removeCalls++;
+			if (delayRemove) {
+				delayRemove = false;
+				const callback = args.at(-1) as (error: Error | null) => void;
+				return Reflect.apply(actual.rm, actual, [
+					...args.slice(0, -1),
+					(error: Error | null) => {
+						releaseRemove = () => callback(error);
+					},
+				]);
+			}
+			return Reflect.apply(actual.rm, actual, args);
+		}) as typeof actual.rm,
 		write: write as typeof actual.write,
 		writev: writev as typeof actual.writev,
 	};
@@ -92,6 +128,14 @@ describe("createFileSink", () => {
 		nextFutimesError = null;
 		failedFutimesFd = null;
 		closedFds = [];
+		releaseExistingOpen?.();
+		releaseExistingOpen = null;
+		delayExistingOpen = false;
+		releaseRemove?.();
+		releaseRemove = null;
+		delayRemove = false;
+		openCalls = 0;
+		removeCalls = 0;
 		await rm(testDir, { recursive: true, force: true });
 	});
 
@@ -203,6 +247,43 @@ describe("createFileSink", () => {
 		expect(() => {
 			stream.write(Buffer.from("data"));
 		}).not.toThrow();
+	});
+
+	it("should not replace an existing file after cancellation", async () => {
+		const filePath = `${testDir}/existing.txt`;
+		await writeFile(filePath, "original");
+		delayExistingOpen = true;
+		const stream = createFileSink(filePath);
+		await vi.waitFor(() => expect(releaseExistingOpen).toBeTypeOf("function"));
+
+		const cancelError = new Error("cancelled");
+		stream.destroy(cancelError);
+		releaseExistingOpen?.();
+		releaseExistingOpen = null;
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		await expect(stream.end()).rejects.toBe(cancelError);
+		expect(removeCalls).toBe(0);
+		expect(await readFile(filePath, "utf8")).toBe("original");
+	});
+
+	it("should not reopen a removed file after cancellation", async () => {
+		const filePath = `${testDir}/removed.txt`;
+		await writeFile(filePath, "original");
+		delayRemove = true;
+		const stream = createFileSink(filePath);
+		await vi.waitFor(() => expect(releaseRemove).toBeTypeOf("function"));
+
+		const cancelError = new Error("cancelled");
+		stream.destroy(cancelError);
+		releaseRemove?.();
+		releaseRemove = null;
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		await expect(stream.end()).rejects.toBe(cancelError);
+		expect(openCalls).toBe(1);
+		expect(removeCalls).toBe(1);
+		await expect(stat(filePath)).rejects.toMatchObject({ code: "ENOENT" });
 	});
 
 	it("should handle single write efficiently", async () => {
