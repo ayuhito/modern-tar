@@ -46,15 +46,22 @@ export function unpackTar(
 	const unpacker = createUnpacker(options);
 	const concurrency = options.concurrency || cpus().length || 8;
 	const opQueue = createOperationQueue(concurrency);
+	let cancelError: Error | null = null;
+	const checkCancelled = () => {
+		if (cancelError) throw cancelError;
+	};
 	const pathCache = createPathCache(
 		directoryPath,
 		options,
 		opQueue,
 		concurrency,
+		checkCancelled,
 	);
 
 	// Track current file stream across write() calls for handling backpressure
 	let currentFileStream: FileSink | null = null;
+	// File closes overlap parsing, so cancellation must own detached sinks too.
+	const fileStreams = new Set<FileSink>();
 	let needsDrain = false;
 	const writeCurrent = (chunk: Uint8Array) => {
 		// biome-ignore lint/style/noNonNullAssertion: Called only while a file entry is active.
@@ -69,6 +76,20 @@ export function unpackTar(
 		queuedError ??= err;
 		if (!writable.destroyed) writable.destroy(err);
 	};
+	const closeCurrent = () => {
+		const stream = currentFileStream;
+		if (!stream) return;
+		currentFileStream = null;
+		opQueue
+			.add(() => stream.end())
+			.then(
+				() => fileStreams.delete(stream),
+				(err) => {
+					fileStreams.delete(stream);
+					onQueuedError(err);
+				},
+			);
+	};
 
 	const writable = new Writable({
 		async write(chunk, _, cb) {
@@ -77,6 +98,7 @@ export function unpackTar(
 			const pendingFileOpens: Promise<Error | undefined>[] = [];
 			let writeError: Error | undefined;
 			try {
+				checkCancelled();
 				unpacker.write(chunk);
 
 				if (unpacker.isEntryActive()) {
@@ -87,19 +109,17 @@ export function unpackTar(
 							needsDrain = false;
 							const fed = unpacker.streamBody(writeCurrent);
 
-							if (needsDrain) await currentFileStream.waitDrain();
-							else if (fed === 0) return; // Need more data.
+							if (needsDrain) {
+								await currentFileStream.waitDrain();
+								checkCancelled();
+							} else if (fed === 0) return; // Need more data.
 						}
 
 						// Body complete, skip padding.
 						if (!unpacker.skipPadding()) return;
 
 						// Padding complete, close file.
-						const streamToClose = currentFileStream;
-						if (streamToClose)
-							opQueue.add(() => streamToClose.end()).catch(onQueuedError);
-
-						currentFileStream = null;
+						closeCurrent();
 					} else {
 						// Otherwise, just discard the entry body.
 						if (!unpacker.skipEntry()) {
@@ -131,6 +151,7 @@ export function unpackTar(
 					const outPath = await opQueue.add(() =>
 						pathCache.preparePath(transformedHeader),
 					);
+					checkCancelled();
 
 					// Only file entries return a path for streaming.
 					if (outPath) {
@@ -143,6 +164,7 @@ export function unpackTar(
 							mode: options.fmode ?? safeMode,
 							mtime: transformedHeader.mtime ?? undefined,
 						});
+						fileStreams.add(currentFileStream);
 						pendingFileOpens.push(
 							currentFileStream.waitDrain().catch((error: Error) => error),
 						);
@@ -152,18 +174,17 @@ export function unpackTar(
 							needsDrain = false;
 							const fed = unpacker.streamBody(writeCurrent);
 
-							if (needsDrain) await currentFileStream.waitDrain();
-							else if (fed === 0) return; // Need more data.
+							if (needsDrain) {
+								await currentFileStream.waitDrain();
+								checkCancelled();
+							} else if (fed === 0) return; // Need more data.
 						}
 
 						// Skip padding.
 						if (!unpacker.skipPadding()) return; // Need more data.
 
 						// Close without await.
-						const streamToClose = currentFileStream;
-						if (streamToClose)
-							opQueue.add(() => streamToClose.end()).catch(onQueuedError);
-						currentFileStream = null;
+						closeCurrent();
 					} else {
 						// No body data or already handled.
 						if (!unpacker.skipEntry()) {
@@ -177,7 +198,7 @@ export function unpackTar(
 				const openError = pendingFileOpens.length
 					? (await Promise.all(pendingFileOpens)).find((error) => error)
 					: undefined;
-				cb(openError ?? writeError);
+				cb(cancelError ?? openError ?? writeError);
 			}
 		},
 
@@ -190,6 +211,7 @@ export function unpackTar(
 				await pathCache.ready();
 				// Wait for all file ops to complete.
 				await opQueue.onIdle();
+				checkCancelled();
 				if (queuedError) throw queuedError;
 				// Validate symlink targets after all archive-created symlinks exist.
 				await pathCache.checkSymlinks();
@@ -202,24 +224,15 @@ export function unpackTar(
 		},
 
 		destroy(error, callback) {
-			// Handle stream destruction asynchronously to prevent blocking
-			(async () => {
-				// Clean up any active file stream and reset state.
-				if (currentFileStream) {
-					currentFileStream.destroy(error ?? undefined);
-					currentFileStream = null;
-				}
-
-				// Drain active file operations.
-				await opQueue.onIdle();
-			})().then(
-				() => callback(error ?? null),
-				// If there is an error during cleanup, pass it to the callback instead.
-				(e) =>
-					callback(
-						error ?? (e instanceof Error ? e : new Error("Stream destroyed")),
-					),
-			);
+			const hasWork =
+				fileStreams.size > 0 ||
+				writable.writableLength > 0 ||
+				(writable.writableEnded && !writable.writableFinished);
+			cancelError ??= error ?? (AbortSignal.abort().reason as Error);
+			for (const stream of fileStreams) stream.destroy(cancelError);
+			fileStreams.clear();
+			currentFileStream = null;
+			callback(error ?? (hasWork ? cancelError : null));
 		},
 	});
 
