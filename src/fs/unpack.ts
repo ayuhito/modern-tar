@@ -139,10 +139,14 @@ export function unpackTar(
 							? transformedHeader.mode & 0o777
 							: undefined;
 
-						currentFileStream = createFileSink(outPath, {
-							mode: options.fmode ?? safeMode,
-							mtime: transformedHeader.mtime ?? undefined,
-						});
+						currentFileStream = createFileSink(
+							outPath,
+							{
+								mode: options.fmode ?? safeMode,
+								mtime: transformedHeader.mtime ?? undefined,
+							},
+							onQueuedError,
+						);
 						pendingFileOpens.push(
 							currentFileStream.waitDrain().catch((error: Error) => error),
 						);

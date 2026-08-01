@@ -51,6 +51,7 @@ const discardFile = (fd: number) => fs.ftruncate(fd, 0, () => fs.close(fd));
 export function createFileSink(
 	path: string,
 	{ mode = 0o666, mtime }: SinkOptions = {},
+	onError?: (error: Error) => void,
 ): FileSink {
 	let state: SinkState = STATE_OPENING;
 	let flushing = false;
@@ -123,7 +124,8 @@ export function createFileSink(
 		}
 		flushing = false;
 
-		endReject?.(error);
+		if (endReject) endReject(error);
+		else onError?.(error);
 		// Unblock callers waiting on waitDrain so they surface the same failure.
 		settleDrain(error);
 		// We intentionally leave endResolve unset so end() continues to reject.
