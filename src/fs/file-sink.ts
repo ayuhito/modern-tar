@@ -12,8 +12,9 @@ export interface FileSink {
 	waitDrain(): Promise<void>;
 }
 
-/** Maximum number of bytes to buffer before applying backpressure. */
-const BATCH_BYTES = 256 * 1024; // 256KB
+/** Flush and backpressure thresholds for bounded, overlapping writes. */
+const BATCH_BYTES = 256 * 1024;
+const BUFFER_LIMIT = 8 * 1024 * 1024;
 const OPEN_FLAGS =
 	fs.constants.O_WRONLY |
 	fs.constants.O_CREAT |
@@ -42,8 +43,8 @@ const DRAINED_PROMISE: Promise<void> = Promise.resolve();
  * uses async `fs` calls, so we have to include this sink to keep the parser
  * and the filesystem in sync without dragging in a full Writable stream.
  *
- * The sink buffers at most 256KB of data before flushing with write calls and
- * handles backpressure appropriately. After writes complete, metadata updates
+ * The sink flushes each 256 KiB and applies backpressure at 8 MiB while write
+ * calls overlap. After writes complete, metadata updates
  * such as `futimes` run.
  */
 export function createFileSink(
@@ -63,24 +64,19 @@ export function createFileSink(
 	let endResolve: (() => void) | null = null;
 	let endReject: ((error: Error) => void) | null = null;
 
-	// Every pending waitDrain promise parks a pair of callbacks here.
-	const waitResolves: Array<() => void> = [];
-	const waitRejects: Array<(error: Error) => void> = [];
-
-	// Resolves all pending waitDrain promises.
-	const settleWaiters = () => {
-		if (waitResolves.length === 0) return;
-		for (let i = 0; i < waitResolves.length; i++) waitResolves[i]();
-		waitResolves.length = 0;
-		waitRejects.length = 0;
-	};
-
-	// Rejects all pending waitDrain promises with the given error.
-	const failWaiters = (error: Error) => {
-		if (waitRejects.length === 0) return;
-		for (let i = 0; i < waitRejects.length; i++) waitRejects[i](error);
-		waitRejects.length = 0;
-		waitResolves.length = 0;
+	// All callers wait for the same open/drain transition.
+	let drainPromise: Promise<void> | null = null;
+	let drainResolve: (() => void) | null = null;
+	let drainReject: ((error: Error) => void) | null = null;
+	const settleDrain = (error?: Error) => {
+		if (!drainPromise) return;
+		const resolve = drainResolve;
+		const reject = drainReject;
+		drainPromise = null;
+		drainResolve = null;
+		drainReject = null;
+		if (error) reject?.(error);
+		else resolve?.();
 	};
 
 	const resetBuffers = () => {
@@ -92,7 +88,7 @@ export function createFileSink(
 	const finish = () => {
 		state = STATE_CLOSED;
 		endResolve?.();
-		settleWaiters();
+		settleDrain();
 	};
 
 	// While writev is in-flight, we swap in a fresh array to collect new writes
@@ -123,7 +119,7 @@ export function createFileSink(
 
 		endReject?.(error);
 		// Unblock callers waiting on waitDrain so they surface the same failure.
-		failWaiters(error);
+		settleDrain(error);
 		// We intentionally leave endResolve unset so end() continues to reject.
 	};
 
@@ -168,7 +164,7 @@ export function createFileSink(
 			spare.length = 0; // Reset recycled array so the next flush starts empty.
 
 			// If we drained below the threshold, resolve waiters.
-			if (bytes < BATCH_BYTES) settleWaiters();
+			if (bytes < BUFFER_LIMIT) settleDrain();
 
 			// Otherwise, flush more data if available.
 			if (queue.length > 0) flush();
@@ -203,7 +199,7 @@ export function createFileSink(
 		} else if (bytes >= BATCH_BYTES && !flushing) {
 			flush();
 		} else {
-			settleWaiters();
+			settleDrain();
 		}
 	};
 
@@ -217,7 +213,7 @@ export function createFileSink(
 				? Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)
 				: Buffer.from(chunk);
 
-		if (buf.length === 0) return bytes < BATCH_BYTES;
+		if (buf.length === 0) return bytes < BUFFER_LIMIT;
 
 		queue.push(buf);
 		bytes += buf.length;
@@ -225,19 +221,19 @@ export function createFileSink(
 		if (state === STATE_OPEN && !flushing && bytes >= BATCH_BYTES) flush();
 
 		// Return false to apply backpressure.
-		return bytes < BATCH_BYTES;
+		return bytes < BUFFER_LIMIT;
 	};
 
 	const waitDrain = () => {
 		if (storedError) return Promise.reject(storedError);
 		if (
 			state === STATE_OPENING ||
-			(state === STATE_OPEN && bytes >= BATCH_BYTES)
+			(state === STATE_OPEN && bytes >= BUFFER_LIMIT)
 		)
-			return new Promise<void>((resolve, reject) => {
-				waitResolves.push(resolve);
-				waitRejects.push(reject);
-			});
+			return (drainPromise ??= new Promise<void>((resolve, reject) => {
+				drainResolve = resolve;
+				drainReject = reject;
+			}));
 
 		return DRAINED_PROMISE;
 	};
