@@ -14,6 +14,7 @@ let delayRemove = false;
 let releaseRemove: (() => void) | null = null;
 let openCalls = 0;
 let removeCalls = 0;
+let maxWriteVectors = 0;
 
 vi.mock("node:fs", async () => {
 	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -46,6 +47,10 @@ vi.mock("node:fs", async () => {
 		);
 	};
 	const writev = (...args: unknown[]) => {
+		maxWriteVectors = Math.max(
+			maxWriteVectors,
+			(args[1] as Uint8Array[]).length,
+		);
 		if (nextPartialWrite === null)
 			return Reflect.apply(actual.writev, actual, args);
 		const callback = args.at(-1) as (
@@ -136,6 +141,7 @@ describe("createFileSink", () => {
 		delayRemove = false;
 		openCalls = 0;
 		removeCalls = 0;
+		maxWriteVectors = 0;
 		await rm(testDir, { recursive: true, force: true });
 	});
 
@@ -169,6 +175,20 @@ describe("createFileSink", () => {
 
 		const content = await readFile(filePath, "utf-8");
 		expect(content).toBe("chunk1\nchunk2\nchunk3\n");
+	});
+
+	it("should limit fragmented writev batches", async () => {
+		const filePath = `${testDir}/fragmented.bin`;
+		const stream = createFileSink(filePath);
+		await stream.waitDrain();
+
+		for (let i = 0; i < 4096; i++) {
+			if (!stream.write(Buffer.alloc(64, i & 0xff))) await stream.waitDrain();
+		}
+		await stream.end();
+
+		expect(maxWriteVectors).toBeLessThanOrEqual(1024);
+		expect((await stat(filePath)).size).toBe(4096 * 64);
 	});
 
 	it("should handle empty file (no writes)", async () => {
