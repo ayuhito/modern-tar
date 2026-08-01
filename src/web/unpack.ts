@@ -49,6 +49,7 @@ export function createTarDecoder(
 	let pumping = false;
 	let blocked = false;
 	let resume: (() => void) | null = null;
+	let abortHooked = false;
 	// We can parse the two zero EOF blocks before the writable side actually closes.
 	// Keeping these states separate lets strict mode reject non-zero trailing bytes.
 	let eofReached = false;
@@ -236,7 +237,10 @@ export function createTarDecoder(
 					unpacker.write(chunk);
 					pump();
 					if (blocked && unpacker.available() >= BUFFER_LIMIT) {
-						controller.signal.onabort = unblock;
+						if (!abortHooked) {
+							controller.signal.onabort = unblock;
+							abortHooked = true;
+						}
 						return new Promise<void>((resolve) => (resume = resolve));
 					}
 				} catch (error) {
