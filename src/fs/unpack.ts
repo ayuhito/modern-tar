@@ -74,7 +74,7 @@ export function unpackTar(
 		async write(chunk, _, cb) {
 			// File opens overlap within this write. Every exit reaches `finally`,
 			// which waits for them to settle before calling `cb`.
-			const pendingFileOpens: Promise<Error | undefined>[] = [];
+			let pendingFileOpens: Promise<Error | undefined>[] | undefined;
 			let writeError: Error | undefined;
 			try {
 				unpacker.write(chunk);
@@ -147,7 +147,7 @@ export function unpackTar(
 							},
 							onQueuedError,
 						);
-						pendingFileOpens.push(
+						(pendingFileOpens ??= []).push(
 							currentFileStream.waitDrain().catch((error: Error) => error),
 						);
 
@@ -178,7 +178,7 @@ export function unpackTar(
 			} catch (err) {
 				writeError = err as Error;
 			} finally {
-				const openError = pendingFileOpens.length
+				const openError = pendingFileOpens
 					? (await Promise.all(pendingFileOpens)).find((error) => error)
 					: undefined;
 				cb(openError ?? writeError);

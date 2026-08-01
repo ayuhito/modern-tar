@@ -95,16 +95,6 @@ export function createFileSink(
 		settleDrain();
 	};
 
-	// While writev is in-flight, we swap in a fresh array to collect new writes
-	// to prevent stalling.
-	const swapQueues = () => {
-		const current = queue;
-		queue = spare;
-		spare = current;
-		queue.length = 0;
-		return current;
-	};
-
 	const fail = (error: Error) => {
 		if (storedError) return;
 
@@ -170,7 +160,10 @@ export function createFileSink(
 		if (flushing || queue.length === 0 || state !== STATE_OPEN) return;
 
 		flushing = true;
-		let bufs = swapQueues();
+		let bufs = queue;
+		queue = spare;
+		spare = bufs;
+		queue.length = 0;
 		let pendingBytes = bytes;
 
 		// writev callback is small enough that passing a pre-declared function is slower.
