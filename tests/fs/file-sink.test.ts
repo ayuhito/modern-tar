@@ -209,7 +209,7 @@ describe("createFileSink", () => {
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
-		const oversized = Buffer.alloc(300_000, 0x61); // > 256KB to trip high water mark
+		const oversized = Buffer.alloc(8 * 1024 * 1024 + 1, 0x61);
 		expect(stream.write(oversized)).toBe(false);
 
 		await stream.waitDrain();

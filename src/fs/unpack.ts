@@ -55,7 +55,13 @@ export function unpackTar(
 
 	// Track current file stream across write() calls for handling backpressure
 	let currentFileStream: FileSink | null = null;
-	let currentWriteCallback: ((chunk: Uint8Array) => boolean) | null = null;
+	let needsDrain = false;
+	const writeCurrent = (chunk: Uint8Array) => {
+		// biome-ignore lint/style/noNonNullAssertion: Called only while a file entry is active.
+		const writeOk = currentFileStream!.write(chunk);
+		if (!writeOk) needsDrain = true;
+		return writeOk;
+	};
 	// Detached file closes must still fail extraction if they error later.
 	let queuedError: Error | null = null;
 
@@ -75,28 +81,18 @@ export function unpackTar(
 
 				if (unpacker.isEntryActive()) {
 					// State was saved from previous write call, so continue processing.
-					if (currentFileStream && currentWriteCallback) {
-						let needsDrain = false;
-						const writeCallback = currentWriteCallback;
-
+					if (currentFileStream) {
 						// Handle if body is not yet processed.
 						while (!unpacker.isBodyComplete()) {
 							needsDrain = false;
-							const fed = unpacker.streamBody(writeCallback);
+							const fed = unpacker.streamBody(writeCurrent);
 
-							if (fed === 0) {
-								if (needsDrain) {
-									await currentFileStream.waitDrain();
-								} else {
-									return; // Need more data.
-								}
-							}
+							if (needsDrain) await currentFileStream.waitDrain();
+							else if (fed === 0) return; // Need more data.
 						}
 
 						// Body complete, skip padding.
-						while (!unpacker.skipPadding()) {
-							return;
-						}
+						if (!unpacker.skipPadding()) return;
 
 						// Padding complete, close file.
 						const streamToClose = currentFileStream;
@@ -104,7 +100,6 @@ export function unpackTar(
 							opQueue.add(() => streamToClose.end()).catch(onQueuedError);
 
 						currentFileStream = null;
-						currentWriteCallback = null;
 					} else {
 						// Otherwise, just discard the entry body.
 						if (!unpacker.skipEntry()) {
@@ -144,48 +139,31 @@ export function unpackTar(
 							? transformedHeader.mode & 0o777
 							: undefined;
 
-						const fileStream = createFileSink(outPath, {
+						currentFileStream = createFileSink(outPath, {
 							mode: options.fmode ?? safeMode,
 							mtime: transformedHeader.mtime ?? undefined,
 						});
 						pendingFileOpens.push(
-							fileStream.waitDrain().catch((error: Error) => error),
+							currentFileStream.waitDrain().catch((error: Error) => error),
 						);
 
 						// Stream body from unpacker to file.
-						let needsDrain = false;
-						const writeCallback = (chunk: Uint8Array): boolean => {
-							const writeOk = fileStream.write(chunk);
-							if (!writeOk) needsDrain = true;
-							return writeOk;
-						};
-
 						while (!unpacker.isBodyComplete()) {
 							needsDrain = false;
-							const fed = unpacker.streamBody(writeCallback);
+							const fed = unpacker.streamBody(writeCurrent);
 
-							if (fed === 0) {
-								if (needsDrain) {
-									await fileStream.waitDrain();
-								} else {
-									// Need more data, so save state to continue later.
-									currentFileStream = fileStream;
-									currentWriteCallback = writeCallback;
-									return;
-								}
-							}
+							if (needsDrain) await currentFileStream.waitDrain();
+							else if (fed === 0) return; // Need more data.
 						}
 
 						// Skip padding.
-						while (!unpacker.skipPadding()) {
-							// Need more data, so save state to continue later.
-							currentFileStream = fileStream;
-							currentWriteCallback = writeCallback;
-							return;
-						}
+						if (!unpacker.skipPadding()) return; // Need more data.
 
 						// Close without await.
-						opQueue.add(() => fileStream.end()).catch(onQueuedError);
+						const streamToClose = currentFileStream;
+						if (streamToClose)
+							opQueue.add(() => streamToClose.end()).catch(onQueuedError);
+						currentFileStream = null;
 					} else {
 						// No body data or already handled.
 						if (!unpacker.skipEntry()) {
@@ -230,7 +208,6 @@ export function unpackTar(
 				if (currentFileStream) {
 					currentFileStream.destroy(error ?? undefined);
 					currentFileStream = null;
-					currentWriteCallback = null;
 				}
 
 				// Drain active file operations.
