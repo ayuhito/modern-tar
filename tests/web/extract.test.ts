@@ -376,6 +376,86 @@ describe("createTarDecoder", () => {
 		expect(finalRead.done).toBe(true);
 	});
 
+	it("propagates unread body backpressure and cancellation to the source", async () => {
+		const body = new Uint8Array(8 * 1024 * 1024).fill(97);
+		const archive = await createBaseArchive([
+			{
+				header: { name: "large.bin", type: "file", size: body.length },
+				body,
+			},
+		]);
+		const chunkSize = 64 * 1024;
+		let pulledChunks = 0;
+		let offset = 0;
+		let cancelSource!: () => void;
+		const sourceCanceled = new Promise<void>((resolve) => {
+			cancelSource = resolve;
+		});
+		const source = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (offset >= archive.length) return controller.close();
+				pulledChunks++;
+				controller.enqueue(archive.subarray(offset, offset + chunkSize));
+				offset += chunkSize;
+			},
+			cancel: () => cancelSource(),
+		});
+		const reader = source.pipeThrough(createTarDecoder()).getReader();
+		const result = await reader.read();
+		if (!result.value) throw new Error("Expected first entry");
+		const bodyReader = result.value.body.getReader();
+
+		await expectToStayPending(bodyReader.closed);
+		const pulledBeforeCancel = pulledChunks;
+		await reader.cancel();
+		await readWithTimeout(
+			sourceCanceled,
+			"Timed out waiting for source cancellation",
+		);
+
+		const maxBufferedChunks = (1024 * 1024) / chunkSize;
+		expect(pulledBeforeCancel).toBeLessThanOrEqual(maxBufferedChunks + 2);
+	});
+
+	it("aborts while an unread body backpressures the writable side", async () => {
+		const body = new Uint8Array(2 * 1024 * 1024).fill(97);
+		const archive = await createBaseArchive([
+			{
+				header: { name: "large.bin", type: "file", size: body.length },
+				body,
+			},
+		]);
+		const chunkSize = 64 * 1024;
+		const decoder = createTarDecoder();
+		const reader = decoder.readable.getReader();
+		const writer = decoder.writable.getWriter();
+
+		await writer.write(archive.subarray(0, chunkSize));
+		const result = await readWithTimeout(
+			reader.read(),
+			"Timed out waiting for entry before abort",
+		);
+		if (!result.value) throw new Error("Expected first entry");
+		const readerClosed = reader.closed.then(
+			() => null,
+			(error) => error,
+		);
+
+		const writes: Promise<void>[] = [];
+		for (let offset = chunkSize; offset < archive.length; offset += chunkSize)
+			writes.push(writer.write(archive.subarray(offset, offset + chunkSize)));
+		const writesSettled = Promise.allSettled(writes);
+		await expectToStayPending(writesSettled);
+
+		const reason = new Error("Abort decoder");
+		await readWithTimeout(
+			writer.abort(reason),
+			"Timed out aborting backpressured decoder",
+		);
+		await writesSettled;
+		expect(await readerClosed).toBe(reason);
+	});
+
 	it("continues serving buffered headers before the source closes", async () => {
 		const archive = await createBaseArchive([
 			{ header: { name: "one/", type: "directory", size: 0 } },
