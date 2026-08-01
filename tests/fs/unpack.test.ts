@@ -106,6 +106,9 @@ describe("extract", () => {
 	});
 
 	afterEach(async () => {
+		mkdirDelay = null;
+		releaseMkdir?.();
+		releaseMkdir = null;
 		afterSymlinkRm = null;
 		beforeLink = null;
 		afterLinkExists = null;
@@ -220,7 +223,9 @@ describe("extract", () => {
 		interceptWrite = null;
 		releaseWrite = null;
 		release?.();
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await vi.waitFor(async () => {
+			expect((await fs.stat(path.join(destDir, "detached.bin"))).size).toBe(0);
+		});
 	});
 
 	it("does not open an entry after path preparation is cancelled", async () => {

@@ -35,6 +35,7 @@ type SinkState =
 	| typeof STATE_FAILED;
 
 const DRAINED_PROMISE: Promise<void> = Promise.resolve();
+const discardFile = (fd: number) => fs.ftruncate(fd, 0, () => fs.close(fd));
 
 /**
  * Creates a lightweight file writer for tar extraction.
@@ -58,6 +59,7 @@ export function createFileSink(
 	let spare: Buffer[] = []; // Recycled array swapped in while writev is in flight.
 	let bytes = 0;
 	let storedError: Error | null = null;
+	let failedFd: number | null = null;
 
 	// Used to track end() state.
 	let endPromise: Promise<void> | null = null;
@@ -86,6 +88,7 @@ export function createFileSink(
 	};
 
 	const finish = () => {
+		if (state === STATE_FAILED) return;
 		state = STATE_CLOSED;
 		endResolve?.();
 		settleDrain();
@@ -107,15 +110,18 @@ export function createFileSink(
 		// After a write() failure we block all further writes to keep the state consistent.
 		storedError = error;
 		state = STATE_FAILED;
+		const writePending = flushing;
 		resetBuffers();
-		flushing = false;
 
 		const fdToClose = fd;
 		fd = null;
 
 		// Hard-fail truncation keeps partially written files from leaking on disk.
-		if (fdToClose !== null)
-			fs.ftruncate(fdToClose, 0, () => fs.close(fdToClose));
+		if (fdToClose !== null) {
+			if (writePending) failedFd = fdToClose;
+			else discardFile(fdToClose);
+		}
+		flushing = false;
 
 		endReject?.(error);
 		// Unblock callers waiting on waitDrain so they surface the same failure.
@@ -135,14 +141,23 @@ export function createFileSink(
 		if (mtime) {
 			// Apply mtime before closing so corpus diffing stays deterministic.
 			fs.futimes(fdToClose, mtime, mtime, (err) => {
-				if (err) return fail(err);
+				if (state !== STATE_OPEN) {
+					fs.close(fdToClose);
+					return;
+				}
+				if (err) {
+					fs.close(fdToClose, () => fail(err));
+					return;
+				}
 				fs.close(fdToClose, (closeErr) => {
+					if (state !== STATE_OPEN) return;
 					if (closeErr) fail(closeErr);
 					else finish();
 				});
 			});
 		} else {
 			fs.close(fdToClose, (err) => {
+				if (state !== STATE_OPEN) return;
 				if (err) fail(err);
 				else finish();
 			});
@@ -153,16 +168,51 @@ export function createFileSink(
 		if (flushing || queue.length === 0 || state !== STATE_OPEN) return;
 
 		flushing = true;
-		const bufs = swapQueues();
+		let bufs = swapQueues();
+		let pendingBytes = bytes;
 
 		// writev callback is small enough that passing a pre-declared function is slower.
 		const onDone = (err: Error | null, written = 0) => {
-			if (err) return fail(err);
+			if (state !== STATE_OPEN) {
+				if (failedFd !== null) {
+					const fdToClose = failedFd;
+					failedFd = null;
+					discardFile(fdToClose);
+				}
+				return;
+			}
+			if (err) {
+				flushing = false;
+				fail(err);
+				return;
+			}
+			if (written <= 0 || written > pendingBytes) {
+				flushing = false;
+				fail(new Error("File write made no progress."));
+				return;
+			}
+
+			bytes -= written;
+			pendingBytes -= written;
+			if (pendingBytes > 0) {
+				let skipped = written;
+				let index = 0;
+				while (skipped >= bufs[index].length) skipped -= bufs[index++].length;
+				bufs = bufs.slice(index);
+				if (skipped > 0) bufs[0] = bufs[0].subarray(skipped);
+				if (bufs.length === 1) {
+					const buf = bufs[0];
+					// biome-ignore lint/style/noNonNullAssertion: Checked before flushing.
+					fs.write(fd!, buf, 0, buf.length, null, onDone);
+				} else {
+					// biome-ignore lint/style/noNonNullAssertion: Checked before flushing.
+					fs.writev(fd!, bufs, onDone);
+				}
+				return;
+			}
 
 			flushing = false;
-			bytes -= written;
 			spare.length = 0; // Reset recycled array so the next flush starts empty.
-
 			// If we drained below the threshold, resolve waiters.
 			if (bytes < BUFFER_LIMIT) settleDrain();
 
@@ -173,10 +223,10 @@ export function createFileSink(
 
 		if (bufs.length === 1) {
 			const buf = bufs[0];
-			// biome-ignore lint/style/noNonNullAssertion: Checked above.
+			// biome-ignore lint/style/noNonNullAssertion: Checked before flushing.
 			fs.write(fd!, buf, 0, buf.length, null, onDone);
 		} else {
-			// biome-ignore lint/style/noNonNullAssertion: Checked above.
+			// biome-ignore lint/style/noNonNullAssertion: Checked before flushing.
 			fs.writev(fd!, bufs, onDone);
 		}
 	};
@@ -282,7 +332,7 @@ export function createFileSink(
 
 	// Open immediately so callers can await waitDrain() before writing body data.
 	fs.open(path, CREATE_FLAGS, mode, (err, openFd) => {
-		if (!err || err.code !== "EEXIST") return onOpen(err, openFd);
+		if (err?.code !== "EEXIST") return onOpen(err, openFd);
 		fs.rm(path, { force: true }, (rmErr) => {
 			if (rmErr) return fail(rmErr);
 			fs.open(path, CREATE_FLAGS, mode, onOpen);
