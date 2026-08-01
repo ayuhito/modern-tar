@@ -47,15 +47,11 @@ export function unpackTar(
 	const concurrency = options.concurrency || cpus().length || 8;
 	const opQueue = createOperationQueue(concurrency);
 	let cancelError: Error | null = null;
-	const checkCancelled = () => {
-		if (cancelError) throw cancelError;
-	};
 	const pathCache = createPathCache(
 		directoryPath,
 		options,
 		opQueue,
 		concurrency,
-		checkCancelled,
 	);
 
 	// Track current file stream across write() calls for handling backpressure
@@ -94,7 +90,6 @@ export function unpackTar(
 			let pendingFileOpens: Promise<Error | undefined>[] | undefined;
 			let writeError: Error | undefined;
 			try {
-				checkCancelled();
 				unpacker.write(chunk);
 
 				if (unpacker.isEntryActive()) {
@@ -105,10 +100,8 @@ export function unpackTar(
 							needsDrain = false;
 							const fed = unpacker.streamBody(writeCurrent);
 
-							if (needsDrain) {
-								await currentFileStream.waitDrain();
-								checkCancelled();
-							} else if (fed === 0) return; // Need more data.
+							if (needsDrain) await currentFileStream.waitDrain();
+							else if (fed === 0) return; // Need more data.
 						}
 
 						// Body complete, skip padding.
@@ -147,7 +140,7 @@ export function unpackTar(
 					const outPath = await opQueue.add(() =>
 						pathCache.preparePath(transformedHeader),
 					);
-					checkCancelled();
+					if (cancelError) throw cancelError;
 
 					// Only file entries return a path for streaming.
 					if (outPath) {
@@ -174,10 +167,8 @@ export function unpackTar(
 							needsDrain = false;
 							const fed = unpacker.streamBody(writeCurrent);
 
-							if (needsDrain) {
-								await currentFileStream.waitDrain();
-								checkCancelled();
-							} else if (fed === 0) return; // Need more data.
+							if (needsDrain) await currentFileStream.waitDrain();
+							else if (fed === 0) return; // Need more data.
 						}
 
 						// Skip padding.
@@ -211,7 +202,7 @@ export function unpackTar(
 				await pathCache.ready();
 				// Wait for all file ops to complete.
 				await opQueue.onIdle();
-				checkCancelled();
+				if (cancelError) throw cancelError;
 				// Validate symlink targets after all archive-created symlinks exist.
 				await pathCache.checkSymlinks();
 				// Now that all files are written, create the hardlinks.

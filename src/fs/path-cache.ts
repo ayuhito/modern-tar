@@ -30,7 +30,6 @@ export const createPathCache = (
 	options: UnpackOptionsFS,
 	opQueue: ReturnType<typeof createOperationQueue>,
 	concurrency: number,
-	checkCancelled: () => void,
 ) => {
 	const { maxDepth = 1024, dmode } = options;
 	// Serializes directory creation operations within the same directory tree.
@@ -56,9 +55,7 @@ export const createPathCache = (
 				if (parentDir === symbolic) throw err;
 
 				// Ensure parent exists, then retry creating target directory.
-				checkCancelled();
 				await fs.mkdir(parentDir, { recursive: true });
-				checkCancelled();
 				await fs.mkdir(symbolic, { recursive: true });
 			} else {
 				throw err;
@@ -91,7 +88,6 @@ export const createPathCache = (
 		errorMessage: string,
 	): Promise<string> => {
 		const destDir = await destDirPromise;
-		checkCancelled();
 
 		// If it's the destination directory itself, we can skip realpath call.
 		if (dirPath === destDir.symbolic) return destDir.real;
@@ -107,9 +103,7 @@ export const createPathCache = (
 			realDirCache.set(dirPath, promise);
 		}
 
-		const realPath = await promise;
-		checkCancelled();
-		return realPath;
+		return promise;
 	};
 
 	// Ensures a directory exists.
@@ -120,22 +114,16 @@ export const createPathCache = (
 	): Promise<void> => {
 		// Return existing promise if directory creation is already in progress.
 		let promise = dirPromises.get(dirPath);
-		if (promise) {
-			await promise;
-			checkCancelled();
-			return;
-		}
+		if (promise) return promise;
 
 		promise = (async () => {
 			const destDir = await destDirPromise;
-			checkCancelled();
 
 			// Skip if it's the destination directory (already exists).
 			if (dirPath === destDir.symbolic) return;
 
 			// Recursively ensure parent directory exists first.
 			await prepareDirectory(path.dirname(dirPath));
-			checkCancelled();
 
 			try {
 				const stat = await fs.lstat(dirPath);
@@ -169,7 +157,6 @@ export const createPathCache = (
 			} catch (err: unknown) {
 				if ((err as NodeJS.ErrnoException).code === ENOENT) {
 					// Path does not exist.
-					checkCancelled();
 					await fs.mkdir(dirPath, { mode: mode ?? options.dmode });
 					return;
 				}
@@ -190,7 +177,6 @@ export const createPathCache = (
 		 */
 		async ready(): Promise<void> {
 			await destDirPromise;
-			checkCancelled();
 		},
 		/**
 		 * Prepares a filesystem path for extraction based on TAR header.
@@ -199,12 +185,10 @@ export const createPathCache = (
 		 * @returns The output path if the entry is a file that needs to be streamed.
 		 */
 		async preparePath(header: TarHeader): Promise<string | undefined> {
-			checkCancelled();
 			const { name, linkname, type, mode, mtime } = header;
 
 			const normalizedName = normalizeHeaderName(name);
 			const destDir = await destDirPromise;
-			checkCancelled();
 			const outPath = path.join(destDir.symbolic, normalizedName);
 
 			// Enforce maximum directory depth to prevent DoS attacks.
@@ -242,12 +226,10 @@ export const createPathCache = (
 					await prepareDirectory(outPath, dmode ?? safeMode);
 
 					// Set directory modification time.
-					if (mtime) {
-						checkCancelled();
+					if (mtime)
 						await fs.lutimes(outPath, mtime, mtime).catch(() => {
 							// Skip errors.
 						});
-					}
 
 					return;
 				}
@@ -255,7 +237,6 @@ export const createPathCache = (
 				case FILE: {
 					pathConflicts.set(normalizedName, FILE);
 					await prepareDirectory(parentDir);
-					checkCancelled();
 					// Anchor the file to its validated real parent before its open
 					// overlaps later entries.
 					return path.join(
@@ -281,11 +262,9 @@ export const createPathCache = (
 					);
 
 					await prepareDirectory(parentDir);
-					checkCancelled();
 
 					// Reject parent swaps between leaf removal and link creation.
 					const realParentDir = await fs.realpath(parentDir);
-					checkCancelled();
 					validateBounds(
 						realParentDir,
 						destDir.real,
@@ -302,27 +281,21 @@ export const createPathCache = (
 						await fs.symlink(linkname, realOutPath);
 					} catch (err) {
 						if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-						checkCancelled();
 						await fs.rm(realOutPath, { force: true });
-						checkCancelled();
 						if ((await fs.realpath(parentDir)) !== realParentDir)
 							throw new Error("Symlink parent changed.");
-						checkCancelled();
 						await fs.symlink(linkname, realOutPath);
 					}
-					checkCancelled();
 					(symlinks ??= []).push([normalizedName, linkname]);
 					// A symlink can change the meaning of any cached descendant path.
 					dirPromises.clear();
 					realDirCache.clear();
 
 					// Set symlink modification time.
-					if (mtime) {
-						checkCancelled();
+					if (mtime)
 						await fs.lutimes(outPath, mtime, mtime).catch(() => {
 							// Skip errors.
 						});
-					}
 
 					return;
 				}
@@ -349,7 +322,6 @@ export const createPathCache = (
 
 					// Defer hardlink creation until after all files are written.
 					await prepareDirectory(parentDir);
-					checkCancelled();
 					if (linkTarget !== outPath) {
 						deferredLinks.push({ linkTarget, outPath });
 					}
@@ -370,11 +342,9 @@ export const createPathCache = (
 		 * entry creates another symlink.
 		 */
 		async checkSymlinks() {
-			checkCancelled();
 			if (!symlinks) return;
 
 			const { symbolic: dest, real } = await destDirPromise;
-			checkCancelled();
 			// realpath results are canonical, so reuse one boundary prefix instead of
 			// resolving both paths again for every symlink.
 			const realPrefix = real + path.sep;
@@ -454,12 +424,10 @@ export const createPathCache = (
 
 			// Validate concurrently without queuing the entire archive at once.
 			for (let start = 0; start < symlinks.length; start += concurrency) {
-				checkCancelled();
 				const batch = symlinks.slice(start, start + concurrency);
 				const errors = await Promise.all(
 					batch.map((symlink) => opQueue.add(() => getSymlinkError(symlink))),
 				);
-				checkCancelled();
 				for (const [i, error] of errors.entries()) {
 					if (error === undefined) continue;
 					await fs.rm(path.join(dest, batch[i][0]), { force: true });
@@ -473,13 +441,10 @@ export const createPathCache = (
 		 * This ensures hardlink targets exist before creating the links.
 		 */
 		async applyLinks() {
-			checkCancelled();
 			const destRoot = (await destDirPromise).real;
-			checkCancelled();
 			for (const { linkTarget, outPath } of deferredLinks) {
 				try {
 					const realTargetDir = await fs.realpath(path.dirname(linkTarget));
-					checkCancelled();
 					validateBounds(
 						realTargetDir,
 						destRoot,
@@ -495,7 +460,6 @@ export const createPathCache = (
 						opQueue.add(() => fs.lstat(realTarget)),
 						opQueue.add(() => fs.realpath(path.dirname(outPath))),
 					]);
-					checkCancelled();
 					if (targetResult.status === "rejected") throw targetResult.reason;
 					const targetStat = targetResult.value;
 					if (targetStat.isSymbolicLink())
@@ -518,7 +482,6 @@ export const createPathCache = (
 
 						try {
 							const outStat = await fs.lstat(realOutPath);
-							checkCancelled();
 							if (
 								outStat.dev === targetStat.dev &&
 								outStat.ino === targetStat.ino
@@ -529,12 +492,10 @@ export const createPathCache = (
 							if ((err as NodeJS.ErrnoException).code !== ENOENT) throw err;
 						}
 
-						checkCancelled();
 						await fs.link(realTarget, realOutPath);
 					}
 
 					const linkStat = await fs.lstat(realOutPath);
-					checkCancelled();
 					if (
 						linkStat.dev !== targetStat.dev ||
 						linkStat.ino !== targetStat.ino

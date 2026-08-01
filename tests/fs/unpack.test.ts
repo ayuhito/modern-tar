@@ -11,12 +11,9 @@ const originalFs =
 let mkdirDelay: Promise<void> | null = null;
 let releaseMkdir: (() => void) | null = null;
 let finishDelayedMkdir: (() => void) | null = null;
-let beforeMkdir: ((target: string) => Promise<void>) | null = null;
 let afterSymlinkRm: (() => Promise<void>) | null = null;
 let beforeLink: (() => Promise<void>) | null = null;
 let afterLinkExists: (() => Promise<void>) | null = null;
-let beforeLstat: ((target: string) => Promise<void>) | null = null;
-let releaseLstat: (() => void) | null = null;
 let interceptOpen: ((target: string, run: () => void) => boolean) | null = null;
 let releaseOpen: (() => void) | null = null;
 let interceptWrite:
@@ -61,7 +58,6 @@ vi.mock("node:fs/promises", async () => {
 					target: string,
 					options?: Parameters<typeof actual.mkdir>[1],
 				) => {
-					await beforeMkdir?.(String(target));
 					const delayed = Boolean(
 						mkdirDelay && target.includes("delayed-extracted"),
 					);
@@ -71,10 +67,6 @@ vi.mock("node:fs/promises", async () => {
 					return result;
 				},
 			),
-		lstat: async (...args: Parameters<typeof actual.lstat>) => {
-			await beforeLstat?.(String(args[0]));
-			return actual.lstat(...args);
-		},
 		rm: async (...args: Parameters<typeof actual.rm>) => {
 			const result = await actual.rm(...args);
 			if (String(args[0]).endsWith(`${path.sep}link.txt`))
@@ -113,15 +105,11 @@ describe("extract", () => {
 
 	afterEach(async () => {
 		mkdirDelay = null;
-		beforeMkdir = null;
 		releaseMkdir?.();
 		releaseMkdir = null;
 		afterSymlinkRm = null;
 		beforeLink = null;
 		afterLinkExists = null;
-		beforeLstat = null;
-		releaseLstat?.();
-		releaseLstat = null;
 		releaseOpen?.();
 		interceptOpen = null;
 		releaseOpen = null;
@@ -293,93 +281,6 @@ describe("extract", () => {
 		mkdirDelay = null;
 		releaseMkdir = null;
 	});
-
-	it("does not retry destination creation after cancellation", async () => {
-		const archive = await packTarWeb([
-			{
-				header: { name: "late.txt", type: "file", size: 4 },
-				body: "late",
-			},
-		]);
-		const destDir = path.join(tmpDir, "retry-cancelled", "dest");
-		const mkdirTargets: string[] = [];
-		let releaseFirstMkdir: (() => void) | null = null;
-		let finishFirstMkdir: (() => void) | null = null;
-		const firstMkdirStarted = new Promise<void>((resolveStarted) => {
-			beforeMkdir = async (target) => {
-				mkdirTargets.push(target);
-				if (mkdirTargets.length !== 1) return;
-				resolveStarted();
-				await new Promise<void>((resolve) => {
-					releaseFirstMkdir = resolve;
-				});
-				finishFirstMkdir?.();
-				throw Object.assign(new Error("parent removed"), { code: "ENOENT" });
-			};
-		});
-		const firstMkdirFinished = new Promise<void>((resolve) => {
-			finishFirstMkdir = resolve;
-		});
-		const unpackStream = unpackTar(destDir);
-		const extraction = pipeline(Readable.from([archive]), unpackStream);
-		await firstMkdirStarted;
-
-		const cancelError = new Error("cancel destination retry");
-		unpackStream.destroy(cancelError);
-		await expect(extraction).rejects.toBe(cancelError);
-		releaseFirstMkdir?.();
-		await firstMkdirFinished;
-		await new Promise<void>((resolve) => setImmediate(resolve));
-
-		expect(mkdirTargets).toEqual([destDir]);
-		await expect(fs.access(destDir)).rejects.toThrow();
-	});
-
-	it.skipIf(process.platform === "win32")(
-		"does not apply deferred hardlinks after cancellation",
-		async () => {
-			const archive = await packTarWeb([
-				{
-					header: { name: "target.txt", type: "file", size: 6 },
-					body: "target",
-				},
-				{
-					header: {
-						name: "late-link.txt",
-						type: "link",
-						size: 0,
-						linkname: "target.txt",
-					},
-				},
-			]);
-			const destDir = path.join(tmpDir, "cancelled-links");
-			const targetPath = path.join(destDir, "target.txt");
-			const lstatStarted = new Promise<void>((resolveStarted) => {
-				beforeLstat = async (target) => {
-					if (path.basename(target) !== path.basename(targetPath)) return;
-					beforeLstat = null;
-					resolveStarted();
-					await new Promise<void>((resolve) => {
-						releaseLstat = resolve;
-					});
-				};
-			});
-			const unpackStream = unpackTar(destDir);
-			const extraction = pipeline(Readable.from([archive]), unpackStream);
-			await lstatStarted;
-
-			const cancelError = new Error("cancel deferred links");
-			unpackStream.destroy(cancelError);
-			await expect(extraction).rejects.toBe(cancelError);
-			releaseLstat?.();
-			releaseLstat = null;
-			await new Promise<void>((resolve) => setImmediate(resolve));
-
-			await expect(
-				fs.access(path.join(destDir, "late-link.txt")),
-			).rejects.toThrow();
-		},
-	);
 
 	it("strips path components on extract", async () => {
 		const sourceDir = path.join(FIXTURES_DIR, "b");
