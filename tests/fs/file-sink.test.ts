@@ -1,7 +1,24 @@
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFileSink } from "../../src/fs/file-sink";
+
+let nextWriteError: Error | null = null;
+
+vi.mock("node:fs", async () => {
+	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+	const write = (...args: unknown[]) => {
+		const error = nextWriteError;
+		if (!error) return Reflect.apply(actual.write, actual, args);
+		nextWriteError = null;
+		const callback = args.at(-1) as (error: Error, written: number) => void;
+		queueMicrotask(() => callback(error, 0));
+	};
+	return {
+		...actual,
+		write: write as typeof actual.write,
+	};
+});
 
 describe("createFileSink", () => {
 	const testDir = "tests/fixtures/file-sink";
@@ -11,6 +28,7 @@ describe("createFileSink", () => {
 	});
 
 	afterEach(async () => {
+		nextWriteError = null;
 		await rm(testDir, { recursive: true, force: true });
 	});
 
@@ -199,6 +217,20 @@ describe("createFileSink", () => {
 
 		const content = await readFile(filePath, "utf-8");
 		expect(content.length).toBe(oversized.length);
+	});
+
+	it("should preserve an asynchronous write error", async () => {
+		const filePath = `${testDir}/write-error.txt`;
+		const stream = createFileSink(filePath);
+		await stream.waitDrain();
+
+		const writeError = new Error("disk write failed");
+		nextWriteError = writeError;
+		stream.write(Buffer.alloc(256 * 1024));
+		await Promise.resolve();
+
+		await expect(stream.waitDrain()).rejects.toBe(writeError);
+		await expect(stream.end()).rejects.toBe(writeError);
 	});
 
 	it("should handle mtime option with fs.futimes", async () => {

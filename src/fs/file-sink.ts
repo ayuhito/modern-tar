@@ -229,6 +229,7 @@ export function createFileSink(
 	};
 
 	const waitDrain = () => {
+		if (storedError) return Promise.reject(storedError);
 		if (
 			state === STATE_OPENING ||
 			(state === STATE_OPEN && bytes >= BATCH_BYTES)
@@ -242,8 +243,8 @@ export function createFileSink(
 	};
 
 	const end = (): Promise<void> => {
-		if (state >= STATE_CLOSED) return DRAINED_PROMISE;
 		if (storedError) return Promise.reject(storedError);
+		if (state >= STATE_CLOSED) return DRAINED_PROMISE;
 		if (endPromise) return endPromise;
 
 		endPromise = new Promise((resolve, reject) => {
