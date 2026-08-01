@@ -198,6 +198,8 @@ export function unpackTar(
 				// Close out remaining buffered data and flush the async operation queue.
 				unpacker.end();
 				unpacker.validateEOF();
+				// Non-strict archives may end mid-entry, so flush the bytes received.
+				if (currentFileStream) closeCurrent();
 				// Ensure all paths are prepared before cleanup.
 				await pathCache.ready();
 				// Wait for all file ops to complete.
