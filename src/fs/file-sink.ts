@@ -15,6 +15,7 @@ export interface FileSink {
 /** Flush and backpressure thresholds for bounded, overlapping writes. */
 const BATCH_BYTES = 256 * 1024;
 const BUFFER_LIMIT = 8 * 1024 * 1024;
+const MAX_WRITE_VECTORS = 1024;
 const OPEN_FLAGS =
 	fs.constants.O_WRONLY |
 	fs.constants.O_CREAT |
@@ -241,7 +242,7 @@ export function createFileSink(
 			// end() ran before open() resolved, so finish work immediately.
 			if (queue.length > 0) flush();
 			else close();
-		} else if (bytes >= BATCH_BYTES) {
+		} else if (bytes >= BATCH_BYTES || queue.length >= MAX_WRITE_VECTORS) {
 			flush();
 		} else {
 			settleDrain();
@@ -254,17 +255,23 @@ export function createFileSink(
 		queue.push(chunk);
 		bytes += chunk.length;
 
-		if (state === STATE_OPEN && !flushing && bytes >= BATCH_BYTES) flush();
+		if (
+			state === STATE_OPEN &&
+			!flushing &&
+			(bytes >= BATCH_BYTES || queue.length >= MAX_WRITE_VECTORS)
+		)
+			flush();
 
 		// Return false to apply backpressure.
-		return bytes < BUFFER_LIMIT;
+		return bytes < BUFFER_LIMIT && queue.length < MAX_WRITE_VECTORS;
 	};
 
 	const waitDrain = () => {
 		if (storedError) return Promise.reject(storedError);
 		if (
 			state === STATE_OPENING ||
-			(state === STATE_OPEN && bytes >= BUFFER_LIMIT)
+			(state === STATE_OPEN &&
+				(bytes >= BUFFER_LIMIT || queue.length >= MAX_WRITE_VECTORS))
 		)
 			return (drainPromise ??= new Promise<void>((resolve, reject) => {
 				drainResolve = resolve;
