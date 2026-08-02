@@ -6,7 +6,7 @@ import { packTar, unpackTar } from "../../src/web/helpers";
 import { it } from "../helpers/test";
 
 describe("repack", () => {
-	it("successfully repacks unpacked entries", async ({ tempDir }) => {
+	it("successfully repacks unpacked entries", async ({ tmpDir }) => {
 		const originalEntries = [
 			{
 				header: { name: "example.txt", size: 11, type: "file" as const },
@@ -22,7 +22,7 @@ describe("repack", () => {
 		];
 
 		const archive = await packTar(originalEntries);
-		const tempPath = join(tempDir, "test-repack.tar");
+		const tempPath = join(tmpDir, "test-repack.tar");
 		await writeFile(tempPath, archive);
 
 		// Original workflow that was failing
