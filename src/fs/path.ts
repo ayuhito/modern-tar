@@ -55,5 +55,5 @@ export function normalizeName(name: string): string {
 
 // Normalizes a header name without changing its Unicode spelling.
 export const normalizeHeaderName = (s: string) =>
-	// Strip trailing slashes.
-	normalizeName(s.replace(/\/+$/, ""));
+	// Strip trailing separators.
+	normalizeName(s.replace(/[\\/]+$/, ""));

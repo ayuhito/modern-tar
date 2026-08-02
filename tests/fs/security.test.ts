@@ -2153,52 +2153,53 @@ describe("security", () => {
 	);
 
 	describe("path collision and concurrency edge cases", () => {
-		it("handles directory then file with same normalized path", async ({
-			tmpDir,
-		}) => {
-			const extractDir = path.join(tmpDir, "extract");
-			await fs.mkdir(extractDir, { recursive: true });
+		it.for([{ directoryName: "config/" }, { directoryName: "config\\" }])(
+			"rejects a $directoryName directory followed by a file at the same normalized path",
+			async ({ directoryName }, { tmpDir }) => {
+				const extractDir = path.join(tmpDir, "extract");
+				await fs.mkdir(extractDir, { recursive: true });
 
-			const entries: TarEntry[] = [
-				{
-					header: {
-						name: "config/",
-						size: 0,
-						type: "directory",
-						mode: 0o755,
-						mtime: new Date(),
-						uid: 0,
-						gid: 0,
+				const entries: TarEntry[] = [
+					{
+						header: {
+							name: directoryName,
+							size: 0,
+							type: "directory",
+							mode: 0o755,
+							mtime: new Date(),
+							uid: 0,
+							gid: 0,
+						},
 					},
-				},
-				{
-					header: {
-						name: "config", // Same path without trailing slash
-						size: 4,
-						type: "file",
-						mode: 0o644,
-						mtime: new Date(),
-						uid: 0,
-						gid: 0,
+					{
+						header: {
+							name: "config", // Same path without trailing slash
+							size: 4,
+							type: "file",
+							mode: 0o644,
+							mtime: new Date(),
+							uid: 0,
+							gid: 0,
+						},
+						body: "test",
 					},
-					body: "test",
-				},
-			];
+				];
 
-			const tarBuffer = await packTar(entries);
-			const maliciousTar = Readable.from([tarBuffer]);
-			const unpackStream = unpackTar(extractDir);
+				const tarBuffer = await packTar(entries);
+				const maliciousTar = Readable.from([tarBuffer]);
+				const unpackStream = unpackTar(extractDir);
 
-			// Should reject due to path conflict
-			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-				/Path conflict/,
-			);
+				// Should reject due to path conflict
+				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
+					/Path conflict/,
+				);
 
-			// Directory should still exist (first entry wins)
-			const configPath = path.join(extractDir, "config");
-			const stats = await fs.stat(configPath);
-			expect(stats.isDirectory()).toBe(true);
-		});
+				// Directory should still exist (first entry wins)
+				const configPath = path.join(extractDir, "config");
+				const stats = await fs.stat(configPath);
+				expect(stats.isDirectory()).toBe(true);
+			},
+		);
 
 		it("handles file then directory with same normalized path", async ({
 			tmpDir,
