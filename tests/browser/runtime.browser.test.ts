@@ -2,6 +2,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
 import { chunkBytes } from "../helpers/bytes";
 
+const TSGO_WASM_URL = new URL(
+	"../web/fixtures/tsgo-wasm-2025.12.7.tgz",
+	import.meta.url,
+).href;
+
 let archive: Uint8Array<ArrayBuffer>;
 
 beforeAll(async () => {
@@ -77,5 +82,23 @@ describe("browser runtime", () => {
 
 		expect(wasm.header.name).toBe("module.wasm");
 		expect(new TextDecoder().decode(wasm.data)).toBe("wasm!!");
+	});
+
+	it("streams a real gzip package through strip and filter", {
+		timeout: 60_000,
+	}, async () => {
+		const response = await fetch(TSGO_WASM_URL);
+		if (!response.body) throw new Error("Expected response body");
+
+		const [wasm] = await unpackTar(
+			response.body.pipeThrough(new DecompressionStream("gzip")),
+			{
+				strip: 1,
+				filter: (header) => header.name === "tsgo.wasm",
+			},
+		);
+
+		expect(wasm.header.name).toBe("tsgo.wasm");
+		expect(wasm.data?.length).toBeGreaterThan(0);
 	});
 });
