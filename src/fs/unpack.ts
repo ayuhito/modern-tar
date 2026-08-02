@@ -87,7 +87,8 @@ export function unpackTar(
 		async write(chunk, _, cb) {
 			// File opens overlap within this write. Every exit reaches `finally`,
 			// which waits for them to settle before calling `cb`.
-			let pendingFileOpens: Promise<Error | undefined>[] | undefined;
+			// biome-ignore lint/suspicious/noConfusingVoidType: Promise<void> resolves with undefined at runtime.
+			let pendingFileOpens: Promise<Error | void>[] | undefined;
 			let writeError: Error | undefined;
 			try {
 				unpacker.write(chunk);
@@ -159,10 +160,7 @@ export function unpackTar(
 						);
 						fileStreams.add(currentFileStream);
 						(pendingFileOpens ??= []).push(
-							currentFileStream.waitDrain().then(
-								() => undefined,
-								(error: Error) => error,
-							),
+							currentFileStream.waitDrain().catch((error: Error) => error),
 						);
 
 						// Stream body from unpacker to file.
