@@ -2,8 +2,7 @@
 	"extends": "./tsconfig.base.json",
 	"compilerOptions": {
 		"lib": ["ES2023"],
-		"types": []
+		"types": ["node"]
 	},
-	"files": ["node_modules/node-types-18/index.d.ts"],
 	"include": ["src/fs/**/*.ts", "src/tar/**/*.ts"]
 }

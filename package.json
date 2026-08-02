@@ -40,7 +40,6 @@
 		"@vitest/browser-playwright": "4.1.10",
 		"@vitest/coverage-v8": "4.1.10",
 		"miniflare": "4.20260730.0",
-		"node-types-18": "npm:@types/node@18.19.130",
 		"playwright": "1.62.1",
 		"publint": "0.3.22",
 		"tsdown": "0.22.14",
