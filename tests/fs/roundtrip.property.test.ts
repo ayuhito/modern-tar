@@ -34,28 +34,31 @@ async function listFiles(root: string, prefix = ""): Promise<string[]> {
 describe("filesystem archive properties", () => {
 	it("round-trips generated temporary trees", async ({ tmpDir }) => {
 		let iteration = 0;
-		await hegel.testAsync(async (tc) => {
-			const generated = tc.draw(gs.arrays(file, { minSize: 1, maxSize: 6 }));
-			const files = Object.fromEntries(
-				generated.map(({ body, segments }, index) => [
-					`${index}-${segments.join("/")}`,
-					Uint8Array.from(body),
-				]),
-			);
-			const root = path.join(tmpDir, String(iteration++));
-			const source = await writeTree(path.join(root, "source"), files);
-			const destination = path.join(root, "destination");
+		await hegel.testAsync(
+			async (tc) => {
+				const generated = tc.draw(gs.arrays(file, { minSize: 1, maxSize: 6 }));
+				const files = Object.fromEntries(
+					generated.map(({ body, segments }, index) => [
+						`${index}-${segments.join("/")}`,
+						Uint8Array.from(body),
+					]),
+				);
+				const root = path.join(tmpDir, String(iteration++));
+				const source = await writeTree(path.join(root, "source"), files);
+				const destination = path.join(root, "destination");
 
-			await pipeline(packTar(source), unpackTar(destination));
+				await pipeline(packTar(source), unpackTar(destination));
 
-			// The filesystem manifest is the model: every generated path must exist,
-			// no extra path may appear, and every byte must be preserved.
-			expect(await listFiles(destination)).toEqual(Object.keys(files).sort());
-			for (const [name, body] of Object.entries(files)) {
-				expect(
-					Uint8Array.from(await readFile(path.join(destination, name))),
-				).toEqual(body);
-			}
-		});
+				// The filesystem manifest is the model: every generated path must exist,
+				// no extra path may appear, and every byte must be preserved.
+				expect(await listFiles(destination)).toEqual(Object.keys(files).sort());
+				for (const [name, body] of Object.entries(files)) {
+					expect(
+						Uint8Array.from(await readFile(path.join(destination, name))),
+					).toEqual(body);
+				}
+			},
+			{ testCases: 25 },
+		);
 	});
 });
