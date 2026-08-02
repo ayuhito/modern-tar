@@ -5,7 +5,7 @@ import { packTar, type TarEntry } from "../../../src/web";
 const archive = async (entries: TarEntry[]) =>
 	Readable.from([await packTar(entries)]);
 
-export const createTarWithMaliciousFile = (name: string) =>
+export const archiveWithFile = (name: string) =>
 	archive([
 		{
 			header: { name: "safe-file.txt", size: 14, type: "file" },
@@ -17,16 +17,13 @@ export const createTarWithMaliciousFile = (name: string) =>
 		},
 	]);
 
-export const createTarWithMaliciousDirectory = (name: string) =>
+export const archiveWithDirectory = (name: string) =>
 	archive([
 		{ header: { name: "safe-dir/", size: 0, type: "directory" } },
 		{ header: { name, size: 0, type: "directory" } },
 	]);
 
-export const createTarWithMaliciousHardlink = (
-	name: string,
-	linkname: string,
-) =>
+export const archiveWithHardlink = (name: string, linkname: string) =>
 	archive([
 		{
 			header: { name: "safe-file.txt", size: 14, type: "file" },
@@ -35,7 +32,7 @@ export const createTarWithMaliciousHardlink = (
 		{ header: { name, linkname, size: 0, type: "link" } },
 	]);
 
-export const createTarWithSymlink = (linkname: string) =>
+export const archiveWithSymlink = (linkname: string) =>
 	archive([
 		{
 			header: { name: "safe-file.txt", size: 12, type: "file" },

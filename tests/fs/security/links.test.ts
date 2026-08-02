@@ -6,10 +6,7 @@ import { describe, expect } from "vitest";
 import { unpackTar } from "../../../src/fs";
 import { packTar, type TarEntry } from "../../../src/web";
 import { it } from "../../helpers/test";
-import {
-	createTarWithMaliciousHardlink,
-	createTarWithSymlink,
-} from "./helpers";
+import { archiveWithHardlink, archiveWithSymlink } from "./helpers";
 
 describe("link security", () => {
 	describe("hardlink path traversal", () => {
@@ -19,7 +16,7 @@ describe("link security", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const maliciousTar = await createTarWithMaliciousHardlink(
+			const maliciousTar = await archiveWithHardlink(
 				"link.txt",
 				"../../target.txt",
 			);
@@ -36,7 +33,7 @@ describe("link security", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const maliciousTar = await createTarWithMaliciousHardlink(
+			const maliciousTar = await archiveWithHardlink(
 				"link.txt",
 				"/tmp/target.txt",
 			);
@@ -53,10 +50,7 @@ describe("link security", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const safeTar = await createTarWithMaliciousHardlink(
-				"link.txt",
-				"safe-file.txt",
-			);
+			const safeTar = await archiveWithHardlink("link.txt", "safe-file.txt");
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -227,7 +221,7 @@ describe("link security", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const maliciousTar = await createTarWithSymlink("../../etc/passwd");
+				const maliciousTar = await archiveWithSymlink("../../etc/passwd");
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -242,7 +236,7 @@ describe("link security", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const maliciousTar = await createTarWithSymlink("/etc/passwd");
+				const maliciousTar = await archiveWithSymlink("/etc/passwd");
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -281,7 +275,7 @@ describe("link security", () => {
 				await fs.mkdir(extractDir, { recursive: true });
 				await fs.symlink(".", path.join(extractDir, "noop"));
 
-				const maliciousTar = await createTarWithSymlink("noop/..");
+				const maliciousTar = await archiveWithSymlink("noop/..");
 				await expect(
 					pipeline(maliciousTar, unpackTar(extractDir)),
 				).rejects.toThrow(
@@ -357,7 +351,7 @@ describe("link security", () => {
 				await fs.mkdir(outsideDir);
 				await fs.symlink(outsideDir, path.join(extractDir, "redirect"));
 
-				const maliciousTar = await createTarWithSymlink("redirect");
+				const maliciousTar = await archiveWithSymlink("redirect");
 				await expect(
 					pipeline(maliciousTar, unpackTar(extractDir)),
 				).rejects.toThrow(
@@ -472,7 +466,7 @@ describe("link security", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const safeTar = await createTarWithSymlink("safe-file.txt");
+				const safeTar = await archiveWithSymlink("safe-file.txt");
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -492,7 +486,7 @@ describe("link security", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const safeTar = await createTarWithSymlink("subdir/file.txt");
+				const safeTar = await archiveWithSymlink("subdir/file.txt");
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -512,7 +506,7 @@ describe("link security", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const safeTar = await createTarWithSymlink("./subdir/../safe-file.txt");
+				const safeTar = await archiveWithSymlink("./subdir/../safe-file.txt");
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -529,9 +523,7 @@ describe("link security", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const maliciousTar = await createTarWithSymlink(
-					"../../../tmp/malicious",
-				);
+				const maliciousTar = await archiveWithSymlink("../../../tmp/malicious");
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -582,7 +574,7 @@ describe("link security", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const safeTar = await createTarWithSymlink(".");
+				const safeTar = await archiveWithSymlink(".");
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -602,7 +594,7 @@ describe("link security", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const maliciousTar = await createTarWithSymlink(
+				const maliciousTar = await archiveWithSymlink(
 					"./foo/../bar/../../etc/passwd",
 				);
 				const unpackStream = unpackTar(extractDir);

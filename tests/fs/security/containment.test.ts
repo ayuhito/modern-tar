@@ -6,10 +6,7 @@ import { describe, expect } from "vitest";
 import { unpackTar } from "../../../src/fs";
 import { packTar, type TarEntry } from "../../../src/web";
 import { it } from "../../helpers/test";
-import {
-	createTarWithMaliciousDirectory,
-	createTarWithMaliciousFile,
-} from "./helpers";
+import { archiveWithDirectory, archiveWithFile } from "./helpers";
 
 describe("path containment", () => {
 	describe("file path traversal", () => {
@@ -17,9 +14,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const maliciousTar = await createTarWithMaliciousFile(
-				"../../malicious.txt",
-			);
+			const maliciousTar = await archiveWithFile("../../malicious.txt");
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -31,8 +26,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const maliciousTar =
-				await createTarWithMaliciousFile("/tmp/malicious.txt");
+			const maliciousTar = await archiveWithFile("/tmp/malicious.txt");
 			const unpackStream = unpackTar(extractDir);
 
 			// Should succeed by stripping the absolute path prefix
@@ -50,7 +44,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const maliciousTar = await createTarWithMaliciousFile(
+			const maliciousTar = await archiveWithFile(
 				"./safe/../../../malicious.txt",
 			);
 			const unpackStream = unpackTar(extractDir);
@@ -66,7 +60,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const safeTar = await createTarWithMaliciousFile("subdir/safe.txt");
+			const safeTar = await archiveWithFile("subdir/safe.txt");
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -82,7 +76,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const safeTar = await createTarWithMaliciousFile("./subdir/../safe.txt");
+			const safeTar = await archiveWithFile("./subdir/../safe.txt");
 			const unpackStream = unpackTar(extractDir);
 
 			// Strict security: reject any path containing /../ even if it resolves safely
@@ -99,8 +93,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const maliciousTar =
-				await createTarWithMaliciousDirectory("../../malicious/");
+			const maliciousTar = await archiveWithDirectory("../../malicious/");
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -112,8 +105,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const maliciousTar =
-				await createTarWithMaliciousDirectory("/tmp/malicious/");
+			const maliciousTar = await archiveWithDirectory("/tmp/malicious/");
 			const unpackStream = unpackTar(extractDir);
 
 			// Should succeed by stripping the absolute path prefix
@@ -131,7 +123,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const safeTar = await createTarWithMaliciousDirectory("subdir/nested/");
+			const safeTar = await archiveWithDirectory("subdir/nested/");
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -288,7 +280,7 @@ describe("path containment", () => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
-			const safeTar = await createTarWithMaliciousFile("./safe//file.txt");
+			const safeTar = await archiveWithFile("./safe//file.txt");
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -303,9 +295,7 @@ describe("path containment", () => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
-				const maliciousTar = await createTarWithMaliciousFile(
-					"..\\..\\malicious.txt",
-				);
+				const maliciousTar = await archiveWithFile("..\\..\\malicious.txt");
 				const unpackStream = unpackTar(extractDir, { concurrency: 1 });
 
 				// Backslashes are now normalized to forward slashes, making this a traversal attempt

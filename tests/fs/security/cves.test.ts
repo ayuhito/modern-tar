@@ -6,7 +6,7 @@ import { describe, expect } from "vitest";
 import { unpackTar } from "../../../src/fs";
 import { packTar, type TarEntry } from "../../../src/web";
 import { it } from "../../helpers/test";
-import { createTarWithMaliciousHardlink } from "./helpers";
+import { archiveWithHardlink } from "./helpers";
 
 describe("CVE regressions", () => {
 	describe("CVE-specific attacks", () => {
@@ -99,10 +99,7 @@ describe("CVE regressions", () => {
 				await fs.writeFile(victimFile, "do not delete");
 				await fs.symlink(victimFile, prelink);
 
-				const maliciousTar = await createTarWithMaliciousHardlink(
-					"link.txt",
-					"prelink",
-				);
+				const maliciousTar = await archiveWithHardlink("link.txt", "prelink");
 
 				await expect(
 					pipeline(maliciousTar, unpackTar(extractDir)),
