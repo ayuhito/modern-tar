@@ -4,22 +4,19 @@ import * as path from "node:path";
 
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
-import { useTempDirectory } from "../helpers/temp-directory";
+import { it } from "../helpers/test";
 
 describe("fs compression", () => {
-	let tmpDir: string;
-	useTempDirectory("modern-tar-fs-compression-test-", (directory) => {
-		tmpDir = directory;
-	});
-
 	describe("gzip compression", () => {
-		it("compresses and decompresses a simple directory", async () => {
+		it("compresses and decompresses a simple directory", async ({
+			tempDir,
+		}) => {
 			// Create test files
-			const sourceDir = path.join(tmpDir, "source");
-			const compressedFile = path.join(tmpDir, "archive.tar.gz");
-			const extractDir = path.join(tmpDir, "extracted");
+			const sourceDir = path.join(tempDir, "source");
+			const compressedFile = path.join(tempDir, "archive.tar.gz");
+			const extractDir = path.join(tempDir, "extracted");
 
 			await fs.mkdir(sourceDir, { recursive: true });
 			await fs.writeFile(path.join(sourceDir, "file1.txt"), "Hello, world!");
@@ -80,10 +77,10 @@ describe("fs compression", () => {
 			expect(file3Content).toBe("Nested file content.");
 		});
 
-		it("handles large files with compression", async () => {
-			const sourceDir = path.join(tmpDir, "large-source");
-			const compressedFile = path.join(tmpDir, "large-archive.tar.gz");
-			const extractDir = path.join(tmpDir, "large-extracted");
+		it("handles large files with compression", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "large-source");
+			const compressedFile = path.join(tempDir, "large-archive.tar.gz");
+			const extractDir = path.join(tempDir, "large-extracted");
 
 			await fs.mkdir(sourceDir, { recursive: true });
 
@@ -138,10 +135,12 @@ describe("fs compression", () => {
 			}
 		});
 
-		it("preserves file permissions and timestamps through compression", async () => {
-			const sourceDir = path.join(tmpDir, "perms-source");
-			const compressedFile = path.join(tmpDir, "perms-archive.tar.gz");
-			const extractDir = path.join(tmpDir, "perms-extracted");
+		it("preserves file permissions and timestamps through compression", async ({
+			tempDir,
+		}) => {
+			const sourceDir = path.join(tempDir, "perms-source");
+			const compressedFile = path.join(tempDir, "perms-archive.tar.gz");
+			const extractDir = path.join(tempDir, "perms-extracted");
 
 			await fs.mkdir(sourceDir, { recursive: true });
 
@@ -204,8 +203,10 @@ describe("fs compression", () => {
 	});
 
 	describe("error handling", () => {
-		it("handles stream destruction without TransformStream errors", async () => {
-			const extractDir = path.join(tmpDir, "extract-test");
+		it("handles stream destruction without TransformStream errors", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract-test");
 			const unpackStream = unpackTar(extractDir, {
 				filter: () => true,
 				map: (header) => ({ ...header, name: `processed-${header.name}` }),
@@ -234,8 +235,8 @@ describe("fs compression", () => {
 			}
 		});
 
-		it("handles stream destruction during processing", async () => {
-			const extractDir = path.join(tmpDir, "extract-test");
+		it("handles stream destruction during processing", async ({ tempDir }) => {
+			const extractDir = path.join(tempDir, "extract-test");
 			const unpackStream = unpackTar(extractDir, {
 				filter: () => true,
 				map: (header) => ({ ...header, name: `processed-${header.name}` }),
@@ -263,10 +264,10 @@ describe("fs compression", () => {
 			}
 		});
 
-		it("handles compression errors gracefully", async () => {
+		it("handles compression errors gracefully", async ({ tempDir }) => {
 			// Test that compression works normally
-			const sourceDir = path.join(tmpDir, "normal-source");
-			const compressedFile = path.join(tmpDir, "normal.tar.gz");
+			const sourceDir = path.join(tempDir, "normal-source");
+			const compressedFile = path.join(tempDir, "normal.tar.gz");
 
 			await fs.mkdir(sourceDir, { recursive: true });
 			await fs.writeFile(path.join(sourceDir, "test.txt"), "test content");
@@ -285,10 +286,10 @@ describe("fs compression", () => {
 			expect(stats.size).toBeGreaterThan(0);
 		});
 
-		it("handles extraction errors gracefully", async () => {
-			const sourceDir = path.join(tmpDir, "valid-source");
-			const compressedFile = path.join(tmpDir, "valid-archive.tar.gz");
-			const extractDir = path.join(tmpDir, "valid-extract");
+		it("handles extraction errors gracefully", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "valid-source");
+			const compressedFile = path.join(tempDir, "valid-archive.tar.gz");
+			const extractDir = path.join(tempDir, "valid-extract");
 
 			await fs.mkdir(sourceDir, { recursive: true });
 			await fs.writeFile(path.join(sourceDir, "test.txt"), "test content");

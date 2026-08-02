@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { TSGO_WASM_FIXTURE } from "./manifest";
 
 const fixturePath = (name: string) => join(import.meta.dirname, name);
 
@@ -40,4 +39,4 @@ export const ELECTRON_TGZ = fixturePath("electron-33.0.2.tgz");
 export const NODE_V25_DARWIN_ARM64_TAR_GZ = fixturePath(
 	"node-v25.2.0-darwin-arm64.tar.gz",
 );
-export const TSGO_WASM_TGZ = fixturePath(TSGO_WASM_FIXTURE);
+export const TSGO_WASM_TGZ = fixturePath("tsgo-wasm-2025.12.7.tgz");

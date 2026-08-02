@@ -1,14 +1,9 @@
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { normalizeHeaderName, validateBounds } from "../../src/fs/path";
-import { useTempDirectory } from "../helpers/temp-directory";
+import { it } from "../helpers/test";
 
 describe("path utilities", () => {
-	let tmpDir: string;
-	useTempDirectory("modern-tar-path-test-", (directory) => {
-		tmpDir = directory;
-	});
-
 	describe("normalizeHeaderName", () => {
 		it("preserves Unicode while normalizing path syntax", () => {
 			expect(normalizeHeaderName("café/")).toBe("café");
@@ -183,8 +178,8 @@ describe("path utilities", () => {
 	});
 
 	describe("validateBounds", () => {
-		it("allows paths within destination directory", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("allows paths within destination directory", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const targetPath = path.join(destDir, "file.txt");
 
 			expect(() => {
@@ -192,16 +187,16 @@ describe("path utilities", () => {
 			}).not.toThrow();
 		});
 
-		it("allows exact destination directory path", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("allows exact destination directory path", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 
 			expect(() => {
 				validateBounds(destDir, destDir, "Path outside bounds");
 			}).not.toThrow();
 		});
 
-		it("prevents path traversal with relative paths", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("prevents path traversal with relative paths", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const targetPath = path.join(destDir, "../outside.txt");
 
 			expect(() => {
@@ -209,8 +204,8 @@ describe("path utilities", () => {
 			}).toThrow("Path outside bounds");
 		});
 
-		it("prevents absolute paths outside destination", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("prevents absolute paths outside destination", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const targetPath = "/etc/passwd";
 
 			expect(() => {
@@ -218,8 +213,8 @@ describe("path utilities", () => {
 			}).toThrow("Path outside bounds");
 		});
 
-		it("handles unicode normalization in path validation", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("handles unicode normalization in path validation", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const targetPath = path.join(destDir, "café.txt");
 
 			expect(() => {
@@ -227,8 +222,8 @@ describe("path utilities", () => {
 			}).not.toThrow();
 		});
 
-		it("prevents unicode normalization bypass attacks", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("prevents unicode normalization bypass attacks", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 
 			// Test with different unicode normalization forms of the same characters
 			const composed = path.join(destDir, "../café");
@@ -243,17 +238,19 @@ describe("path utilities", () => {
 			}).toThrow("Path outside bounds");
 		});
 
-		it("does not conflate Unicode-equivalent sibling directories", () => {
-			const destDir = path.join(tmpDir, "café");
-			const siblingPath = path.join(tmpDir, "cafe\u0301", "outside.txt");
+		it("does not conflate Unicode-equivalent sibling directories", ({
+			tempDir,
+		}) => {
+			const destDir = path.join(tempDir, "café");
+			const siblingPath = path.join(tempDir, "cafe\u0301", "outside.txt");
 
 			expect(() => {
 				validateBounds(siblingPath, destDir, "Path outside bounds");
 			}).toThrow("Path outside bounds");
 		});
 
-		it("handles mixed separators correctly", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("handles mixed separators correctly", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const targetPath = `${destDir}/subdir\\file.txt`;
 
 			expect(() => {
@@ -261,8 +258,8 @@ describe("path utilities", () => {
 			}).not.toThrow();
 		});
 
-		it("handles sophisticated unicode path traversal", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("handles sophisticated unicode path traversal", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 
 			// Test with various unicode characters that could be used in attacks
 			const attacks = [
@@ -282,8 +279,8 @@ describe("path utilities", () => {
 			}
 		});
 
-		it("handles deeply nested valid paths", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("handles deeply nested valid paths", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const deepPath = path.join(
 				destDir,
 				...Array(50).fill("level"),
@@ -295,8 +292,8 @@ describe("path utilities", () => {
 			}).not.toThrow();
 		});
 
-		it("prevents bypassing with double encoding", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("prevents bypassing with double encoding", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			// URL encoding won't be decoded by path.join, so this creates a valid path
 			const encodedPath = path.join(destDir, "..%2F..%2Fevil.txt");
 
@@ -306,8 +303,8 @@ describe("path utilities", () => {
 			}).not.toThrow();
 		});
 
-		it("handles empty path components", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("handles empty path components", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const targetPath = path.join(destDir, "dir", "", "file.txt");
 
 			expect(() => {
@@ -315,8 +312,8 @@ describe("path utilities", () => {
 			}).not.toThrow();
 		});
 
-		it("prevents case-sensitive bypass attempts", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("prevents case-sensitive bypass attempts", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const targetPath = path.join(destDir, "../EXTRACT/file.txt");
 
 			expect(() => {
@@ -324,8 +321,8 @@ describe("path utilities", () => {
 			}).toThrow("Path outside bounds");
 		});
 
-		it("handles very long destination directories", () => {
-			const longDir = path.join(tmpDir, "a".repeat(200));
+		it("handles very long destination directories", ({ tempDir }) => {
+			const longDir = path.join(tempDir, "a".repeat(200));
 			const targetPath = path.join(longDir, "file.txt");
 
 			expect(() => {
@@ -333,8 +330,8 @@ describe("path utilities", () => {
 			}).not.toThrow();
 		});
 
-		it("prevents subtle unicode spoofing in paths", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("prevents subtle unicode spoofing in paths", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 
 			// Test with look-alike characters that could confuse path validation
 			const spoofed = path.resolve(destDir, "..\u002E/evil.txt"); // Unicode full stop
@@ -351,8 +348,8 @@ describe("path utilities", () => {
 			}
 		});
 
-		it("handles Windows-style paths on Unix systems", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("handles Windows-style paths on Unix systems", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const windowsPath = `${destDir}\\subdir\\file.txt`;
 
 			// On Unix systems, the path module normalizes this differently
@@ -374,8 +371,8 @@ describe("path utilities", () => {
 			}
 		});
 
-		it("prevents directory traversal with URL encoding", () => {
-			const destDir = path.join(tmpDir, "extract");
+		it("prevents directory traversal with URL encoding", ({ tempDir }) => {
+			const destDir = path.join(tempDir, "extract");
 			const encodedPath = path.join(destDir, "%2e%2e%2f%2e%2e%2fevil.txt");
 
 			// URL encoding is not decoded by path.join, so this is a valid filename

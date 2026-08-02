@@ -3,10 +3,10 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/encoding";
-import { useTempDirectory } from "../helpers/temp-directory";
+import { it } from "../helpers/test";
 
 const isWindows = process.platform === "win32";
 
@@ -16,11 +16,6 @@ let expectedHelloContent: string;
 let expectedTestContent: string;
 
 describe("packTarSources", () => {
-	let tmpDir: string;
-	useTempDirectory("modern-tar-archive-test-", (directory) => {
-		tmpDir = directory;
-	});
-
 	beforeEach(async () => {
 		// Read the actual fixture files to handle line endings correctly
 		expectedHelloContent = await fs.readFile(
@@ -33,7 +28,7 @@ describe("packTarSources", () => {
 		);
 	});
 
-	it("packs a single file source", async () => {
+	it("packs a single file source", async ({ tempDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
@@ -43,8 +38,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		// Write tar to file and extract
 		await pipeline(archiveStream, createWriteStream(tarPath));
@@ -64,7 +59,7 @@ describe("packTarSources", () => {
 		expect(extractedStat.mode).toBe(originalStat.mode);
 	});
 
-	it("packs multiple file sources", async () => {
+	it("packs multiple file sources", async ({ tempDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
@@ -79,8 +74,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -100,7 +95,7 @@ describe("packTarSources", () => {
 		expect(testContent).toBe(expectedTestContent);
 	});
 
-	it("packs content sources", async () => {
+	it("packs content sources", async ({ tempDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "content",
@@ -120,8 +115,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -146,7 +141,9 @@ describe("packTarSources", () => {
 		expect(uint8Content).toBe("Hello from Uint8Array!");
 	});
 
-	it("packs content sources with new TarEntryData types", async () => {
+	it("packs content sources with new TarEntryData types", async ({
+		tempDir,
+	}) => {
 		// Create test data for various types
 		const testString = "Hello from ArrayBuffer!";
 		const arrayBuffer = new ArrayBuffer(testString.length);
@@ -191,8 +188,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -222,7 +219,7 @@ describe("packTarSources", () => {
 		expect(emptyContent).toBe("");
 	});
 
-	it("packs StreamSource with Node Readable", async () => {
+	it("packs StreamSource with Node Readable", async ({ tempDir }) => {
 		const readableContent = "Hello from Readable!";
 		const readable = Readable.from([Buffer.from(readableContent, "utf-8")]);
 
@@ -236,8 +233,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "readable-test.tar");
-		const destDir = path.join(tmpDir, "readable-extracted");
+		const tarPath = path.join(tempDir, "readable-test.tar");
+		const destDir = path.join(tempDir, "readable-extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -251,7 +248,9 @@ describe("packTarSources", () => {
 		expect(extractedContent).toBe("Hello from Readable!");
 	});
 
-	it("packs content sources with Node Readable streams of different chunk types", async () => {
+	it("packs content sources with Node Readable streams of different chunk types", async ({
+		tempDir,
+	}) => {
 		// Test with string chunks
 		const stringChunks = Readable.from([
 			"Hello ",
@@ -286,8 +285,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "chunks-test.tar");
-		const destDir = path.join(tmpDir, "chunks-extracted");
+		const tarPath = path.join(tempDir, "chunks-test.tar");
+		const destDir = path.join(tempDir, "chunks-extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -307,7 +306,7 @@ describe("packTarSources", () => {
 		expect(mixedContent).toBe("Mixed: Buffer and Uint8");
 	});
 
-	it("packs StreamSource with Web ReadableStream", async () => {
+	it("packs StreamSource with Web ReadableStream", async ({ tempDir }) => {
 		const webStreamContent = "Hello from Web ReadableStream!";
 		const webStream = new ReadableStream({
 			start(controller) {
@@ -326,8 +325,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "web-stream-test.tar");
-		const destDir = path.join(tmpDir, "web-stream-extracted");
+		const tarPath = path.join(tempDir, "web-stream-test.tar");
+		const destDir = path.join(tempDir, "web-stream-extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -341,7 +340,7 @@ describe("packTarSources", () => {
 		expect(extractedContent).toBe("Hello from Web ReadableStream!");
 	});
 
-	it("packs content source with custom mode", async () => {
+	it("packs content source with custom mode", async ({ tempDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "content",
@@ -352,8 +351,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -370,7 +369,7 @@ describe("packTarSources", () => {
 		}
 	});
 
-	it("packs directory sources", async () => {
+	it("packs directory sources", async ({ tempDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "directory",
@@ -380,8 +379,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -400,7 +399,7 @@ describe("packTarSources", () => {
 		expect(content).toBe(expectedTestContent);
 	});
 
-	it("packs mixed source types", async () => {
+	it("packs mixed source types", async ({ tempDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
@@ -420,8 +419,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -448,7 +447,9 @@ describe("packTarSources", () => {
 		).toBe(true);
 	});
 
-	it("handles Windows paths by normalizing to forward slashes", async () => {
+	it("handles Windows paths by normalizing to forward slashes", async ({
+		tempDir,
+	}) => {
 		const sources: TarSource[] = [
 			{
 				type: "content",
@@ -458,8 +459,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -471,11 +472,11 @@ describe("packTarSources", () => {
 		expect(content).toBe("test content");
 	});
 
-	it("handles empty sources array", async () => {
+	it("handles empty sources array", async ({ tempDir }) => {
 		const sources: TarSource[] = [];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "empty.tar");
+		const tarPath = path.join(tempDir, "empty.tar");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 
@@ -485,9 +486,9 @@ describe("packTarSources", () => {
 		expect(stats.size).toBeLessThan(2048); // Should be small for empty archive
 	});
 
-	it("preserves file timestamps and modes", async () => {
+	it("preserves file timestamps and modes", async ({ tempDir }) => {
 		// Create a test file with specific timestamp
-		const testFile = path.join(tmpDir, "timestamptest.txt");
+		const testFile = path.join(tempDir, "timestamptest.txt");
 		await fs.writeFile(testFile, "timestamp test");
 
 		// Set a specific timestamp (Jan 1, 2020)
@@ -503,8 +504,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -523,9 +524,9 @@ describe("packTarSources", () => {
 		expect(extractedStat.mode).toBe(originalStat.mode);
 	});
 
-	it("handles directory with no files", async () => {
+	it("handles directory with no files", async ({ tempDir }) => {
 		// Create empty directory
-		const emptyDir = path.join(tmpDir, "empty");
+		const emptyDir = path.join(tempDir, "empty");
 		await fs.mkdir(emptyDir);
 
 		const sources: TarSource[] = [
@@ -537,8 +538,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "test.tar");
-		const destDir = path.join(tmpDir, "extracted");
+		const tarPath = path.join(tempDir, "test.tar");
+		const destDir = path.join(tempDir, "extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -550,11 +551,13 @@ describe("packTarSources", () => {
 		expect(stat.isDirectory()).toBe(true);
 	});
 
-	it("handles errors gracefully when source file doesn't exist", async () => {
+	it("handles errors gracefully when source file doesn't exist", async ({
+		tempDir,
+	}) => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
-				source: path.join(tmpDir, "nonexistent.txt"),
+				source: path.join(tempDir, "nonexistent.txt"),
 				target: "missing.txt",
 			},
 		];
@@ -629,7 +632,7 @@ describe("packTarSources", () => {
 		).rejects.toThrow(/Unsupported content type/);
 	});
 
-	it("handles StreamSource with custom mode", async () => {
+	it("handles StreamSource with custom mode", async ({ tempDir }) => {
 		const content = "Stream with custom mode";
 		const readable = Readable.from([Buffer.from(content, "utf-8")]);
 
@@ -644,8 +647,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "custom-mode-stream.tar");
-		const destDir = path.join(tmpDir, "custom-mode-stream-extracted");
+		const tarPath = path.join(tempDir, "custom-mode-stream.tar");
+		const destDir = path.join(tempDir, "custom-mode-stream-extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -669,7 +672,9 @@ describe("packTarSources", () => {
 		}
 	});
 
-	it("handles large StreamSource efficiently without OOM", async () => {
+	it("handles large StreamSource efficiently without OOM", async ({
+		tempDir,
+	}) => {
 		// Create a 10MB stream that generates data on the fly
 		const chunkSize = 1024 * 1024; // 1MB chunks
 		const totalChunks = 10;
@@ -704,8 +709,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "large-stream.tar");
-		const destDir = path.join(tmpDir, "large-stream-extracted");
+		const tarPath = path.join(tempDir, "large-stream.tar");
+		const destDir = path.join(tempDir, "large-stream-extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);
@@ -749,7 +754,7 @@ describe("packTarSources", () => {
 		}).rejects.toThrow();
 	});
 
-	it("handles multiple StreamSources in mixed archive", async () => {
+	it("handles multiple StreamSources in mixed archive", async ({ tempDir }) => {
 		const stream1Content = "First stream content";
 		const stream2Content = "Second stream content";
 
@@ -787,8 +792,8 @@ describe("packTarSources", () => {
 		];
 
 		const archiveStream = packTar(sources);
-		const tarPath = path.join(tmpDir, "mixed-streams.tar");
-		const destDir = path.join(tmpDir, "mixed-streams-extracted");
+		const tarPath = path.join(tempDir, "mixed-streams.tar");
+		const destDir = path.join(tempDir, "mixed-streams-extracted");
 
 		await pipeline(archiveStream, createWriteStream(tarPath));
 		const unpackStream = unpackTar(destDir);

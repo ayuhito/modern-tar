@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { Miniflare } from "miniflare";
 import { describe, expect, it } from "vitest";
 import { packTar } from "../../src/web/helpers";
-import { fragments } from "../helpers/fragments";
+import { chunkBytes } from "../helpers/bytes";
 
 const fixturePath = (name: string) => resolve(import.meta.dirname, name);
 
@@ -101,7 +101,7 @@ async function writeArchive(
 	// If there are remaining bytes after the initial chunk, write them in parts with optional delays.
 	if (remaining > 0) {
 		const chunkSize = Math.max(1, Math.ceil(remaining / parts));
-		for (const fragment of fragments(tarBuffer, chunkSize, initialBytes)) {
+		for (const fragment of chunkBytes(tarBuffer, chunkSize, initialBytes)) {
 			await writer.write(fragment);
 		}
 	}

@@ -1,17 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { decoder } from "../../src/tar/encoding";
 import { packTar, unpackTar } from "../../src/web/helpers";
-import { useTempDirectory } from "../helpers/temp-directory";
+import { it } from "../helpers/test";
 
 describe("repack", () => {
-	let tmpDir: string;
-	useTempDirectory("modern-tar-repack-test-", (directory) => {
-		tmpDir = directory;
-	});
-
-	it("successfully repacks unpacked entries", async () => {
+	it("successfully repacks unpacked entries", async ({ tempDir }) => {
 		const originalEntries = [
 			{
 				header: { name: "example.txt", size: 11, type: "file" as const },
@@ -27,7 +22,7 @@ describe("repack", () => {
 		];
 
 		const archive = await packTar(originalEntries);
-		const tempPath = join(tmpDir, "test-repack.tar");
+		const tempPath = join(tempDir, "test-repack.tar");
 		await writeFile(tempPath, archive);
 
 		// Original workflow that was failing

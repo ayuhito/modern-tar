@@ -5,8 +5,8 @@ import { decoder, encoder } from "../../src/tar/encoding";
 import { createTarHeader } from "../../src/tar/header";
 
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
-import { deferred } from "../helpers/deferred";
-import { fragments } from "../helpers/fragments";
+import { chunkBytes } from "../helpers/bytes";
+import { createDeferred } from "../helpers/deferred";
 import {
 	INCOMPLETE_TAR,
 	LONG_NAME_TAR,
@@ -335,7 +335,7 @@ describe("createTarDecoder", () => {
 		const writer = decoder.writable.getWriter();
 
 		const writeAll = (async () => {
-			for (const fragment of fragments(archive, 128)) {
+			for (const fragment of chunkBytes(archive, 128)) {
 				await writer.write(fragment);
 			}
 		})();
@@ -385,8 +385,8 @@ describe("createTarDecoder", () => {
 		]);
 		const chunkSize = 64 * 1024;
 		let pulledChunks = 0;
-		const sourceFragments = fragments(archive, chunkSize)[Symbol.iterator]();
-		const sourceCanceled = deferred();
+		const sourceFragments = chunkBytes(archive, chunkSize)[Symbol.iterator]();
+		const sourceCanceled = createDeferred();
 		const source = new ReadableStream<Uint8Array>({
 			pull(controller) {
 				const { done, value } = sourceFragments.next();
@@ -438,7 +438,7 @@ describe("createTarDecoder", () => {
 		);
 
 		const writes: Promise<void>[] = [];
-		for (const fragment of fragments(archive, chunkSize, chunkSize)) {
+		for (const fragment of chunkBytes(archive, chunkSize, chunkSize)) {
 			writes.push(writer.write(fragment));
 		}
 		const writesSettled = Promise.allSettled(writes);

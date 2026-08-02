@@ -2,21 +2,16 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
-import { useTempDirectory } from "../helpers/temp-directory";
+import { it } from "../helpers/test";
 
 const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
 
 describe("options fs", () => {
-	let tmpDir: string;
-	useTempDirectory("modern-tar-options-test-", (directory) => {
-		tmpDir = directory;
-	});
-
 	describe("pack options fs", () => {
-		it("uses dereference option to follow symlinks", async () => {
-			const sourceDir = path.join(tmpDir, "source");
+		it("uses dereference option to follow symlinks", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "source");
 			const targetFile = path.join(sourceDir, "target.txt");
 			const symlinkFile = path.join(sourceDir, "link.txt");
 
@@ -26,13 +21,13 @@ describe("options fs", () => {
 
 			// Pack without dereferencing (default)
 			const packStream1 = packTar(sourceDir, { dereference: false });
-			const extractDir1 = path.join(tmpDir, "extract1");
+			const extractDir1 = path.join(tempDir, "extract1");
 			const unpackStream1 = unpackTar(extractDir1);
 			await pipeline(packStream1, unpackStream1);
 
 			// Pack with dereferencing
 			const packStream2 = packTar(sourceDir, { dereference: true });
-			const extractDir2 = path.join(tmpDir, "extract2");
+			const extractDir2 = path.join(tempDir, "extract2");
 			const unpackStream2 = unpackTar(extractDir2);
 			await pipeline(packStream2, unpackStream2);
 
@@ -50,8 +45,8 @@ describe("options fs", () => {
 			expect(content2).toBe("target content");
 		});
 
-		it("uses filter option with fs.Stats", async () => {
-			const sourceDir = path.join(tmpDir, "source");
+		it("uses filter option with fs.Stats", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "source");
 			await fs.mkdir(sourceDir);
 			await fs.writeFile(path.join(sourceDir, "small.txt"), "small");
 			await fs.writeFile(
@@ -66,7 +61,7 @@ describe("options fs", () => {
 				},
 			});
 
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 			const unpackStream = unpackTar(extractDir);
 			await pipeline(packStream, unpackStream);
 
@@ -74,8 +69,8 @@ describe("options fs", () => {
 			expect(files).toEqual(["large.txt"]);
 		});
 
-		it("filters filesystem sources using source paths", async () => {
-			const sensitiveFile = path.join(tmpDir, "secret.txt");
+		it("filters filesystem sources using source paths", async ({ tempDir }) => {
+			const sensitiveFile = path.join(tempDir, "secret.txt");
 			await fs.writeFile(sensitiveFile, "top-secret");
 
 			const packStream = packTar(
@@ -91,7 +86,7 @@ describe("options fs", () => {
 				},
 			);
 
-			const extractDir = path.join(tmpDir, "extract-filter-source");
+			const extractDir = path.join(tempDir, "extract-filter-source");
 			const unpackStream = unpackTar(extractDir);
 			await pipeline(packStream, unpackStream);
 
@@ -100,7 +95,7 @@ describe("options fs", () => {
 			).rejects.toThrow();
 		});
 
-		it("uses map option to transform headers", async () => {
+		it("uses map option to transform headers", async ({ tempDir }) => {
 			const sourceDir = path.join(FIXTURES_DIR, "a");
 			const packStream = packTar(sourceDir, {
 				map: (header) => ({
@@ -111,7 +106,7 @@ describe("options fs", () => {
 				}),
 			});
 
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 			const unpackStream = unpackTar(extractDir);
 			await pipeline(packStream, unpackStream);
 
@@ -120,8 +115,8 @@ describe("options fs", () => {
 			expect(files).toContain("hello.txt");
 		});
 
-		it("multiple options", async () => {
-			const sourceDir = path.join(tmpDir, "source");
+		it("multiple options", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "source");
 			const subDir = path.join(sourceDir, "subdir");
 			await fs.mkdir(sourceDir);
 			await fs.mkdir(subDir);
@@ -144,7 +139,7 @@ describe("options fs", () => {
 				}),
 			});
 
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 			const unpackStream = unpackTar(extractDir);
 			await pipeline(packStream, unpackStream);
 
@@ -170,13 +165,13 @@ describe("options fs", () => {
 	});
 
 	describe("unpack options fs", () => {
-		it("uses fmode to override file permissions", async () => {
-			const sourceDir = path.join(tmpDir, "source");
+		it("uses fmode to override file permissions", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "source");
 			await fs.mkdir(sourceDir);
 			await fs.writeFile(path.join(sourceDir, "test.txt"), "content");
 
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 
 			const unpackStream = unpackTar(extractDir, {
 				fmode: 0o600, // Read/write for owner only
@@ -193,14 +188,14 @@ describe("options fs", () => {
 			}
 		});
 
-		it("uses dmode to override directory permissions", async () => {
-			const sourceDir = path.join(tmpDir, "source");
+		it("uses dmode to override directory permissions", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "source");
 			const subDir = path.join(sourceDir, "subdir");
 			await fs.mkdir(sourceDir);
 			await fs.mkdir(subDir);
 
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 
 			const unpackStream = unpackTar(extractDir, {
 				dmode: 0o700, // Read/write/execute for owner only
@@ -217,10 +212,10 @@ describe("options fs", () => {
 			}
 		});
 
-		it("inherits core strip option", async () => {
+		it("inherits core strip option", async ({ tempDir }) => {
 			const sourceDir = path.join(FIXTURES_DIR, "b");
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 
 			const unpackStream = unpackTar(extractDir, {
 				strip: 1, // Remove first path component
@@ -234,8 +229,8 @@ describe("options fs", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"strips hardlink linknames with strip option",
-			async () => {
-				const binDir = path.join(tmpDir, "source", "wrapper", "bin");
+			async ({ tempDir }) => {
+				const binDir = path.join(tempDir, "source", "wrapper", "bin");
 				await fs.mkdir(binDir, { recursive: true });
 				await fs.writeFile(path.join(binDir, "python3.6"), "python\n");
 				await fs.link(
@@ -243,9 +238,9 @@ describe("options fs", () => {
 					path.join(binDir, "python3.6m"),
 				);
 
-				const extractDir = path.join(tmpDir, "extract");
+				const extractDir = path.join(tempDir, "extract");
 				await pipeline(
-					packTar(path.join(tmpDir, "source")),
+					packTar(path.join(tempDir, "source")),
 					unpackTar(extractDir, { strip: 1 }),
 				);
 
@@ -255,14 +250,14 @@ describe("options fs", () => {
 			},
 		);
 
-		it("inherits core filter option", async () => {
-			const sourceDir = path.join(tmpDir, "source");
+		it("inherits core filter option", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "source");
 			await fs.mkdir(sourceDir);
 			await fs.writeFile(path.join(sourceDir, "keep.txt"), "keep");
 			await fs.writeFile(path.join(sourceDir, "skip.js"), "skip");
 
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 
 			const unpackStream = unpackTar(extractDir, {
 				filter: (header) => header.name.endsWith(".txt"),
@@ -275,13 +270,13 @@ describe("options fs", () => {
 			expect(files).not.toContain("skip.js");
 		});
 
-		it("inherits core map option", async () => {
-			const sourceDir = path.join(tmpDir, "source");
+		it("inherits core map option", async ({ tempDir }) => {
+			const sourceDir = path.join(tempDir, "source");
 			await fs.mkdir(sourceDir);
 			await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
 
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 
 			const unpackStream = unpackTar(extractDir, {
 				map: (header) => ({
@@ -297,10 +292,10 @@ describe("options fs", () => {
 			expect(files).toContain("prefixed-file.txt");
 		});
 
-		it("combines core options with filesystem options", async () => {
+		it("combines core options with filesystem options", async ({ tempDir }) => {
 			const sourceDir = path.join(FIXTURES_DIR, "a");
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 
 			const unpackStream = unpackTar(extractDir, {
 				// Core options (map only)
@@ -328,8 +323,10 @@ describe("options fs", () => {
 			}
 		});
 
-		it("preserves original permissions when fmode/dmode not specified", async () => {
-			const sourceDir = path.join(tmpDir, "source");
+		it("preserves original permissions when fmode/dmode not specified", async ({
+			tempDir,
+		}) => {
+			const sourceDir = path.join(tempDir, "source");
 			await fs.mkdir(sourceDir);
 			await fs.writeFile(
 				path.join(sourceDir, "exec.sh"),
@@ -339,7 +336,7 @@ describe("options fs", () => {
 			await fs.mkdir(path.join(sourceDir, "restricted"), { mode: 0o700 });
 
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 			const unpackStream = unpackTar(extractDir); // No fmode/dmode specified
 
 			await pipeline(packStream, unpackStream);
@@ -359,11 +356,11 @@ describe("options fs", () => {
 	});
 
 	describe("error handling", () => {
-		it("handles permission errors gracefully", async () => {
+		it("handles permission errors gracefully", async ({ tempDir }) => {
 			// This test might be platform-specific, so we'll keep it simple
 			const sourceDir = path.join(FIXTURES_DIR, "a");
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 
 			// Try to extract with very restrictive permissions
 			const unpackStream = unpackTar(extractDir, {
@@ -375,10 +372,10 @@ describe("options fs", () => {
 			await expect(pipeline(packStream, unpackStream)).resolves.not.toThrow();
 		});
 
-		it("handles invalid strip values gracefully", async () => {
+		it("handles invalid strip values gracefully", async ({ tempDir }) => {
 			const sourceDir = path.join(FIXTURES_DIR, "a");
 			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 
 			const unpackStream = unpackTar(extractDir, {
 				strip: 999, // Strip way too many components

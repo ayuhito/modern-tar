@@ -2,18 +2,13 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { unpackTar } from "../../src/fs";
 import { normalizeName } from "../../src/fs/path";
 import { packTar, type TarEntry } from "../../src/web";
-import { useTempDirectory } from "../helpers/temp-directory";
+import { it } from "../helpers/test";
 
 describe("fs path normalization", () => {
-	let tmpDir: string;
-	useTempDirectory("modern-tar-win-security-test-", (directory) => {
-		tmpDir = directory;
-	});
-
 	// Helper function to create tar with specific entries
 	const createTarWithEntries = async (
 		entries: TarEntry[],
@@ -63,8 +58,8 @@ describe("fs path normalization", () => {
 	});
 
 	describe("windows drive letter traversal prevention", () => {
-		it("should reject C:../path traversal attempts", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should reject C:../path traversal attempts", async ({ tempDir }) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -94,8 +89,8 @@ describe("fs path normalization", () => {
 			expect(files).toHaveLength(0);
 		});
 
-		it("should reject C:../path traversal universally", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should reject C:../path traversal universally", async ({ tempDir }) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -122,8 +117,10 @@ describe("fs path normalization", () => {
 			);
 		});
 
-		it("should reject D:../../sensitive traversal attempts", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should reject D:../../sensitive traversal attempts", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -149,8 +146,10 @@ describe("fs path normalization", () => {
 			);
 		});
 
-		it("should reject case-insensitive drive letter traversal (c:../)", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should reject case-insensitive drive letter traversal (c:../)", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -178,8 +177,10 @@ describe("fs path normalization", () => {
 	});
 
 	describe("windows drive letter stripping", () => {
-		it("should strip C: prefix from filenames universally", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should strip C: prefix from filenames universally", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -214,9 +215,9 @@ describe("fs path normalization", () => {
 			expect(content).toBe("safe content");
 		});
 
-		it("should strip C: prefix for tar compatibility", async () => {
+		it("should strip C: prefix for tar compatibility", async ({ tempDir }) => {
 			// Drive letters are always stripped for tar file portability
-			const extractDir = path.join(tmpDir, "extract");
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -250,8 +251,10 @@ describe("fs path normalization", () => {
 			expect(content).toBe("test content!");
 		});
 
-		it("should strip various drive letters (A:, Z:, etc.) universally", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should strip various drive letters (A:, Z:, etc.) universally", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -290,8 +293,10 @@ describe("fs path normalization", () => {
 			expect(files.sort()).toEqual(["fileA.txt", "fileZ.txt"]);
 		});
 
-		it("should handle nested paths with drive letters universally", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should handle nested paths with drive letters universally", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -324,8 +329,8 @@ describe("fs path normalization", () => {
 	describe("windows reserved character encoding", () => {
 		it.skipIf(process.platform !== "win32")(
 			"should encode reserved characters on Windows",
-			async () => {
-				const extractDir = path.join(tmpDir, "extract");
+			async ({ tempDir }) => {
+				const extractDir = path.join(tempDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const entries: TarEntry[] = [
@@ -366,8 +371,8 @@ describe("fs path normalization", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"should preserve reserved characters on Unix",
-			async () => {
-				const extractDir = path.join(tmpDir, "extract");
+			async ({ tempDir }) => {
+				const extractDir = path.join(tempDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const entries: TarEntry[] = [
@@ -406,8 +411,8 @@ describe("fs path normalization", () => {
 
 		it.skipIf(process.platform !== "win32")(
 			"should encode asterisk and pipe characters on Windows",
-			async () => {
-				const extractDir = path.join(tmpDir, "extract");
+			async ({ tempDir }) => {
+				const extractDir = path.join(tempDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const entries: TarEntry[] = [
@@ -437,8 +442,10 @@ describe("fs path normalization", () => {
 	});
 
 	describe("Windows backslash normalization", () => {
-		it("should normalize backslashes to forward slashes universally", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should normalize backslashes to forward slashes universally", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -467,8 +474,10 @@ describe("fs path normalization", () => {
 			expect(content).toBe("content");
 		});
 
-		it("should normalize backslashes to forward slashes for tar compatibility", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should normalize backslashes to forward slashes for tar compatibility", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -496,8 +505,10 @@ describe("fs path normalization", () => {
 			expect(files).toContain("dir");
 		});
 
-		it("should handle mixed slashes and backslashes universally", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should handle mixed slashes and backslashes universally", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -537,8 +548,8 @@ describe("fs path normalization", () => {
 	describe("Combined Windows path issues", () => {
 		it.skipIf(process.platform !== "win32")(
 			"should handle drive letter + reserved chars + backslashes on Windows",
-			async () => {
-				const extractDir = path.join(tmpDir, "extract");
+			async ({ tempDir }) => {
+				const extractDir = path.join(tempDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const entries: TarEntry[] = [
@@ -575,8 +586,8 @@ describe("fs path normalization", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"should handle drive letter stripping and slash normalization on Unix",
-			async () => {
-				const extractDir = path.join(tmpDir, "extract");
+			async ({ tempDir }) => {
+				const extractDir = path.join(tempDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const entries: TarEntry[] = [
@@ -611,8 +622,10 @@ describe("fs path normalization", () => {
 			},
 		);
 
-		it("should reject drive traversal even with encoded characters", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should reject drive traversal even with encoded characters", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
@@ -700,8 +713,10 @@ describe("fs path normalization", () => {
 	});
 
 	describe("cross-platform compatibility with map option", () => {
-		it("should allow custom path transformation via map option", async () => {
-			const extractDir = path.join(tmpDir, "extract");
+		it("should allow custom path transformation via map option", async ({
+			tempDir,
+		}) => {
+			const extractDir = path.join(tempDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
 			const entries: TarEntry[] = [
