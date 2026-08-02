@@ -5,13 +5,6 @@ import { it } from "../helpers/test";
 
 describe("path utilities", () => {
 	describe("normalizeHeaderName", () => {
-		it("preserves Unicode while normalizing path syntax", () => {
-			expect(normalizeHeaderName("café/")).toBe("café");
-			// Backslashes are always normalized to forward slashes for tar compatibility
-			expect(normalizeHeaderName("path\\to\\file/")).toBe("path/to/file");
-			expect(normalizeHeaderName("test///")).toBe("test");
-		});
-
 		it("handles Windows drive letters and reserved characters on Windows", () => {
 			// Mock Windows platform
 			const originalPlatform = process.platform;

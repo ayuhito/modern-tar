@@ -144,7 +144,7 @@ export function createChunkQueue(): ChunkQueue {
 				// Copy from head to tail in order.
 				if (head < tail) {
 					for (let i = 0; i < count; i++) newChunks[i] = chunks[head + i];
-				} else if (count > 0) {
+				} else {
 					// Otherwise, we have wrapped data and need two copies.
 					const firstPart = oldLen - head;
 					for (let i = 0; i < firstPart; i++) newChunks[i] = chunks[head + i];

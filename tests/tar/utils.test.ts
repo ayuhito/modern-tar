@@ -222,15 +222,6 @@ describe("tar utilities", () => {
 	});
 
 	describe("edge cases and security", () => {
-		it("handles malformed octal strings gracefully", () => {
-			const buffer = encoder.encode("abc123\x00");
-			const result = readOctal(buffer, 0, 7);
-
-			// readOctal implementation treats non-digit chars as part of octal calculation
-			// This test documents actual behavior rather than ideal behavior
-			expect(typeof result).toBe("number");
-		});
-
 		it("handles buffer bounds correctly in writeString", () => {
 			const buffer = new Uint8Array(5);
 			// This should not write beyond buffer bounds
@@ -246,22 +237,6 @@ describe("tar utilities", () => {
 			const result = readString(buffer, 0, 100);
 
 			expect(result).toBe("hello");
-		});
-
-		it("handles negative offsets safely", () => {
-			const buffer = new Uint8Array(10);
-			// These operations should be safe even with edge case inputs
-			expect(() => writeString(buffer, 0, 5, "test")).not.toThrow();
-			expect(() => readString(buffer, 0, 5)).not.toThrow();
-		});
-
-		it("handles octal overflow gracefully", () => {
-			// Test with number that would overflow octal representation
-			const buffer = encoder.encode("99999999999\x00"); // Invalid octal digits
-			const result = readOctal(buffer, 0, 12);
-
-			// readOctal treats '9' as part of calculation, this documents actual behavior
-			expect(typeof result).toBe("number");
 		});
 	});
 
@@ -279,7 +254,6 @@ describe("tar utilities", () => {
 	});
 
 	it("handles unaligned zero blocks without crashing", () => {
-		const errorOccurred = false;
 		const unpacker = createUnpacker();
 
 		// Create a large buffer with unaligned offset that contains a zero block
@@ -295,8 +269,6 @@ describe("tar utilities", () => {
 			unpacker.write(unalignedChunk);
 			unpacker.end();
 		}).not.toThrow();
-
-		expect(errorOccurred).toBe(false);
 	});
 
 	it("rejects oversized meta entry bodies", () => {

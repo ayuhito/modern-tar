@@ -33,7 +33,7 @@ describe("tar encoding properties", () => {
 			);
 		}));
 
-	it("round-trips every octal value that fits in its field", () =>
+	it("round-trips octal values that fit in their field", () =>
 		hegel.test((tc) => {
 			const size = tc.draw(gs.integers({ minValue: 2, maxValue: 12 }));
 			const value = tc.draw(
@@ -60,12 +60,7 @@ describe("tar encoding properties", () => {
 			const offset = tc.draw(offsets);
 			const size = 8;
 			const buffer = new Uint8Array(offset + size);
-			let remaining = value;
-
-			for (let index = buffer.length - 1; index >= offset; index--) {
-				buffer[index] = remaining % 256;
-				remaining = Math.floor(remaining / 256);
-			}
+			new DataView(buffer.buffer).setBigUint64(offset, BigInt(value));
 			buffer[offset] |= 0x80;
 
 			expect(readNumeric(buffer, offset, size)).toBe(value);

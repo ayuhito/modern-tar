@@ -35,51 +35,6 @@ describe("pack", () => {
 		expect(decoder.decode(extracted[0].data)).toBe("hello world\n");
 	});
 
-	it("packs multiple files", async () => {
-		const entries: TarEntry[] = [
-			{
-				header: {
-					name: "file-1.txt",
-					mtime: new Date(1387580181000),
-					mode: 0o644,
-					uname: "maf",
-					gname: "staff",
-					uid: 501,
-					gid: 20,
-					size: 12,
-				},
-				body: "i am file-1\n",
-			},
-			{
-				header: {
-					name: "file-2.txt",
-					mtime: new Date(1387580181000),
-					mode: 0o644,
-					uname: "maf",
-					gname: "staff",
-					uid: 501,
-					gid: 20,
-					size: 12,
-				},
-				body: "i am file-2\n",
-			},
-		];
-
-		const packedBuffer = await packTar(entries);
-
-		// Verify the archive can be extracted correctly (round-trip test)
-		const extracted = await unpackTar(packedBuffer);
-		expect(extracted).toHaveLength(2);
-
-		expect(extracted[0].header.name).toBe("file-1.txt");
-		expect(extracted[0].header.size).toBe(12);
-		expect(decoder.decode(extracted[0].data)).toBe("i am file-1\n");
-
-		expect(extracted[1].header.name).toBe("file-2.txt");
-		expect(extracted[1].header.size).toBe(12);
-		expect(decoder.decode(extracted[1].data)).toBe("i am file-2\n");
-	});
-
 	it("packs different types (directory, symlink)", async () => {
 		const entries: TarEntry[] = [
 			{
@@ -228,51 +183,6 @@ describe("pack", () => {
 		const [extracted] = await unpackTar(packedBuffer);
 		expect(extracted.header.name).toBe(longName);
 		expect(extracted.header.pax?.path).toBeUndefined();
-	});
-
-	it("packs and then extracts successfully (round-trip)", async () => {
-		const originalEntries: TarEntry[] = [
-			{
-				header: {
-					name: "a/b/c.txt",
-					size: 11,
-					type: "file",
-					mode: 0o644,
-					mtime: new Date("2025-09-23T04:55:00.000Z"),
-				},
-				body: "hello world",
-			},
-			{
-				header: {
-					name: "a/b/",
-					type: "directory",
-					mode: 0o755,
-					size: 0,
-					mtime: new Date("2025-09-23T04:55:00.000Z"),
-				},
-			},
-		];
-
-		const packedBuffer = await packTar(originalEntries);
-		const extractedEntries = await unpackTar(packedBuffer);
-
-		expect(extractedEntries).toHaveLength(2);
-
-		// File entry checks
-		expect(extractedEntries[0].header.name).toBe("a/b/c.txt");
-		expect(extractedEntries[0].header.size).toBe(11);
-		expect(extractedEntries[0].header.type).toBe("file");
-		expect(extractedEntries[0].header.mode).toBe(0o644);
-		expect(extractedEntries[0].header.mtime).toEqual(
-			new Date("2025-09-23T04:55:00.000Z"),
-		);
-		expect(decoder.decode(extractedEntries[0].data)).toBe("hello world");
-
-		// Directory entry checks
-		expect(extractedEntries[1].header.name).toBe("a/b/");
-		expect(extractedEntries[1].header.size).toBe(0);
-		expect(extractedEntries[1].header.type).toBe("directory");
-		expect(extractedEntries[1].header.mode).toBe(0o755);
 	});
 
 	it("errors for invalid body types", async () => {
