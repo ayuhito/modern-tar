@@ -73,8 +73,13 @@ describe("unpack tar", () => {
 			},
 		});
 
+		// TypeScript 7 widens the writable side to BufferSource, although this
+		// stream always writes Uint8Array chunks.
 		const decompressed = compressed.pipeThrough(
-			new DecompressionStream("gzip"),
+			new DecompressionStream("gzip") as ReadableWritablePair<
+				Uint8Array,
+				Uint8Array
+			>,
 		);
 		const [wasm] = await unpackTar(decompressed, {
 			strip: 1,

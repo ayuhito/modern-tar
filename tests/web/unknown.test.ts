@@ -74,7 +74,7 @@ describe("unknown and non-standard tar formats", () => {
 				// Data should be accessible
 				expect(entry.data).toBeInstanceOf(Uint8Array);
 				if (entry.header.type === "file") {
-					expect(entry.data.length).toBe(entry.header.size);
+					expect(entry.data?.length).toBe(entry.header.size);
 				}
 			});
 		});

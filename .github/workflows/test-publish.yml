@@ -1,32 +1,43 @@
 name: Publish Any Commit
+
 on: [push, pull_request]
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
         with:
-          bun-version: latest
+          node-version-file: .node-version
+          cache: pnpm
 
       - name: Install
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
-      - name: Build
-        run: bun run build
+      - name: Check
+        run: pnpm run check
 
       - name: Typecheck
-        run: bun run typecheck
+        run: pnpm run typecheck
+
+      - name: Build and validate package
+        run: pnpm run build
 
       - name: Test
-        run: bun run test --run
+        run: pnpm test --run
+
+      - name: Test TypeScript 5.7 declarations
+        run: pnpm run test:types:compat
 
       - name: Publish
-        run: bunx pkg-pr-new publish
+        run: pnpm dlx pkg-pr-new@0.0.86 publish

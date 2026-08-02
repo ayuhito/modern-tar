@@ -6,13 +6,22 @@
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,
+	"packageManager": "pnpm@11.18.0",
 	"main": "./dist/web/index.js",
 	"module": "./dist/web/index.js",
 	"types": "./dist/web/index.d.ts",
 	"exports": {
 		"./package.json": "./package.json",
-		".": "./dist/web/index.js",
-		"./fs": "./dist/fs/index.js"
+		".": {
+			"types": "./dist/web/index.d.ts",
+			"import": "./dist/web/index.js",
+			"default": "./dist/web/index.js"
+		},
+		"./fs": {
+			"types": "./dist/fs/index.d.ts",
+			"import": "./dist/fs/index.js",
+			"default": "./dist/fs/index.js"
+		}
 	},
 	"typesVersions": {
 		"*": {
@@ -25,27 +34,32 @@
 		}
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.4",
-		"@types/node": "^26.1.1",
+		"@arethetypeswrong/core": "0.18.5",
+		"@biomejs/biome": "2.5.6",
+		"@types/node": "26.1.2",
 		"@vitest/browser-playwright": "4.1.10",
 		"@vitest/coverage-v8": "4.1.10",
-		"miniflare": "^4.20260714.0",
-		"playwright": "^1.61.1",
-		"tsdown": "^0.22.11",
-		"unrun": "0.2.39",
-		"typescript": "^6.0.3",
-		"vite": "^8.1.5",
+		"miniflare": "4.20260730.0",
+		"node-types-18": "npm:@types/node@18.19.130",
+		"playwright": "1.62.1",
+		"publint": "0.3.22",
+		"tsdown": "0.22.14",
+		"typescript": "7.0.2",
+		"typescript-5-7": "npm:typescript@5.7.3",
 		"vitest": "4.1.10"
 	},
 	"scripts": {
 		"build": "tsdown",
 		"dev": "tsdown --watch",
 		"test": "vitest",
-		"test:workers": "tsdown && vitest --config vitest.workers.config.ts --run",
+		"test:workers": "pnpm run build && vitest --config vitest.workers.config.ts --run",
 		"coverage": "vitest run --coverage",
-		"check": "biome check --write",
-		"typecheck": "tsc --noEmit",
-		"test:browser": "vitest --config=vitest.browser.config.ts --browser"
+		"check": "biome check .",
+		"check:fix": "biome check --write .",
+		"check:package": "node scripts/check-package.mjs",
+		"typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.web.json && tsc --noEmit --project tsconfig.fs.json",
+		"test:types:compat": "node scripts/check-types-compat.mjs",
+		"test:browser": "vitest --config=vitest.browser.config.ts --browser --run"
 	},
 	"files": [
 		"dist",

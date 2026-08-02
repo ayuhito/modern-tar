@@ -4,6 +4,11 @@ export default defineConfig([
 	{
 		entry: ["./src/web/index.ts", "./src/fs/index.ts"],
 		platform: "node",
+		publint: true,
+		attw: {
+			profile: "esm-only",
+			level: "error",
+		},
 		dts: {
 			build: true,
 		},

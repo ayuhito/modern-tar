@@ -159,7 +159,10 @@ export function unpackTar(
 						);
 						fileStreams.add(currentFileStream);
 						(pendingFileOpens ??= []).push(
-							currentFileStream.waitDrain().catch((error: Error) => error),
+							currentFileStream.waitDrain().then(
+								() => undefined,
+								(error: Error) => error,
+							),
 						);
 
 						// Stream body from unpacker to file.
