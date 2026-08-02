@@ -1,0 +1,17 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+	"packageRules": [
+		{
+			"description": "Group every non-major dependency update into one PR",
+			"matchUpdateTypes": ["minor", "patch", "pin", "digest", "pinDigest"],
+			"groupName": "all non-major dependencies",
+			"groupSlug": "all-non-major"
+		},
+		{
+			"description": "Keep major dependency upgrades separate",
+			"matchUpdateTypes": ["major"],
+			"groupName": null
+		}
+	]
+}
