@@ -1,31 +1,22 @@
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
-const server = {
-	watch: {
-		ignored: ["**/tests/fs/fixtures/e/symlink"],
-	},
-};
-
 export default defineConfig({
 	test: {
 		projects: [
 			{
-				server,
 				test: {
 					name: "node",
 					include: ["tests/{fs,tar,web}/**/*.test.ts"],
 				},
 			},
 			{
-				server,
 				test: {
 					name: "workers",
 					include: ["tests/workers/**/*.test.ts"],
 				},
 			},
 			{
-				server,
 				test: {
 					name: "browser",
 					include: ["tests/browser/**/*.test.ts"],

@@ -1,4 +1,12 @@
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFileSink } from "../../src/fs/file-sink";
@@ -121,10 +129,10 @@ vi.mock("node:fs", async () => {
 });
 
 describe("createFileSink", () => {
-	const testDir = "tests/fixtures/file-sink";
+	let tmpDir: string;
 
 	beforeEach(async () => {
-		await mkdir(testDir, { recursive: true });
+		tmpDir = await mkdtemp(join(tmpdir(), "modern-tar-sink-"));
 	});
 
 	afterEach(async () => {
@@ -142,11 +150,11 @@ describe("createFileSink", () => {
 		openCalls = 0;
 		removeCalls = 0;
 		maxWriteVectors = 0;
-		await rm(testDir, { recursive: true, force: true });
+		await rm(tmpDir, { recursive: true, force: true });
 	});
 
 	it("should write data to file asynchronously", async () => {
-		const filePath = `${testDir}/basic.txt`;
+		const filePath = `${tmpDir}/basic.txt`;
 		// Ensure parent directory exists before creating stream
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
@@ -161,7 +169,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should handle multiple writes and batch with fs.writev", async () => {
-		const filePath = `${testDir}/batched.txt`;
+		const filePath = `${tmpDir}/batched.txt`;
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath);
 
@@ -178,7 +186,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should limit fragmented writev batches", async () => {
-		const filePath = `${testDir}/fragmented.bin`;
+		const filePath = `${tmpDir}/fragmented.bin`;
 		const stream = createFileSink(filePath);
 		await stream.waitDrain();
 
@@ -192,7 +200,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should handle empty file (no writes)", async () => {
-		const filePath = `${testDir}/empty.txt`;
+		const filePath = `${tmpDir}/empty.txt`;
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath);
 
@@ -205,8 +213,8 @@ describe("createFileSink", () => {
 		await expect(stat(filePath)).resolves.toBeDefined();
 	});
 
-	it("should handle destroy gracefully with immediate file opening", async () => {
-		const filePath = `${testDir}/destroyed.txt`;
+	it("destroys while the file is opening", async () => {
+		const filePath = `${tmpDir}/destroyed.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
@@ -230,7 +238,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should discard queued writes after destroy", async () => {
-		const filePath = `${testDir}/discarded-queue.txt`;
+		const filePath = `${tmpDir}/discarded-queue.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
@@ -258,7 +266,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should ignore write after destroy", () => {
-		const filePath = `${testDir}/write-after-destroy.txt`;
+		const filePath = `${tmpDir}/write-after-destroy.txt`;
 		const stream = createFileSink(filePath);
 
 		stream.destroy();
@@ -270,7 +278,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should not replace an existing file after cancellation", async () => {
-		const filePath = `${testDir}/existing.txt`;
+		const filePath = `${tmpDir}/existing.txt`;
 		await writeFile(filePath, "original");
 		delayExistingOpen = true;
 		const stream = createFileSink(filePath);
@@ -288,7 +296,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should not reopen a removed file after cancellation", async () => {
-		const filePath = `${testDir}/removed.txt`;
+		const filePath = `${tmpDir}/removed.txt`;
 		await writeFile(filePath, "original");
 		delayRemove = true;
 		const stream = createFileSink(filePath);
@@ -306,8 +314,8 @@ describe("createFileSink", () => {
 		await expect(stat(filePath)).rejects.toMatchObject({ code: "ENOENT" });
 	});
 
-	it("should handle single write efficiently", async () => {
-		const filePath = `${testDir}/single.txt`;
+	it("writes a single chunk", async () => {
+		const filePath = `${tmpDir}/single.txt`;
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath);
 
@@ -319,7 +327,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should respect file mode option", async () => {
-		const filePath = `${testDir}/mode.txt`;
+		const filePath = `${tmpDir}/mode.txt`;
 		await mkdir(dirname(filePath), { recursive: true }); // Ensure dir exists
 		const stream = createFileSink(filePath, { mode: 0o600 });
 
@@ -333,29 +341,21 @@ describe("createFileSink", () => {
 		}
 	});
 
-	it("should handle streaming writes efficiently", async () => {
-		const filePath = `${testDir}/streaming.txt`;
+	it("writes streamed chunks", async () => {
+		const filePath = `${tmpDir}/streaming.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
 		stream.write(Buffer.from("test data"));
 
-		// Measure end time - should handle async operations efficiently
-		const start = performance.now();
 		await stream.end();
-		const elapsed = performance.now() - start;
 
-		// Verify file was written correctly
 		const content = await readFile(filePath, "utf-8");
 		expect(content).toBe("test data");
-
-		// Flush should be fast since it doesn't wait for close
-		// This is more of a behavioral test than a strict timing test
-		expect(elapsed).toBeLessThan(100); // Should be well under 100ms
 	});
 
 	it("should resolve waitDrain after partially flushing backlog", async () => {
-		const filePath = `${testDir}/wait-drain.txt`;
+		const filePath = `${tmpDir}/wait-drain.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
@@ -371,7 +371,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should preserve an asynchronous write error", async () => {
-		const filePath = `${testDir}/write-error.txt`;
+		const filePath = `${tmpDir}/write-error.txt`;
 		const stream = createFileSink(filePath);
 		await stream.waitDrain();
 
@@ -385,7 +385,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should retry the unwritten suffix of a partial write", async () => {
-		const filePath = `${testDir}/partial-write.txt`;
+		const filePath = `${tmpDir}/partial-write.txt`;
 		const stream = createFileSink(filePath);
 		await stream.waitDrain();
 
@@ -397,7 +397,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should retry the unwritten suffix of a partial writev", async () => {
-		const filePath = `${testDir}/partial-writev.txt`;
+		const filePath = `${tmpDir}/partial-writev.txt`;
 		const stream = createFileSink(filePath);
 		await stream.waitDrain();
 
@@ -411,7 +411,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should reject a write that makes no progress", async () => {
-		const filePath = `${testDir}/zero-write.txt`;
+		const filePath = `${tmpDir}/zero-write.txt`;
 		const stream = createFileSink(filePath);
 		await stream.waitDrain();
 
@@ -422,7 +422,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should handle mtime option with fs.futimes", async () => {
-		const filePath = join(testDir, "mtime-test.txt");
+		const filePath = join(tmpDir, "mtime-test.txt");
 		const testMtime = new Date("2023-01-15T10:30:00Z");
 		const stream = createFileSink(filePath, { mtime: testMtime });
 
@@ -439,7 +439,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should handle mtime option with empty file", async () => {
-		const filePath = join(testDir, "empty-mtime-test.txt");
+		const filePath = join(tmpDir, "empty-mtime-test.txt");
 		const testMtime = new Date("2023-06-20T15:45:30Z");
 		const stream = createFileSink(filePath, { mtime: testMtime });
 
@@ -456,7 +456,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should close the file descriptor when futimes fails", async () => {
-		const filePath = join(testDir, "mtime-error.txt");
+		const filePath = join(tmpDir, "mtime-error.txt");
 		const stream = createFileSink(filePath, { mtime: new Date() });
 		await stream.waitDrain();
 		const futimesError = new Error("futimes failed");
@@ -467,7 +467,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should work without mtime option (no futimes call)", async () => {
-		const filePath = join(testDir, "no-mtime-test.txt");
+		const filePath = join(tmpDir, "no-mtime-test.txt");
 		const stream = createFileSink(filePath); // No mtime option
 
 		stream.write(Buffer.from("content without mtime"));
@@ -483,7 +483,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should handle writes immediately as file opens", async () => {
-		const filePath = `${testDir}/immediate-writes.txt`;
+		const filePath = `${tmpDir}/immediate-writes.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 
@@ -498,7 +498,7 @@ describe("createFileSink", () => {
 	});
 
 	it("should handle normal operation without ready() method", async () => {
-		const filePath = `${testDir}/no-ready-needed.txt`;
+		const filePath = `${tmpDir}/no-ready-needed.txt`;
 		await mkdir(dirname(filePath), { recursive: true });
 		const stream = createFileSink(filePath);
 

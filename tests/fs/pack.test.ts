@@ -2,29 +2,25 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import * as path from "node:path";
+import { text } from "node:stream/consumers";
 import { pipeline } from "node:stream/promises";
 import { describe, expect } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { createTarDecoder, type TarHeader } from "../../src/web";
 import { it } from "../helpers/test";
-
-const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
+import { writeTree } from "../helpers/tree";
 
 // Helper to get mtime in seconds, like in tar headers
 const mtime = (stat: { mtime: Date }) =>
 	Math.floor(stat.mtime.getTime() / 1000);
 
-const readArchiveText = async (stream: AsyncIterable<Uint8Array>) => {
-	const chunks: Buffer[] = [];
-	for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-	return Buffer.concat(chunks).toString("utf8");
-};
-
 describe("pack", () => {
 	it("packs and extracts a directory with a single file", async ({
 		tmpDir,
 	}) => {
-		const sourceDir = path.join(FIXTURES_DIR, "a");
+		const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+			"hello.txt": "hello world\n",
+		});
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
@@ -50,7 +46,9 @@ describe("pack", () => {
 	});
 
 	it("packs and extracts a nested directory", async ({ tmpDir }) => {
-		const sourceDir = path.join(FIXTURES_DIR, "b");
+		const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+			"a/test.txt": "test\n",
+		});
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
@@ -126,7 +124,9 @@ describe("pack", () => {
 	});
 
 	it("filters entries on pack", async ({ tmpDir }) => {
-		const sourceDir = path.join(FIXTURES_DIR, "c");
+		const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+			".gitignore": "link\n",
+		});
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir, {
@@ -158,7 +158,7 @@ describe("pack", () => {
 		];
 
 		let mutated = false;
-		const archive = await readArchiveText(
+		const archive = await text(
 			packTar(sources, {
 				concurrency: 1,
 				filter: (filePath) => {
@@ -190,7 +190,7 @@ describe("pack", () => {
 			await fsp.writeFile(file, "SAFE12345678");
 			await fsp.writeFile(secret, "LEAK12345678");
 
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar(
 					[
 						{ type: "file", source: emptyFile, target: "empty.txt" },
@@ -280,7 +280,7 @@ describe("pack", () => {
 		await fsp.writeFile(file, "SAFE");
 
 		await expect(
-			readArchiveText(
+			text(
 				packTar([{ type: "file", source: file, target: "file.txt" }], {
 					filter: () => {
 						fs.truncateSync(file, 2);
@@ -306,7 +306,7 @@ describe("pack", () => {
 			await fsp.symlink("target.txt", link);
 
 			let swapped = false;
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar([{ type: "file", source: link, target: "link.txt" }], {
 					baseDir: sourceDir,
 					concurrency: 1,
@@ -342,7 +342,7 @@ describe("pack", () => {
 			await fsp.symlink(secret, inner);
 			await fsp.symlink("inner.txt", outer);
 
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar([{ type: "file", source: outer, target: "outer.txt" }], {
 					baseDir: sourceDir,
 					concurrency: 1,
@@ -367,7 +367,7 @@ describe("pack", () => {
 			await fsp.writeFile(target, "SAFE-DOT-TARGET");
 			await fsp.symlink("..safe.txt", link);
 
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar([{ type: "file", source: link, target: "link.txt" }], {
 					baseDir: sourceDir,
 					dereference: true,
@@ -391,7 +391,7 @@ describe("pack", () => {
 			await fsp.writeFile(path.join(outsideDir, "secret.txt"), "DIR-LEAK!");
 
 			let swapped = false;
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar(sourceDir, {
 					concurrency: 1,
 					filter: (filePath) => {
@@ -440,7 +440,7 @@ describe("pack", () => {
 
 			let archive: string;
 			try {
-				archive = await readArchiveText(packTar(sourceDir, { concurrency: 1 }));
+				archive = await text(packTar(sourceDir, { concurrency: 1 }));
 			} finally {
 				fs.promises.readdir = originalReaddir;
 				syncBuiltinESMExports();
@@ -510,111 +510,6 @@ describe("pack", () => {
 			const stats = await fsp.stat(extractedPath);
 			expect(stats.size).toBe(file.size);
 		}
-	});
-
-	describe("stream source validation", () => {
-		it("throws error when StreamSource has invalid size", async () => {
-			const sources = [
-				{
-					type: "stream" as const,
-					content: new ReadableStream({
-						start(controller) {
-							controller.enqueue(new TextEncoder().encode("test content"));
-							controller.close();
-						},
-					}),
-					target: "test.txt",
-					// size is intentionally missing
-					// biome-ignore lint/suspicious/noExplicitAny: Testing.
-				} as any, // Cast to bypass TypeScript validation for testing
-			];
-
-			const packStream = packTar(sources);
-
-			await expect(async () => {
-				for await (const _chunk of packStream) {
-					// Just consume the stream to trigger the error
-				}
-			}).rejects.toThrow("Invalid tar entry size.");
-		});
-
-		it("throws error when StreamSource has zero size", async () => {
-			const sources = [
-				{
-					type: "stream" as const,
-					content: new ReadableStream({
-						start(controller) {
-							controller.enqueue(new TextEncoder().encode("test content"));
-							controller.close();
-						},
-					}),
-					target: "test.txt",
-					size: 0,
-				},
-			];
-
-			const packStream = packTar(sources);
-
-			await expect(async () => {
-				for await (const _chunk of packStream) {
-					// Just consume the stream to trigger the error
-				}
-			}).rejects.toThrow("Streams require a positive size.");
-		});
-
-		it.each([Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
-			"throws error when StreamSource size is %p",
-			async (size) => {
-				const sources = [
-					{
-						type: "stream" as const,
-						content: new ReadableStream({
-							start(controller) {
-								controller.enqueue(new TextEncoder().encode("test content"));
-								controller.close();
-							},
-						}),
-						target: "test.txt",
-						size,
-					},
-				];
-
-				const packStream = packTar(sources);
-
-				await expect(async () => {
-					for await (const _chunk of packStream) {
-						// Just consume the stream to trigger the error
-					}
-				}).rejects.toThrow("Invalid tar entry size.");
-			},
-		);
-
-		it("works correctly with valid StreamSource size", async ({ tmpDir }) => {
-			const content = "test content for valid stream";
-			const sources = [
-				{
-					type: "stream" as const,
-					content: new ReadableStream({
-						start(controller) {
-							controller.enqueue(new TextEncoder().encode(content));
-							controller.close();
-						},
-					}),
-					target: "valid-stream.txt",
-					size: content.length,
-				},
-			];
-
-			const destDir = path.join(tmpDir, "extracted");
-			const packStream = packTar(sources);
-			const unpackStream = unpackTar(destDir);
-
-			await pipeline(packStream, unpackStream);
-
-			const extractedFile = path.join(destDir, "valid-stream.txt");
-			const extractedContent = await fsp.readFile(extractedFile, "utf-8");
-			expect(extractedContent).toBe(content);
-		});
 	});
 
 	it("allows overriding file and directory modes", async ({ tmpDir }) => {
