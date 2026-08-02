@@ -15,13 +15,11 @@ const USTAR_SPLIT_MAX_SIZE = USTAR_PREFIX_SIZE + USTAR_NAME_SIZE + 1;
 const NON_ASCII = /[^\x00-\x7f]/;
 
 function exceedsUtf8Limit(value: string, limit: number): boolean {
-	// A string's UTF-8 length is between one and three bytes per UTF-16 code
-	// unit. These bounds avoid encoding when they can prove the result.
+	// UTF-16 length gives cheap lower and upper bounds for UTF-8 bytes.
 	if (value.length * 3 <= limit) return false;
 	if (value.length > limit) return true;
 
-	// In the uncertain range, ASCII still has one byte per code unit. Delegate
-	// any Unicode case to TextEncoder, including surrogate pairs and lone halves.
+	// Medium-length ASCII is exact; measure Unicode strings.
 	if (!NON_ASCII.test(value)) return false;
 	return encoder.encode(value).length > limit;
 }

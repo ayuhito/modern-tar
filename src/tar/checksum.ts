@@ -36,8 +36,6 @@ export function writeChecksum(block: Uint8Array): void {
 	);
 
 	// Sum the entire block to get the checksum value.
-	// Addition is order-independent, so count down by index to avoid the
-	// Uint8Array iterator overhead that for...of adds on current V8 versions.
 	let checksum = 0;
 	for (let i = block.length; i > 0; ) {
 		checksum += block[--i];

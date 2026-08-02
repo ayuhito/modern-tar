@@ -11,13 +11,10 @@ export function writeString(
 ) {
 	if (!value) return;
 
-	// ASCII code units are already UTF-8 bytes. Write that common case directly
-	// so each header field does not allocate a subarray or enter TextEncoder.
+	// Copy ASCII directly, but leave Unicode truncation to TextEncoder.
 	for (let i = 0; i < value.length && i < size; i++) {
 		const charCode = value.charCodeAt(i);
 		if (charCode > 0x7f) {
-			// Restart from the beginning so TextEncoder remains the source of truth
-			// for multibyte characters, lone surrogates, and field truncation.
 			encoder.encodeInto(value, view.subarray(offset, offset + size));
 			return;
 		}
@@ -34,8 +31,7 @@ export function writeOctal(
 ) {
 	if (value === undefined) return;
 
-	// Octal digits can be written from least to most significant without
-	// allocating a padded string, subarray, or TextEncoder call.
+	// Write digits directly, then fall back if the value does not fit.
 	let remaining = value;
 	for (let i = offset + size - 2; i >= offset; i--) {
 		view[i] = 48 + (remaining % 8); // 48 is ASCII '0'.
@@ -43,9 +39,7 @@ export function writeOctal(
 	}
 	if (remaining === 0 && value % 1 === 0) return;
 
-	// Preserve the previous truncation behavior for values that do not fit the
-	// field, including the placeholder fields used alongside PAX extensions. The
-	// padded encoding overwrites every digit written by the speculative fast path.
+	// Preserve the previous bytes for overflow and non-integer values.
 	encoder.encodeInto(
 		value.toString(8).padStart(size - 1, "0"),
 		view.subarray(offset, offset + size - 1),
