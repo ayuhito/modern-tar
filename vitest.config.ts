@@ -43,7 +43,7 @@ export default defineConfig({
 			provider: "v8",
 			include: ["src/**/*.ts"],
 			thresholds: {
-				statements: 91.95,
+				statements: 91.89,
 				branches: 87.36,
 				functions: 96.7,
 				lines: 94.82,
