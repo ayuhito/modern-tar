@@ -1,22 +1,17 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
+import { useTempDirectory } from "../helpers/temp-directory";
 
 describe("stream coordination cases", () => {
 	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "vitest-unpack-tar-"));
-	});
-
-	afterEach(async () => {
-		await fsp.rm(tmpDir, { recursive: true, force: true });
+	useTempDirectory("vitest-unpack-tar-", (directory) => {
+		tmpDir = directory;
 	});
 
 	const createTestArchive = async (

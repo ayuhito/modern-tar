@@ -1,48 +1,45 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fixtureNames } from "./manifest";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const directory = dirname(fileURLToPath(import.meta.url));
+const fixturePath = (name: string) => join(directory, name);
 
 // Copied from https://github.com/mafintosh/tar-stream/tree/master/test/fixtures
-export const ONE_FILE_TAR = join(__dirname, "one-file.tar");
-export const MULTI_FILE_TAR = join(__dirname, "multi-file.tar");
-export const PAX_TAR = join(__dirname, "pax.tar");
-export const TYPES_TAR = join(__dirname, "types.tar");
-export const LONG_NAME_TAR = join(__dirname, "long-name.tar");
-export const UNICODE_BSD_TAR = join(__dirname, "unicode-bsd.tar");
-export const UNICODE_TAR = join(__dirname, "unicode.tar");
-export const NAME_IS_100_TAR = join(__dirname, "name-is-100.tar");
-export const INVALID_TGZ = join(__dirname, "invalid.tgz");
-export const SPACE_TAR_GZ = join(__dirname, "space.tar");
-export const GNU_LONG_PATH = join(__dirname, "gnu-long-path.tar");
-export const BASE_256_UID_GID = join(__dirname, "base-256-uid-gid.tar");
-export const LARGE_UID_GID = join(__dirname, "large-uid-gid.tar");
-export const BASE_256_SIZE = join(__dirname, "base-256-size.tar");
-export const HUGE = join(__dirname, "huge.tar.gz");
-export const LATIN1_TAR = join(__dirname, "latin1.tar");
-export const INCOMPLETE_TAR = join(__dirname, "incomplete.tar");
+export const ONE_FILE_TAR = fixturePath(fixtureNames.oneFile);
+export const MULTI_FILE_TAR = fixturePath(fixtureNames.multiFile);
+export const PAX_TAR = fixturePath(fixtureNames.pax);
+export const TYPES_TAR = fixturePath(fixtureNames.types);
+export const LONG_NAME_TAR = fixturePath(fixtureNames.longName);
+export const UNICODE_BSD_TAR = fixturePath(fixtureNames.unicodeBsd);
+export const UNICODE_TAR = fixturePath(fixtureNames.unicode);
+export const NAME_IS_100_TAR = fixturePath(fixtureNames.nameIs100);
+export const INVALID_TGZ = fixturePath(fixtureNames.invalidTgz);
+export const SPACE_TAR_GZ = fixturePath(fixtureNames.space);
+export const GNU_LONG_PATH = fixturePath(fixtureNames.gnuLongPath);
+export const BASE_256_UID_GID = fixturePath(fixtureNames.base256UidGid);
+export const LARGE_UID_GID = fixturePath(fixtureNames.largeUidGid);
+export const BASE_256_SIZE = fixturePath(fixtureNames.base256Size);
+export const HUGE = fixturePath(fixtureNames.huge);
+export const LATIN1_TAR = fixturePath(fixtureNames.latin1);
+export const INCOMPLETE_TAR = fixturePath(fixtureNames.incomplete);
 
 // Created using gnu tar: tar cf gnu-incremental.tar --format gnu --owner=myuser:12345 --group=mygroup:67890 test.txt
-export const GNU_TAR = join(__dirname, "gnu.tar");
+export const GNU_TAR = fixturePath(fixtureNames.gnu);
 // Created using gnu tar: tar cf gnu-incremental.tar -G --format gnu --owner=myuser:12345 --group=mygroup:67890 test.txt
-export const GNU_INCREMENTAL_TAR = join(__dirname, "gnu-incremental.tar");
+export const GNU_INCREMENTAL_TAR = fixturePath(fixtureNames.gnuIncremental);
 // Created from multi-file.tar, removing the magic and recomputing the checksum
-export const UNKNOWN_FORMAT = join(__dirname, "unknown-format.tar");
+export const UNKNOWN_FORMAT = fixturePath(fixtureNames.unknownFormat);
 // Created using gnu tar: tar cf v7.tar --format v7 test.txt
-export const V7_TAR = join(__dirname, "v7.tar");
-export const INVALID_TAR = join(__dirname, "invalid.tar");
+export const V7_TAR = fixturePath(fixtureNames.v7);
+export const INVALID_TAR = fixturePath(fixtureNames.invalidTar);
 
 // Real-world large packages for complex testing
-export const LODASH_TGZ = join(__dirname, "lodash-4.17.21.tgz");
-export const NEXT_SWC_TGZ = join(__dirname, "next-swc-linux-14.2.15.tgz");
-export const SHARP_TGZ = join(__dirname, "sharp-0.33.5.tgz");
-export const ELECTRON_TGZ = join(__dirname, "electron-33.0.2.tgz");
-export const NODE_V25_DARWIN_ARM64_TAR_GZ = join(
-	__dirname,
-	"node-v25.2.0-darwin-arm64.tar.gz",
+export const LODASH_TGZ = fixturePath(fixtureNames.lodash);
+export const NEXT_SWC_TGZ = fixturePath(fixtureNames.nextSwc);
+export const SHARP_TGZ = fixturePath(fixtureNames.sharp);
+export const ELECTRON_TGZ = fixturePath(fixtureNames.electron);
+export const NODE_V25_DARWIN_ARM64_TAR_GZ = fixturePath(
+	fixtureNames.nodeDarwinArm64,
 );
-export const TSGO_WASM_TGZ = join(
-	__dirname,
-	"tsgo-wasm-2025.12.7.tgz",
-);
+export const TSGO_WASM_TGZ = fixturePath(fixtureNames.tsgoWasm);

@@ -1,18 +1,12 @@
-import { promises as fs } from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { normalizeHeaderName, validateBounds } from "../../src/fs/path";
+import { useTempDirectory } from "../helpers/temp-directory";
 
 describe("path utilities", () => {
 	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "modern-tar-path-test-"));
-	});
-
-	afterEach(async () => {
-		await fs.rm(tmpDir, { recursive: true, force: true });
+	useTempDirectory("modern-tar-path-test-", (directory) => {
+		tmpDir = directory;
 	});
 
 	describe("normalizeHeaderName", () => {

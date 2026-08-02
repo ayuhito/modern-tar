@@ -1,13 +1,13 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import * as os from "node:os";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { createTarDecoder, type TarHeader } from "../../src/web";
+import { useTempDirectory } from "../helpers/temp-directory";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
@@ -24,13 +24,8 @@ const readArchiveText = async (stream: AsyncIterable<Uint8Array>) => {
 
 describe("pack", () => {
 	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "modern-tar-pack-test-"));
-	});
-
-	afterEach(async () => {
-		await fsp.rm(tmpDir, { recursive: true, force: true });
+	useTempDirectory("modern-tar-pack-test-", (directory) => {
+		tmpDir = directory;
 	});
 
 	it("packs and extracts a directory with a single file", async () => {

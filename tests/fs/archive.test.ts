@@ -1,13 +1,13 @@
 import { createReadStream, createWriteStream } from "node:fs";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/encoding";
+import { useTempDirectory } from "../helpers/temp-directory";
 
 const isWindows = process.platform === "win32";
 
@@ -19,12 +19,11 @@ let expectedTestContent: string;
 
 describe("packTarSources", () => {
 	let tmpDir: string;
+	useTempDirectory("modern-tar-archive-test-", (directory) => {
+		tmpDir = directory;
+	});
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(
-			path.join(os.tmpdir(), "modern-tar-archive-test-"),
-		);
-
 		// Read the actual fixture files to handle line endings correctly
 		expectedHelloContent = await fs.readFile(
 			path.join(FIXTURES_DIR, "a", "hello.txt"),
@@ -34,10 +33,6 @@ describe("packTarSources", () => {
 			path.join(FIXTURES_DIR, "b", "a", "test.txt"),
 			"utf-8",
 		);
-	});
-
-	afterEach(async () => {
-		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
 	it("packs a single file source", async () => {

@@ -5,9 +5,10 @@ import {
 	type TarEntry,
 	unpackTar,
 } from "../../src/web";
+import { fixtureNames } from "../web/fixtures/manifest";
 
 const TSGO_WASM_URL = new URL(
-	"../web/fixtures/tsgo-wasm-2025.12.7.tgz",
+	`../web/fixtures/${fixtureNames.tsgoWasm}`,
 	import.meta.url,
 ).href;
 

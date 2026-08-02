@@ -1,24 +1,18 @@
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
-import { Readable } from "node:stream";
+import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { unpackTar } from "../../src/fs";
 import { normalizeName } from "../../src/fs/path";
 import { packTar, type TarEntry } from "../../src/web";
+import { archiveStream } from "../helpers/archive";
+import { useTempDirectory } from "../helpers/temp-directory";
 
 describe("fs path normalization", () => {
 	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(
-			path.join(os.tmpdir(), "modern-tar-win-security-test-"),
-		);
-	});
-
-	afterEach(async () => {
-		await fs.rm(tmpDir, { recursive: true, force: true });
+	useTempDirectory("modern-tar-win-security-test-", (directory) => {
+		tmpDir = directory;
 	});
 
 	// Helper function to create tar with specific entries
@@ -26,7 +20,7 @@ describe("fs path normalization", () => {
 		entries: TarEntry[],
 	): Promise<Readable> => {
 		const tarBuffer = await packTar(entries);
-		return Readable.from([tarBuffer]);
+		return archiveStream(tarBuffer);
 	};
 
 	describe("normalizeName function", () => {

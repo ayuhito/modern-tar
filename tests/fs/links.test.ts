@@ -1,12 +1,12 @@
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
-import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
 import { packTar as packTarWeb } from "../../src/web";
+import { archiveStream } from "../helpers/archive";
+import { useTempDirectory } from "../helpers/temp-directory";
 
 const linkEntry = (
 	type: "link" | "symlink",
@@ -16,13 +16,8 @@ const linkEntry = (
 
 describe("links", () => {
 	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "modern-tar-links-test-"));
-	});
-
-	afterEach(async () => {
-		await fs.rm(tmpDir, { recursive: true, force: true });
+	useTempDirectory("modern-tar-links-test-", (directory) => {
+		tmpDir = directory;
 	});
 
 	it.skipIf(process.platform === "win32")("handles symlinks", async () => {
@@ -66,7 +61,7 @@ describe("links", () => {
 
 			await expect(
 				pipeline(
-					Readable.from([tarBuffer]),
+					archiveStream(tarBuffer),
 					unpackTar(destDir, { concurrency: 2 }),
 				),
 			).rejects.toThrow(
@@ -161,7 +156,7 @@ describe("links", () => {
 			]);
 
 			await pipeline(
-				Readable.from([tarBuffer]),
+				archiveStream(tarBuffer),
 				unpackTar(destDir, { concurrency: 1 }),
 			);
 

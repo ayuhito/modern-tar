@@ -1,9 +1,8 @@
-import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Mock fs/promises to control filesystem races.
 const originalFs =
@@ -90,17 +89,18 @@ vi.mock("node:fs/promises", async () => {
 import * as fs from "node:fs/promises";
 import { packTar, unpackTar } from "../../src/fs";
 import { packTar as packTarWeb } from "../../src/web";
+import { archiveStream } from "../helpers/archive";
+import { deferred } from "../helpers/deferred";
+import { fragments } from "../helpers/fragments";
+import { useTempDirectory } from "../helpers/temp-directory";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
 
 describe("extract", () => {
 	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(
-			path.join(os.tmpdir(), "modern-tar-extract-test-"),
-		);
+	useTempDirectory("modern-tar-extract-test-", (directory) => {
+		tmpDir = directory;
 	});
 
 	afterEach(async () => {
@@ -117,7 +117,6 @@ describe("extract", () => {
 		releaseWrite?.();
 		releaseWrite = null;
 		finishDelayedMkdir = null;
-		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
 	it("propagates file write backpressure to the source", async () => {
@@ -132,9 +131,9 @@ describe("extract", () => {
 		const maxBufferedChunks = (8 * 1024 * 1024) / chunkSize;
 		let pulledChunks = 0;
 		function* chunks() {
-			for (let offset = 0; offset < archive.length; offset += chunkSize) {
+			for (const chunk of fragments(archive, chunkSize)) {
 				pulledChunks++;
-				yield archive.subarray(offset, offset + chunkSize);
+				yield chunk;
 			}
 		}
 
@@ -205,7 +204,7 @@ describe("extract", () => {
 		};
 		const destDir = path.join(tmpDir, "cancelled-backpressure");
 		const unpackStream = unpackTar(destDir);
-		const extraction = pipeline(Readable.from([archive]), unpackStream);
+		const extraction = pipeline(archiveStream(archive), unpackStream);
 		await vi.waitFor(() => expect(releaseWrite).toBeTypeOf("function"));
 
 		unpackStream.destroy();
@@ -234,7 +233,7 @@ describe("extract", () => {
 		};
 		const destDir = path.join(tmpDir, "cancelled-detached");
 		const unpackStream = unpackTar(destDir);
-		const extraction = pipeline(Readable.from([archive]), unpackStream);
+		const extraction = pipeline(archiveStream(archive), unpackStream);
 		await vi.waitFor(() => expect(releaseWrite).toBeTypeOf("function"));
 
 		const cancelError = new Error("cancel detached write");
@@ -257,15 +256,14 @@ describe("extract", () => {
 				body: "late",
 			},
 		]);
-		mkdirDelay = new Promise<void>((resolve) => {
-			releaseMkdir = resolve;
-		});
-		const mkdirFinished = new Promise<void>((resolve) => {
-			finishDelayedMkdir = resolve;
-		});
+		const delayedMkdir = deferred();
+		mkdirDelay = delayedMkdir.promise;
+		releaseMkdir = delayedMkdir.resolve;
+		const mkdirFinished = deferred();
+		finishDelayedMkdir = mkdirFinished.resolve;
 		const destDir = path.join(tmpDir, "delayed-extracted-cancelled");
 		const unpackStream = unpackTar(destDir);
-		const extraction = pipeline(Readable.from([archive]), unpackStream);
+		const extraction = pipeline(archiveStream(archive), unpackStream);
 		await vi.waitFor(() =>
 			expect(unpackStream.writableLength).toBeGreaterThan(0),
 		);
@@ -274,7 +272,7 @@ describe("extract", () => {
 		unpackStream.destroy(cancelError);
 		await expect(extraction).rejects.toBe(cancelError);
 		releaseMkdir?.();
-		await mkdirFinished;
+		await mkdirFinished.promise;
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		await expect(fs.access(path.join(destDir, "late.txt"))).rejects.toThrow();
@@ -370,7 +368,7 @@ describe("extract", () => {
 				body: "hello",
 			},
 		]);
-		await pipeline(Readable.from([tarBuffer]), unpackTar(destDir));
+		await pipeline(archiveStream(tarBuffer), unpackTar(destDir));
 
 		expect(await fs.readFile(path.join(destDir, fileName), "utf8")).toBe(
 			"hello",
@@ -384,9 +382,9 @@ describe("extract", () => {
 		const destDir = path.join(tmpDir, "delayed-extracted");
 
 		// Set up the delay for mkdir
-		mkdirDelay = new Promise<void>((resolve) => {
-			releaseMkdir = resolve;
-		});
+		const delayedMkdir = deferred();
+		mkdirDelay = delayedMkdir.promise;
+		releaseMkdir = delayedMkdir.resolve;
 
 		try {
 			const entries = [
@@ -400,7 +398,7 @@ describe("extract", () => {
 			];
 
 			const tarBuffer = await packTarWeb(entries);
-			const packStream = Readable.from([tarBuffer]);
+			const packStream = archiveStream(tarBuffer);
 			const unpackStream = unpackTar(destDir, { filter: () => false });
 
 			const pipelinePromise = pipeline(packStream, unpackStream);
@@ -461,7 +459,7 @@ describe("extract", () => {
 			dmode: 0o755, // Override directory mode
 		});
 
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		const dirPath = path.join(destDir, "testdir");
 		const stats = await fs.stat(dirPath);
@@ -502,7 +500,7 @@ describe("extract", () => {
 		const unpackStream = unpackTar(destDir);
 
 		// This should handle cache invalidation properly
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		// Verify both directory and symlink were created
 		const dirStats = await fs.lstat(path.join(destDir, "testdir"));
@@ -543,7 +541,7 @@ describe("extract", () => {
 			]);
 
 			await expect(
-				pipeline(Readable.from([tarBuffer]), unpackTar(destDir)),
+				pipeline(archiveStream(tarBuffer), unpackTar(destDir)),
 			).rejects.toThrow("Symlink parent changed");
 			expect(await originalFs.readdir(outsideDir)).toEqual([]);
 		},
@@ -564,15 +562,14 @@ describe("extract", () => {
 				await originalFs.realpath(safeDir),
 				"inside.txt",
 			);
-			const openStarted = new Promise<string>((resolve) => {
-				interceptOpen = (target, resumeOpen) => {
-					if (path.basename(target) !== "inside.txt") return false;
-					interceptOpen = null;
-					releaseOpen = resumeOpen;
-					resolve(target);
-					return true;
-				};
-			});
+			const openStarted = deferred<string>();
+			interceptOpen = (target, resumeOpen) => {
+				if (path.basename(target) !== "inside.txt") return false;
+				interceptOpen = null;
+				releaseOpen = resumeOpen;
+				openStarted.resolve(target);
+				return true;
+			};
 
 			const tarBuffer = await packTarWeb([
 				{
@@ -594,12 +591,12 @@ describe("extract", () => {
 			]);
 			const pipelinePromise = expect(
 				pipeline(
-					Readable.from([tarBuffer]),
+					archiveStream(tarBuffer),
 					unpackTar(destDir, { concurrency: 2 }),
 				),
 			).rejects.toThrow("points outside the extraction directory");
 
-			expect(await openStarted).toBe(expectedOpenPath);
+			expect(await openStarted.promise).toBe(expectedOpenPath);
 			await vi.waitFor(async () => {
 				expect(await originalFs.readlink(path.join(destDir, "cached"))).toBe(
 					"redirect",
@@ -640,7 +637,7 @@ describe("extract", () => {
 			fmode: 0o644, // Override file mode
 		});
 
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		const filePath = path.join(destDir, "test-file.txt");
 		const stats = await fs.stat(filePath);
@@ -676,7 +673,7 @@ describe("extract", () => {
 		const unpackStream = unpackTar(destDir, { maxDepth: 3 });
 
 		await expect(
-			pipeline(Readable.from([tarBuffer]), unpackStream),
+			pipeline(archiveStream(tarBuffer), unpackStream),
 		).rejects.toThrow("Tar exceeds max specified depth.");
 	});
 
@@ -700,7 +697,7 @@ describe("extract", () => {
 
 		// Should succeed by stripping the absolute path prefix
 		await expect(
-			pipeline(Readable.from([tarBuffer]), unpackStream),
+			pipeline(archiveStream(tarBuffer), unpackStream),
 		).resolves.toBeUndefined();
 
 		// File should be extracted with stripped path: absolute/path.txt
@@ -727,7 +724,7 @@ describe("extract", () => {
 		const unpackStream = unpackTar(destDir);
 
 		await expect(
-			pipeline(Readable.from([tarBuffer]), unpackStream),
+			pipeline(archiveStream(tarBuffer), unpackStream),
 		).rejects.toThrow(
 			'Hardlink "/absolute/target" points outside the extraction directory.',
 		);
@@ -758,7 +755,7 @@ describe("extract", () => {
 				},
 			]);
 
-			await pipeline(Readable.from([tarBuffer]), unpackTar(tmpDir));
+			await pipeline(archiveStream(tarBuffer), unpackTar(tmpDir));
 
 			expect(collisions).toBe(1);
 			const targetStat = await fs.stat(targetPath);
@@ -788,7 +785,7 @@ describe("extract", () => {
 				},
 			]);
 
-			await pipeline(Readable.from([tarBuffer]), unpackTar(tmpDir));
+			await pipeline(archiveStream(tarBuffer), unpackTar(tmpDir));
 
 			await expect(fs.access(targetPath)).rejects.toThrow();
 			expect(await fs.readFile(outPath, "utf8")).toBe("target");
@@ -814,7 +811,7 @@ describe("extract", () => {
 		const tarBuffer = await packTarWeb(entries);
 		const unpackStream = unpackTar(destDir);
 
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		// Verify the symlink was created (timestamp setting is best-effort)
 		const linkPath = path.join(destDir, "test-symlink");
@@ -863,7 +860,7 @@ describe("extract", () => {
 
 		const tarBuffer = await packTarWeb(entries);
 		const unpackStream = unpackTar(destDir);
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		// Verify each file has correct mtime
 		const file1Stats = await fs.stat(path.join(destDir, "file1.txt"));
@@ -894,7 +891,7 @@ describe("extract", () => {
 
 		const tarBuffer = await packTarWeb(entries);
 		const unpackStream = unpackTar(destDir);
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		// Verify empty file has correct mtime
 		const extractedPath = path.join(destDir, "empty-file.txt");
@@ -933,7 +930,7 @@ describe("extract", () => {
 
 		const tarBuffer = await packTarWeb(entries);
 		const unpackStream = unpackTar(destDir);
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		// Verify timestamps
 		const oldStats = await fs.stat(path.join(destDir, "old-file.txt"));
@@ -972,7 +969,7 @@ describe("extract", () => {
 
 		const tarBuffer = await packTarWeb(entries);
 		const unpackStream = unpackTar(destDir);
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		// Verify nested file has correct mtime
 		const fileStats = await fs.stat(
@@ -1026,7 +1023,7 @@ describe("extract", () => {
 		const tarBuffer = await packTarWeb(entries);
 
 		const unpackStream = unpackTar(destDir);
-		await pipeline(Readable.from([tarBuffer]), unpackStream);
+		await pipeline(archiveStream(tarBuffer), unpackStream);
 
 		// Check that only the normal file was extracted
 		const files = await fs.readdir(destDir);
@@ -1060,7 +1057,7 @@ describe("extract", () => {
 
 		// This should trigger the processingPromise.catch block due to path validation
 		await expect(
-			pipeline(Readable.from([tarBuffer]), unpackStream),
+			pipeline(archiveStream(tarBuffer), unpackStream),
 		).rejects.toThrow(
 			'Symlink "../../../escape-attempt" points outside the extraction directory.',
 		);
@@ -1091,7 +1088,7 @@ describe("extract", () => {
 			const unpackStream = unpackTar(destDir);
 
 			await expect(
-				pipeline(Readable.from([tarBuffer]), unpackStream),
+				pipeline(archiveStream(tarBuffer), unpackStream),
 			).rejects.toThrow("is not a valid directory component");
 		});
 	});
@@ -1115,7 +1112,7 @@ describe("extract", () => {
 			];
 
 			const tarBuffer = await packTarWeb(entries);
-			const tarStream = Readable.from([tarBuffer]);
+			const tarStream = archiveStream(tarBuffer);
 			const unpackStream = unpackTar(destDir);
 
 			await pipeline(tarStream, unpackStream);
@@ -1145,7 +1142,7 @@ describe("extract", () => {
 			const tarBuffer = await packTarWeb(entries);
 			const unpackStream = unpackTar(destDir);
 
-			await pipeline(Readable.from([tarBuffer]), unpackStream);
+			await pipeline(archiveStream(tarBuffer), unpackStream);
 
 			// Should create directory without trailing slashes
 			const filePath = path.join(destDir, "document.pdf");
@@ -1170,7 +1167,7 @@ describe("extract", () => {
 			const tarBuffer = await packTarWeb(entries);
 			const unpackStream = unpackTar(destDir);
 
-			await pipeline(Readable.from([tarBuffer]), unpackStream);
+			await pipeline(archiveStream(tarBuffer), unpackStream);
 
 			// Should create directory without trailing slash
 			const dirPath = path.join(destDir, "valid-dir");
@@ -1197,7 +1194,7 @@ describe("extract", () => {
 			const tarBuffer = await packTarWeb(entries);
 			const unpackStream = unpackTar(destDir);
 
-			await pipeline(Readable.from([tarBuffer]), unpackStream);
+			await pipeline(archiveStream(tarBuffer), unpackStream);
 
 			// Should create the nested directory structure correctly
 			const filePath = path.join(destDir, "nested", "path", "file.txt");
@@ -1224,7 +1221,7 @@ describe("extract", () => {
 
 			const tarBuffer = await packTarWeb(entries);
 			const unpackStream = unpackTar(destDir);
-			await pipeline(Readable.from([tarBuffer]), unpackStream);
+			await pipeline(archiveStream(tarBuffer), unpackStream);
 
 			const createdPath = path.join(destDir, "overridden-name");
 			const stats = await fs.stat(createdPath);
@@ -1251,7 +1248,7 @@ describe("extract", () => {
 
 			const tarBuffer = await packTarWeb(entries);
 			const unpackStream = unpackTar(destDir);
-			await pipeline(Readable.from([tarBuffer]), unpackStream);
+			await pipeline(archiveStream(tarBuffer), unpackStream);
 
 			const createdPath = path.join(destDir, "mylink");
 			const stats = await fs.lstat(createdPath);
@@ -1286,7 +1283,7 @@ describe("extract", () => {
 
 			const tarBuffer = await packTarWeb(entries);
 			const unpackStream = unpackTar(destDir);
-			await pipeline(Readable.from([tarBuffer]), unpackStream);
+			await pipeline(archiveStream(tarBuffer), unpackStream);
 
 			// Check weird-dir is a directory
 			const dirPath = path.join(destDir, "weird-dir");
@@ -1434,7 +1431,7 @@ describe("extract", () => {
 				const tarBuffer = await packTarWeb(entries);
 				const unpackStream = unpackTar(destDir);
 
-				await pipeline(Readable.from([tarBuffer]), unpackStream);
+				await pipeline(archiveStream(tarBuffer), unpackStream);
 
 				// Wait a bit for any potential unhandled rejections to fire
 				await new Promise((resolve) => setTimeout(resolve, 100));
