@@ -39,7 +39,9 @@ jobs:
         run: pnpm run build
 
       - name: Lint package
-        run: pnpm run lint:package
+        run: |
+          pnpm exec publint --pack false
+          pnpm exec attw --pack --profile esm-only .
 
       - name: Install benchmark dependencies
         working-directory: benchmarks
@@ -50,7 +52,7 @@ jobs:
         run: npm exec tsc -- --noEmit
 
       - name: Test Workers
-        run: pnpm run test:workers
+        run: pnpm exec vitest --config vitest.workers.config.ts --run
 
   test-node:
     name: Node ${{ matrix.node-version }} (${{ matrix.os }})

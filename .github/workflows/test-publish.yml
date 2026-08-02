@@ -27,8 +27,5 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Lint package
-        run: pnpm run lint:package
-
       - name: Publish
         run: pnpm dlx pkg-pr-new@0.0.86 publish

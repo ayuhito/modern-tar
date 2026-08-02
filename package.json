@@ -54,8 +54,6 @@
 		"test:workers": "pnpm run build && vitest --config vitest.workers.config.ts --run",
 		"coverage": "vitest run --coverage",
 		"check": "biome check .",
-		"check:fix": "biome check --write .",
-		"lint:package": "publint --pack false && attw --pack --profile esm-only .",
 		"typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.web.json && tsc --noEmit --project tsconfig.fs.json",
 		"test:browser": "vitest --config=vitest.browser.config.ts --browser --run"
 	},
