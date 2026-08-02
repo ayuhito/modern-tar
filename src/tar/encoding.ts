@@ -31,8 +31,8 @@ export function writeOctal(
 ) {
 	if (value === undefined) return;
 
-	// TAR numeric fields are zero-padded ASCII octal, with the final byte reserved
-	// for NUL. Fill the digits right-to-left from the least significant digit.
+	// TAR numeric fields are zero-padded ASCII octal with a final NUL byte. As an
+	// optimization, fill digits right-to-left instead of encoding a padded string.
 	let remaining = value;
 	for (let i = offset + size - 2; i >= offset; i--) {
 		view[i] = 48 + (remaining % 8); // 48 is ASCII '0'.
