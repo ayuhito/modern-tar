@@ -19,6 +19,7 @@ describe("tar encoding properties", () => {
 			const value = tc.draw(gs.text({ excludeCharacters: "\0", maxSize: 64 }));
 			const offset = tc.draw(offsets);
 			const size = encoder.encode(value).length + 1;
+			// Non-zero guard bytes prove the writer stays within the selected field.
 			const buffer = new Uint8Array(offset + size + 16).fill(0xaa);
 			buffer.fill(0, offset, offset + size);
 
@@ -40,6 +41,7 @@ describe("tar encoding properties", () => {
 				gs.integers({ minValue: 0, maxValue: 8 ** (size - 1) - 1 }),
 			);
 			const offset = tc.draw(offsets);
+			// Non-zero guard bytes prove the writer stays within the selected field.
 			const buffer = new Uint8Array(offset + size + 16).fill(0xaa);
 			buffer.fill(0, offset, offset + size);
 
@@ -60,6 +62,7 @@ describe("tar encoding properties", () => {
 			const offset = tc.draw(offsets);
 			const size = 8;
 			const buffer = new Uint8Array(offset + size);
+			// Use the platform encoder as an independent oracle for the field bytes.
 			new DataView(buffer.buffer).setBigUint64(offset, BigInt(value));
 			buffer[offset] |= 0x80;
 

@@ -12,13 +12,14 @@ const segment = gs.text({
 });
 
 const entry = gs.record({
-	data: gs.optional(gs.binary({ maxSize: 1024 })),
+	body: gs.binary({ maxSize: 1024 }),
 	gid: gs.integers({ minValue: 0, maxValue: 1_000_000 }),
 	mode: gs.integers({ minValue: 0, maxValue: 0o777 }),
 	mtimeSeconds: gs.integers({ minValue: 0, maxValue: 2 ** 31 - 1 }),
 	name: gs
 		.arrays(segment, { minSize: 1, maxSize: 3 })
 		.map((parts) => parts.join("/")),
+	type: gs.sampledFrom(["file", "directory"] as const),
 	uid: gs.integers({ minValue: 0, maxValue: 1_000_000 }),
 });
 
@@ -30,19 +31,19 @@ describe("web archive properties", () => {
 				gs.integers({ minValue: 1, maxValue: 1024 }),
 			);
 			const sources = generated.map((value, index) => {
-				const directory = value.data === null;
+				const directory = value.type === "directory";
 				const name = `${index}-${value.name}${directory ? "/" : ""}`;
 				const header = {
 					name,
-					type: directory ? ("directory" as const) : ("file" as const),
-					size: value.data?.length ?? 0,
+					type: value.type,
+					size: directory ? 0 : value.body.length,
 					mode: value.mode,
 					uid: value.uid,
 					gid: value.gid,
 					mtime: new Date(value.mtimeSeconds * 1000),
 				};
 
-				return value.data === null ? { header } : { header, body: value.data };
+				return directory ? { header } : { header, body: value.body };
 			});
 			const archive = await packTar(sources);
 			const stream = new ReadableStream<Uint8Array>({
@@ -59,19 +60,20 @@ describe("web archive properties", () => {
 			expect(unpacked).toHaveLength(generated.length);
 			for (const [index, actual] of unpacked.entries()) {
 				const expected = generated[index];
+				const directory = expected.type === "directory";
 				expect(actual.header).toMatchObject({
-					name: `${index}-${expected.name}${expected.data === null ? "/" : ""}`,
-					type: expected.data === null ? "directory" : "file",
-					size: expected.data?.length ?? 0,
+					name: `${index}-${expected.name}${directory ? "/" : ""}`,
+					type: expected.type,
+					size: directory ? 0 : expected.body.length,
 					mode: expected.mode,
 					uid: expected.uid,
 					gid: expected.gid,
 					mtime: new Date(expected.mtimeSeconds * 1000),
 				});
-				if (expected.data === null) {
+				if (directory) {
 					expect(actual.data).toBeUndefined();
 				} else {
-					expect(actual.data).toEqual(Uint8Array.from(expected.data));
+					expect(actual.data).toEqual(Uint8Array.from(expected.body));
 				}
 			}
 		}));
