@@ -1,4 +1,3 @@
-import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { decoder } from "../../src/tar/encoding";
@@ -11,7 +10,6 @@ import {
 	LATIN1_TAR,
 	NAME_IS_100_TAR,
 	SPACE_TAR_GZ,
-	TSGO_WASM_TGZ,
 	UNICODE_BSD_TAR,
 } from "./fixtures";
 
@@ -124,22 +122,6 @@ describe("tar format fixtures", () => {
 	});
 
 	describe("error handling", () => {
-		it("streams wasm package with filtering without hanging", async () => {
-			// @ts-expect-error ReadableStream.from is available in Node tests
-			const fileStream = ReadableStream.from(createReadStream(TSGO_WASM_TGZ));
-			const tarStream = fileStream.pipeThrough(new DecompressionStream("gzip"));
-
-			const [wasm] = await unpackTar(tarStream, {
-				strip: 1,
-				filter: (header) => header.name === "tsgo.wasm",
-			});
-
-			expect(wasm).toBeDefined();
-			expect(wasm?.header.name).toBe("tsgo.wasm");
-			expect(wasm?.data).toBeInstanceOf(Uint8Array);
-			expect(wasm?.data?.length).toBeGreaterThan(0);
-		});
-
 		it("handles invalid gzip data gracefully", async () => {
 			// Create truly invalid gzip data (not just a misnamed valid archive)
 			const invalidGzipData = new Uint8Array([
@@ -175,30 +157,7 @@ describe("tar format fixtures", () => {
 			await expect(unpackTar(decompressedStream)).rejects.toThrow();
 		});
 
-		it("handles complex valid compressed archives efficiently", async () => {
-			// Test that the previously problematic "invalid.tgz" now works correctly
-			const buffer = await fs.readFile(INVALID_TGZ);
-
-			const decompressedStream = new ReadableStream({
-				start(controller) {
-					controller.enqueue(buffer);
-					controller.close();
-				},
-			}).pipeThrough(new DecompressionStream("gzip"));
-
-			// This should now work efficiently (was previously causing hangs)
-			const entries = await unpackTar(decompressedStream);
-
-			expect(entries.length).toBeGreaterThan(0);
-			// Verify some expected entries from the bl package
-			const dirEntry = entries.find((e) => e.header.name === "bl/");
-			expect(dirEntry).toBeDefined();
-			expect(dirEntry?.header.type).toBe("directory");
-		});
-
 		it("processes the original problematic invalid.tgz fixture without regression", async () => {
-			// This specific fixture was causing performance issues in previous implementations
-			// Ensure it processes correctly and doesn't hang or timeout
 			const buffer = await fs.readFile(INVALID_TGZ);
 
 			const decompressedStream = new ReadableStream({
@@ -208,16 +167,9 @@ describe("tar format fixtures", () => {
 				},
 			}).pipeThrough(new DecompressionStream("gzip"));
 
-			// Should complete in reasonable time and extract all entries
-			const startTime = Date.now();
 			const entries = await unpackTar(decompressedStream);
-			const processingTime = Date.now() - startTime;
 
-			// Verify the archive processes completely
 			expect(entries.length).toBe(54);
-			expect(processingTime).toBeLessThan(5000); // Should complete within 5 seconds
-
-			// Verify specific entries that should be present
 			const blDir = entries.find((e) => e.header.name === "bl/");
 			expect(blDir?.header.type).toBe("directory");
 

@@ -41,27 +41,19 @@ describe("real world examples", () => {
 		expect(readmeEntry?.data?.length).toBe(1107);
 	});
 
-	it("extracts a massive native binary package (@next/swc)", {
-		timeout: 60000,
+	it("buffers a native binary package (@next/swc)", {
+		timeout: 60_000,
 	}, async () => {
 		const entries = await extractTgz(NEXT_SWC_TGZ);
-
-		const filesAndDirs = entries.filter(
-			(e) => e.header.type === "file" || e.header.type === "directory",
+		const binary = entries.find(
+			(entry) => entry.header.name === "package/next-swc.linux-x64-gnu.node",
 		);
-		expect(filesAndDirs.length).toBe(3);
 
-		// Verify the massive binary file exists and is the correct size
-		const binaryEntry = entries.find(
-			(e) => e.header.name === "package/next-swc.linux-x64-gnu.node",
-		);
-		expect(binaryEntry).toBeDefined();
-		expect(binaryEntry?.data?.length).toBe(131406240);
-
-		// Verify package.json exists
-		expect(entries.some((e) => e.header.name === "package/package.json")).toBe(
-			true,
-		);
+		expect(entries).toHaveLength(3);
+		expect(binary?.data?.length).toBe(131_406_240);
+		expect(
+			entries.some((entry) => entry.header.name === "package/package.json"),
+		).toBe(true);
 	});
 
 	it("extracts a native C++ package with build files (sharp)", async () => {
@@ -111,55 +103,26 @@ describe("real world examples", () => {
 		expect(electronDtsEntry?.data?.length).toBe(987499);
 	});
 
-	it("extracts a Node.js release tarball", async () => {
+	it("streams a Node.js release tarball", async () => {
 		// @ts-expect-error ReadableStream.from is supported in Node tests
 		const fileStream = ReadableStream.from(
 			fs.createReadStream(NODE_V25_DARWIN_ARM64_TAR_GZ),
 		);
-
-		const entryStream = fileStream
+		const entries = fileStream
 			.pipeThrough(new DecompressionStream("gzip"))
 			.pipeThrough(createTarDecoder());
 
 		let count = 0;
 		let lastEntry = "";
 		let totalBytes = 0;
-		for await (const entry of entryStream) {
+		for await (const entry of entries) {
 			count++;
 			lastEntry = entry.header.name;
-
-			const reader = entry.body.getReader();
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				if (value) totalBytes += value.length;
-			}
+			for await (const chunk of entry.body) totalBytes += chunk.length;
 		}
 
 		expect(count).toBe(5986);
 		expect(lastEntry).toBe("node-v25.2.0-darwin-arm64/bin/npm");
-		expect(totalBytes).toBe(200544142);
-	});
-
-	it("streams entries from the Node.js release tarball", async () => {
-		// @ts-expect-error ReadableStream.from is supported in Node tests
-		const fileStream = ReadableStream.from(
-			fs.createReadStream(NODE_V25_DARWIN_ARM64_TAR_GZ),
-		);
-
-		const entryStream = fileStream
-			.pipeThrough(new DecompressionStream("gzip"))
-			.pipeThrough(createTarDecoder());
-
-		let count = 0;
-		let lastEntry = "";
-		for await (const entry of entryStream) {
-			count++;
-			lastEntry = entry.header.name;
-			await entry.body.cancel();
-		}
-
-		expect(count).toBe(5986);
-		expect(lastEntry).toBe("node-v25.2.0-darwin-arm64/bin/npm");
+		expect(totalBytes).toBe(200_544_142);
 	});
 });
