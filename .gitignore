@@ -6,6 +6,7 @@ dist
 .mise.toml
 *.tsbuildinfo
 coverage
+.hegel
 AGENT.md
 CLAUDE.md
 

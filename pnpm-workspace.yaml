@@ -1,2 +1,4 @@
 allowBuilds:
+  cbor-extract: true
+  koffi: true
   workerd: true
