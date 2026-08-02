@@ -2165,38 +2165,26 @@ describe("security", () => {
 							name: directoryName,
 							size: 0,
 							type: "directory",
-							mode: 0o755,
-							mtime: new Date(),
-							uid: 0,
-							gid: 0,
 						},
 					},
 					{
 						header: {
-							name: "config", // Same path without trailing slash
+							name: "config",
 							size: 4,
 							type: "file",
-							mode: 0o644,
-							mtime: new Date(),
-							uid: 0,
-							gid: 0,
 						},
 						body: "test",
 					},
 				];
 
-				const tarBuffer = await packTar(entries);
-				const maliciousTar = Readable.from([tarBuffer]);
-				const unpackStream = unpackTar(extractDir);
+				await expect(
+					pipeline(
+						Readable.from([await packTar(entries)]),
+						unpackTar(extractDir),
+					),
+				).rejects.toThrow(/Path conflict/);
 
-				// Should reject due to path conflict
-				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
-					/Path conflict/,
-				);
-
-				// Directory should still exist (first entry wins)
-				const configPath = path.join(extractDir, "config");
-				const stats = await fs.stat(configPath);
+				const stats = await fs.stat(path.join(extractDir, "config"));
 				expect(stats.isDirectory()).toBe(true);
 			},
 		);
