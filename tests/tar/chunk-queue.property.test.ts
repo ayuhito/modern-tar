@@ -7,7 +7,7 @@ const queueCapacity = 256;
 const initialChunks = 200;
 
 describe("chunk queue properties", () => {
-	it("matches a flat byte model across peek, pull, and discard operations", () =>
+	it("behaves like one contiguous byte sequence", () =>
 		hegel.test((tc) => {
 			const chunks = tc.draw(
 				gs.arrays(gs.binary({ maxSize: 64 }), { maxSize: 32 }),
@@ -18,6 +18,10 @@ describe("chunk queue properties", () => {
 				}),
 			);
 			const queue = createChunkQueue();
+			// Chunk boundaries are an implementation detail. This model concatenates
+			// every pushed chunk, then applies the same operations to the remaining
+			// bytes: peek reads without consuming, pull reads and consumes, and discard
+			// only consumes. Requests past the end return null without consuming.
 			let model = Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)));
 			for (const chunk of chunks) queue.push(Uint8Array.from(chunk));
 
