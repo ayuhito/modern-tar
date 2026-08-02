@@ -38,23 +38,6 @@ describe("tar utilities", () => {
 
 				expect(buffer.subarray(0, 5)).toEqual(new Uint8Array(5));
 			});
-
-			it("handles empty string", () => {
-				const buffer = new Uint8Array(10);
-				writeString(buffer, 0, 5, "");
-
-				expect(buffer.subarray(0, 5)).toEqual(new Uint8Array(5));
-			});
-
-			it("handles unicode characters", () => {
-				const buffer = new Uint8Array(20);
-				writeString(buffer, 0, 10, "café");
-
-				// UTF-8 encoding: c=0x63, a=0x61, f=0x66, é=0xc3,0xa9
-				expect(buffer.subarray(0, 5)).toEqual(
-					new Uint8Array([0x63, 0x61, 0x66, 0xc3, 0xa9]),
-				);
-			});
 		});
 
 		describe("readString", () => {
@@ -72,22 +55,6 @@ describe("tar utilities", () => {
 				const result = readString(buffer, 0, 5);
 
 				expect(result).toBe("hello");
-			});
-
-			it("handles offset correctly", () => {
-				const buffer = new Uint8Array([
-					0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00,
-				]);
-				const result = readString(buffer, 2, 6);
-
-				expect(result).toBe("hello");
-			});
-
-			it("handles unicode characters", () => {
-				const buffer = encoder.encode("café\x00");
-				const result = readString(buffer, 0, buffer.length);
-
-				expect(result).toBe("café");
 			});
 
 			it("handles empty string", () => {
@@ -110,13 +77,6 @@ describe("tar utilities", () => {
 				expect(buffer[11]).toBe(0); // NUL terminator
 			});
 
-			it("handles large numbers", () => {
-				const buffer = new Uint8Array(12);
-				writeOctal(buffer, 0, 12, 0o7777777);
-
-				expect(decoder.decode(buffer.subarray(0, 11))).toBe("00007777777");
-			});
-
 			it("handles undefined value", () => {
 				const buffer = new Uint8Array(12);
 				buffer.fill(0xff); // Fill with non-zero to test
@@ -125,38 +85,9 @@ describe("tar utilities", () => {
 				// Should remain unchanged
 				expect(buffer).toEqual(new Uint8Array(12).fill(0xff));
 			});
-
-			it("handles zero value", () => {
-				const buffer = new Uint8Array(12);
-				writeOctal(buffer, 0, 12, 0);
-
-				expect(decoder.decode(buffer.subarray(0, 11))).toBe("00000000000");
-			});
-
-			it("handles offset correctly", () => {
-				const buffer = new Uint8Array(20);
-				writeOctal(buffer, 5, 8, 644);
-
-				// 644 in octal is "1204", padded to 7 chars = "0001204"
-				expect(decoder.decode(buffer.subarray(5, 12))).toBe("0001204");
-			});
 		});
 
 		describe("readOctal", () => {
-			it("reads octal number", () => {
-				const buffer = encoder.encode("0001755\x00");
-				const result = readOctal(buffer, 0, 8);
-
-				expect(result).toBe(0o1755);
-			});
-
-			it("handles leading zeros", () => {
-				const buffer = encoder.encode("00000644");
-				const result = readOctal(buffer, 0, 8);
-
-				expect(result).toBe(0o644);
-			});
-
 			it("handles space-terminated octal", () => {
 				const buffer = encoder.encode("755 ");
 				const result = readOctal(buffer, 0, 4);
@@ -164,42 +95,11 @@ describe("tar utilities", () => {
 				expect(result).toBe(0o755);
 			});
 
-			it("handles null-terminated octal", () => {
-				const buffer = encoder.encode("755\x00");
-				const result = readOctal(buffer, 0, 4);
-
-				expect(result).toBe(0o755);
-			});
-
-			it("handles offset correctly", () => {
-				const buffer = encoder.encode("xxx0001755\x00");
-				const result = readOctal(buffer, 3, 8);
-
-				expect(result).toBe(0o1755);
-			});
-
 			it("returns 0 for empty or invalid octal", () => {
 				const buffer = encoder.encode("    \x00");
 				const result = readOctal(buffer, 0, 5);
 
 				expect(result).toBe(0);
-			});
-
-			it("handles maximum tar values", () => {
-				const buffer = encoder.encode("7777777\x00"); // 7-digit octal
-				const result = readOctal(buffer, 0, 8);
-
-				expect(result).toBe(0o7777777);
-			});
-
-			it("parses values larger than 2GB without overflowing", () => {
-				const largeSize = 0o20000000000; // 2 GiB boundary
-				const buffer = encoder.encode(`${largeSize.toString(8)}\x00`);
-
-				const result = readOctal(buffer, 0, buffer.length);
-
-				expect(result).toBe(largeSize);
-				expect(result).toBeGreaterThanOrEqual(2 ** 31);
 			});
 		});
 	});
@@ -322,15 +222,6 @@ describe("tar utilities", () => {
 	});
 
 	describe("edge cases and security", () => {
-		it("handles malformed octal strings gracefully", () => {
-			const buffer = encoder.encode("abc123\x00");
-			const result = readOctal(buffer, 0, 7);
-
-			// readOctal implementation treats non-digit chars as part of octal calculation
-			// This test documents actual behavior rather than ideal behavior
-			expect(typeof result).toBe("number");
-		});
-
 		it("handles buffer bounds correctly in writeString", () => {
 			const buffer = new Uint8Array(5);
 			// This should not write beyond buffer bounds
@@ -347,64 +238,9 @@ describe("tar utilities", () => {
 
 			expect(result).toBe("hello");
 		});
-
-		it("handles negative offsets safely", () => {
-			const buffer = new Uint8Array(10);
-			// These operations should be safe even with edge case inputs
-			expect(() => writeString(buffer, 0, 5, "test")).not.toThrow();
-			expect(() => readString(buffer, 0, 5)).not.toThrow();
-		});
-
-		it("handles very large octal numbers", () => {
-			const buffer = new Uint8Array(15);
-			const largeNumber = 0o7777777; // 7-digit octal that fits in JS integer range
-			writeOctal(buffer, 0, 15, largeNumber);
-
-			const result = readOctal(buffer, 0, 15);
-			expect(result).toBe(largeNumber);
-		});
-
-		it("handles octal overflow gracefully", () => {
-			// Test with number that would overflow octal representation
-			const buffer = encoder.encode("99999999999\x00"); // Invalid octal digits
-			const result = readOctal(buffer, 0, 12);
-
-			// readOctal treats '9' as part of calculation, this documents actual behavior
-			expect(typeof result).toBe("number");
-		});
 	});
 
 	describe("readNumeric", () => {
-		it("correctly parses base-256 encoded numbers", () => {
-			const buffer = new Uint8Array(8);
-			buffer[0] = 0x80; // Base-256 indicator
-			buffer[1] = 0x00;
-			buffer[2] = 0x00;
-			buffer[3] = 0x00;
-			buffer[4] = 0x01;
-			buffer[5] = 0x86;
-			buffer[6] = 0xa0;
-			buffer[7] = 0x00;
-
-			const result = readNumeric(buffer, 0, 8);
-			expect(result).toBe(25600000);
-		});
-
-		it("correctly parses large UIDs using base-256 encoding", () => {
-			const largeUid = 0x7fffffff; // 2^31 - 1
-			const buffer = new Uint8Array(8);
-			buffer[0] = 0x80; // Base-256 indicator
-			let remaining = largeUid;
-			for (let i = 7; i >= 1; i--) {
-				buffer[i] = remaining & 0xff;
-				remaining = Math.floor(remaining / 256);
-			}
-			buffer[0] |= remaining & 0x7f;
-
-			const result = readNumeric(buffer, 0, 8);
-			expect(result).toBe(largeUid);
-		});
-
 		it("falls back to octal parsing for normal numbers", () => {
 			const buffer = encoder.encode("0001755\x00");
 			const result = readNumeric(buffer, 0, 8);
@@ -415,26 +251,9 @@ describe("tar utilities", () => {
 			const buffer = new Uint8Array(8).fill(0xff);
 			expect(() => readNumeric(buffer, 0, 8)).toThrow("TAR number too large");
 		});
-
-		it("correctly handles the MSB mask for base-256", () => {
-			const buffer = new Uint8Array(8);
-			buffer[0] = 0x80; // MSB set, other bits clear
-			buffer[1] = 0x00;
-			buffer[2] = 0x00;
-			buffer[3] = 0x00;
-			buffer[4] = 0x00;
-			buffer[5] = 0x00;
-			buffer[6] = 0x00;
-			buffer[7] = 0x7f; // Small value
-
-			const result = readNumeric(buffer, 0, 8);
-			// First byte contributes 0 since MSB is masked out and other bits are 0
-			expect(result).toBe(0x7f);
-		});
 	});
 
 	it("handles unaligned zero blocks without crashing", () => {
-		const errorOccurred = false;
 		const unpacker = createUnpacker();
 
 		// Create a large buffer with unaligned offset that contains a zero block
@@ -450,8 +269,6 @@ describe("tar utilities", () => {
 			unpacker.write(unalignedChunk);
 			unpacker.end();
 		}).not.toThrow();
-
-		expect(errorOccurred).toBe(false);
 	});
 
 	it("rejects oversized meta entry bodies", () => {

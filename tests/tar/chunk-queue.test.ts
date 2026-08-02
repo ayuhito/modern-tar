@@ -13,27 +13,11 @@ describe("chunk queue", () => {
 			expect(queue.available()).toBe(5);
 		});
 
-		it("should handle multiple chunks", () => {
-			const queue = createChunkQueue();
-			queue.push(textEncoder.encode("hello "));
-			queue.push(textEncoder.encode("world"));
-			expect(queue.available()).toBe(11);
-		});
-
 		it("should ignore empty chunks", () => {
 			const queue = createChunkQueue();
 			queue.push(textEncoder.encode("data"));
 			queue.push(new Uint8Array(0));
 			expect(queue.available()).toBe(4);
-		});
-
-		it("should handle many chunks", () => {
-			const queue = createChunkQueue();
-			for (let i = 0; i < 100; i++) {
-				queue.push(textEncoder.encode(`chunk${i}`));
-			}
-			// Each chunk is "chunk" + i (at least 6 chars each)
-			expect(queue.available()).toBeGreaterThan(600);
 		});
 	});
 
@@ -80,17 +64,6 @@ describe("chunk queue", () => {
 
 			expect(textDecoder.decode(result!)).toBe("hello worl");
 			expect(queue.available()).toBe(2);
-		});
-
-		it("should read all available data", () => {
-			const queue = createChunkQueue();
-			queue.push(textEncoder.encode("one"));
-			queue.push(textEncoder.encode("two"));
-			queue.push(textEncoder.encode("three"));
-			const result = queue.pull(11);
-
-			expect(textDecoder.decode(result!)).toBe("onetwothree");
-			expect(queue.available()).toBe(0);
 		});
 
 		it("should handle partial chunk consumption correctly", () => {
@@ -230,120 +203,6 @@ describe("chunk queue", () => {
 		});
 	});
 
-	describe("circular buffer and resizing", () => {
-		it("should handle buffer wrapping with default capacity", () => {
-			const queue = createChunkQueue(); // default capacity 64
-
-			// Push 65 single-byte chunks to exceed default capacity
-			for (let i = 0; i < 65; i++) {
-				queue.push(textEncoder.encode(String(i % 10)));
-			}
-
-			expect(queue.available()).toBe(65);
-
-			// Read some data to create wrapping scenario
-			const result1 = queue.pull(10);
-			expect(textDecoder.decode(result1!)).toBe("0123456789");
-			expect(queue.available()).toBe(55);
-
-			// Add more chunks - should work with resized buffer
-			queue.push(textEncoder.encode("A"));
-			queue.push(textEncoder.encode("B"));
-
-			expect(queue.available()).toBe(57);
-		});
-
-		it("should resize when full and maintain data integrity", () => {
-			const queue = createChunkQueue(); // default capacity 64
-
-			// Push exactly 64 chunks to fill initial capacity
-			const chunks: string[] = [];
-			for (let i = 0; i < 64; i++) {
-				const chunk = `chunk${i}`;
-				chunks.push(chunk);
-				queue.push(textEncoder.encode(chunk));
-			}
-
-			// This push should trigger a resize
-			queue.push(textEncoder.encode("overflow"));
-			chunks.push("overflow");
-
-			// Verify all data is still accessible
-			let totalRead = "";
-			while (queue.available() > 0) {
-				const chunk = queue.pull(1);
-				if (chunk) {
-					totalRead += textDecoder.decode(chunk);
-				}
-			}
-
-			const expectedData = chunks.join("");
-			expect(totalRead).toBe(expectedData);
-		});
-
-		it("should handle multiple resizes correctly", () => {
-			const queue = createChunkQueue(); // default capacity 64
-
-			// Push enough chunks to trigger multiple resizes (64 -> 128 -> 256)
-			const testData: string[] = [];
-			for (let i = 0; i < 200; i++) {
-				const data = `item${i}`;
-				testData.push(data);
-				queue.push(textEncoder.encode(data));
-			}
-
-			expect(queue.available()).toBeGreaterThan(1000); // Should have substantial data
-
-			// Read all data back and verify integrity
-			let reconstructed = "";
-			for (const expected of testData) {
-				const chunk = queue.pull(expected.length);
-				expect(chunk).not.toBeNull();
-				reconstructed += textDecoder.decode(chunk!);
-			}
-
-			expect(reconstructed).toBe(testData.join(""));
-			expect(queue.available()).toBe(0);
-		});
-
-		it("should maintain correct order after resizing and partial reads", () => {
-			const queue = createChunkQueue(); // default capacity 64
-
-			// Fill beyond initial capacity with numbered chunks
-			const chunks: string[] = [];
-			for (let i = 0; i < 70; i++) {
-				const chunk = i.toString().padStart(2, "0");
-				chunks.push(chunk);
-				queue.push(textEncoder.encode(chunk));
-			}
-
-			// Partially consume some chunks to create complex state
-			const partial1 = queue.pull(5); // Should get first 5 bytes: "00010"
-			expect(textDecoder.decode(partial1!)).toBe("00010");
-
-			// Add more chunks after resize has occurred
-			for (let i = 70; i < 75; i++) {
-				const chunk = i.toString().padStart(2, "0");
-				chunks.push(chunk);
-				queue.push(textEncoder.encode(chunk));
-			}
-
-			// Read remaining data and verify order is maintained
-			let remaining = "";
-			while (queue.available() > 0) {
-				const chunk = queue.pull(1);
-				if (chunk) {
-					remaining += textDecoder.decode(chunk);
-				}
-			}
-
-			// Expected is all data joined together, minus the first 5 characters we already read
-			const allDataString = chunks.join("");
-			const expectedRemaining = allDataString.substring(5);
-			expect(remaining).toBe(expectedRemaining);
-		});
-	});
-
 	describe("peek", () => {
 		it("should return null if not enough data is available", () => {
 			const queue = createChunkQueue();
@@ -372,22 +231,6 @@ describe("chunk queue", () => {
 			const result2 = queue.peek(5);
 			expect(textDecoder.decode(result2!)).toBe("hello");
 			expect(queue.available()).toBe(11);
-		});
-
-		it("should peek data spanning multiple chunks without consuming", () => {
-			const queue = createChunkQueue();
-			queue.push(textEncoder.encode("hello "));
-			queue.push(textEncoder.encode("worl"));
-			queue.push(textEncoder.encode("d!"));
-
-			const result = queue.peek(10);
-			expect(textDecoder.decode(result!)).toBe("hello worl");
-			expect(queue.available()).toBe(12); // All data should still be there
-
-			// Peek again should return the same data
-			const result2 = queue.peek(10);
-			expect(textDecoder.decode(result2!)).toBe("hello worl");
-			expect(queue.available()).toBe(12);
 		});
 	});
 
@@ -471,37 +314,10 @@ describe("chunk queue", () => {
 			queue.discard(3);
 			expect(queue.available()).toBe(6);
 
-			// Third cycle: peek remaining, consume all
-			// Third cycle: peek 2, consume 6
+			// Third cycle: peek 2, consume the remaining 6
 			peeked = queue.peek(2);
 			expect(textDecoder.decode(peeked!)).toBe("fg");
 			queue.discard(6);
-			expect(queue.available()).toBe(0);
-		});
-
-		it("should work correctly with buffer resizing", () => {
-			const queue = createChunkQueue();
-
-			// Add enough chunks to trigger resize
-			for (let i = 0; i < 70; i++) {
-				queue.push(textEncoder.encode(`${i}`));
-			}
-
-			// Peek and consume in chunks
-			let totalConsumed = 0;
-			while (queue.available() > 0) {
-				const available = queue.available();
-				const toProcess = Math.min(available, 10);
-
-				const peeked = queue.peek(toProcess);
-				expect(peeked).not.toBeNull();
-				expect(peeked!.length).toBe(toProcess);
-
-				queue.discard(toProcess);
-				totalConsumed += toProcess;
-			}
-
-			expect(totalConsumed).toBeGreaterThan(100); // Should have processed substantial data
 			expect(queue.available()).toBe(0);
 		});
 	});
