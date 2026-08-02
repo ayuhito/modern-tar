@@ -1,5 +1,4 @@
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { describe, expect } from "vitest";
@@ -10,13 +9,10 @@ import { writeTree } from "../helpers/tree";
 describe("options fs", () => {
 	describe("pack options fs", () => {
 		it("uses dereference option to follow symlinks", async ({ tmpDir }) => {
-			const sourceDir = path.join(tmpDir, "source");
-			const targetFile = path.join(sourceDir, "target.txt");
-			const symlinkFile = path.join(sourceDir, "link.txt");
-
-			await fs.mkdir(sourceDir);
-			await fs.writeFile(targetFile, "target content");
-			await fs.symlink("target.txt", symlinkFile);
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"target.txt": "target content",
+			});
+			await fs.symlink("target.txt", path.join(sourceDir, "link.txt"));
 
 			// Pack without dereferencing (default)
 			const packStream1 = packTar(sourceDir, { dereference: false });
@@ -45,13 +41,10 @@ describe("options fs", () => {
 		});
 
 		it("uses filter option with fs.Stats", async ({ tmpDir }) => {
-			const sourceDir = path.join(tmpDir, "source");
-			await fs.mkdir(sourceDir);
-			await fs.writeFile(path.join(sourceDir, "small.txt"), "small");
-			await fs.writeFile(
-				path.join(sourceDir, "large.txt"),
-				"large content here",
-			);
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"small.txt": "small",
+				"large.txt": "large content here",
+			});
 
 			const packStream = packTar(sourceDir, {
 				filter: (_filePath, stats) => {
@@ -117,14 +110,11 @@ describe("options fs", () => {
 		});
 
 		it("multiple options", async ({ tmpDir }) => {
-			const sourceDir = path.join(tmpDir, "source");
-			const subDir = path.join(sourceDir, "subdir");
-			await fs.mkdir(sourceDir);
-			await fs.mkdir(subDir);
-
-			await fs.writeFile(path.join(sourceDir, "file1.txt"), "content1");
-			await fs.writeFile(path.join(sourceDir, "file2.log"), "content2");
-			await fs.writeFile(path.join(subDir, "nested.txt"), "nested");
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"file1.txt": "content1",
+				"file2.log": "content2",
+				"subdir/nested.txt": "nested",
+			});
 			await fs.symlink("file1.txt", path.join(sourceDir, "link.txt"));
 
 			const packStream = packTar(sourceDir, {
@@ -167,9 +157,9 @@ describe("options fs", () => {
 
 	describe("unpack options fs", () => {
 		it("uses fmode to override file permissions", async ({ tmpDir }) => {
-			const sourceDir = path.join(tmpDir, "source");
-			await fs.mkdir(sourceDir);
-			await fs.writeFile(path.join(sourceDir, "test.txt"), "content");
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"test.txt": "content",
+			});
 
 			const packStream = packTar(sourceDir);
 			const extractDir = path.join(tmpDir, "extract");
@@ -181,7 +171,7 @@ describe("options fs", () => {
 			await pipeline(packStream, unpackStream);
 
 			const fileStat = await fs.stat(path.join(extractDir, "test.txt"));
-			if (os.platform() !== "win32") {
+			if (process.platform !== "win32") {
 				expect(fileStat.mode & 0o777).toBe(0o600);
 			} else {
 				// Windows handles permissions differently
@@ -205,7 +195,7 @@ describe("options fs", () => {
 			await pipeline(packStream, unpackStream);
 
 			const dirStat = await fs.stat(path.join(extractDir, "subdir"));
-			if (os.platform() !== "win32") {
+			if (process.platform !== "win32") {
 				expect(dirStat.mode & 0o777).toBe(0o700);
 			} else {
 				// Windows handles permissions differently
@@ -254,10 +244,10 @@ describe("options fs", () => {
 		);
 
 		it("inherits core filter option", async ({ tmpDir }) => {
-			const sourceDir = path.join(tmpDir, "source");
-			await fs.mkdir(sourceDir);
-			await fs.writeFile(path.join(sourceDir, "keep.txt"), "keep");
-			await fs.writeFile(path.join(sourceDir, "skip.js"), "skip");
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"keep.txt": "keep",
+				"skip.js": "skip",
+			});
 
 			const packStream = packTar(sourceDir);
 			const extractDir = path.join(tmpDir, "extract");
@@ -274,9 +264,9 @@ describe("options fs", () => {
 		});
 
 		it("inherits core map option", async ({ tmpDir }) => {
-			const sourceDir = path.join(tmpDir, "source");
-			await fs.mkdir(sourceDir);
-			await fs.writeFile(path.join(sourceDir, "file.txt"), "content");
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"file.txt": "content",
+			});
 
 			const packStream = packTar(sourceDir);
 			const extractDir = path.join(tmpDir, "extract");
@@ -320,7 +310,7 @@ describe("options fs", () => {
 
 			// Check permissions
 			const fileStat = await fs.stat(path.join(extractDir, "HELLO.TXT"));
-			if (os.platform() !== "win32") {
+			if (process.platform !== "win32") {
 				expect(fileStat.mode & 0o777).toBe(0o600);
 			} else {
 				// Windows handles permissions differently
@@ -349,7 +339,7 @@ describe("options fs", () => {
 			const fileStat = await fs.stat(path.join(extractDir, "exec.sh"));
 			const dirStat = await fs.stat(path.join(extractDir, "restricted"));
 
-			if (os.platform() !== "win32") {
+			if (process.platform !== "win32") {
 				expect(fileStat.mode & 0o777).toBe(0o755);
 				expect(dirStat.mode & 0o777).toBe(0o700);
 			} else {

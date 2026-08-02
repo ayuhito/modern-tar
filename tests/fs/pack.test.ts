@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import * as path from "node:path";
+import { text } from "node:stream/consumers";
 import { pipeline } from "node:stream/promises";
 import { describe, expect } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
@@ -12,12 +13,6 @@ import { writeTree } from "../helpers/tree";
 // Helper to get mtime in seconds, like in tar headers
 const mtime = (stat: { mtime: Date }) =>
 	Math.floor(stat.mtime.getTime() / 1000);
-
-const readArchiveText = async (stream: AsyncIterable<Uint8Array>) => {
-	const chunks: Buffer[] = [];
-	for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-	return Buffer.concat(chunks).toString("utf8");
-};
 
 describe("pack", () => {
 	it("packs and extracts a directory with a single file", async ({
@@ -163,7 +158,7 @@ describe("pack", () => {
 		];
 
 		let mutated = false;
-		const archive = await readArchiveText(
+		const archive = await text(
 			packTar(sources, {
 				concurrency: 1,
 				filter: (filePath) => {
@@ -195,7 +190,7 @@ describe("pack", () => {
 			await fsp.writeFile(file, "SAFE12345678");
 			await fsp.writeFile(secret, "LEAK12345678");
 
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar(
 					[
 						{ type: "file", source: emptyFile, target: "empty.txt" },
@@ -285,7 +280,7 @@ describe("pack", () => {
 		await fsp.writeFile(file, "SAFE");
 
 		await expect(
-			readArchiveText(
+			text(
 				packTar([{ type: "file", source: file, target: "file.txt" }], {
 					filter: () => {
 						fs.truncateSync(file, 2);
@@ -311,7 +306,7 @@ describe("pack", () => {
 			await fsp.symlink("target.txt", link);
 
 			let swapped = false;
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar([{ type: "file", source: link, target: "link.txt" }], {
 					baseDir: sourceDir,
 					concurrency: 1,
@@ -347,7 +342,7 @@ describe("pack", () => {
 			await fsp.symlink(secret, inner);
 			await fsp.symlink("inner.txt", outer);
 
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar([{ type: "file", source: outer, target: "outer.txt" }], {
 					baseDir: sourceDir,
 					concurrency: 1,
@@ -372,7 +367,7 @@ describe("pack", () => {
 			await fsp.writeFile(target, "SAFE-DOT-TARGET");
 			await fsp.symlink("..safe.txt", link);
 
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar([{ type: "file", source: link, target: "link.txt" }], {
 					baseDir: sourceDir,
 					dereference: true,
@@ -396,7 +391,7 @@ describe("pack", () => {
 			await fsp.writeFile(path.join(outsideDir, "secret.txt"), "DIR-LEAK!");
 
 			let swapped = false;
-			const archive = await readArchiveText(
+			const archive = await text(
 				packTar(sourceDir, {
 					concurrency: 1,
 					filter: (filePath) => {
@@ -445,7 +440,7 @@ describe("pack", () => {
 
 			let archive: string;
 			try {
-				archive = await readArchiveText(packTar(sourceDir, { concurrency: 1 }));
+				archive = await text(packTar(sourceDir, { concurrency: 1 }));
 			} finally {
 				fs.promises.readdir = originalReaddir;
 				syncBuiltinESMExports();
