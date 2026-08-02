@@ -4,11 +4,5 @@
 		"lib": ["ES2023", "DOM", "DOM.AsyncIterable"],
 		"types": ["node"]
 	},
-	"include": [
-		"src/**/*.ts",
-		"tests/**/*.ts",
-		"tsdown.config.ts",
-		"vitest.*.ts"
-	],
-	"exclude": ["tests/package"]
+	"include": ["src/**/*.ts", "tests/**/*.ts", "tsdown.config.ts", "vitest.*.ts"]
 }

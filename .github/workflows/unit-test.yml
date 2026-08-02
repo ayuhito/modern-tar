@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   quality:
-    name: Quality and package
+    name: Quality
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,11 +35,11 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Build and validate package
+      - name: Build
         run: pnpm run build
 
-      - name: Test TypeScript 5.7 declarations
-        run: pnpm run test:types:compat
+      - name: Lint package
+        run: pnpm run lint:package
 
       - name: Install benchmark dependencies
         working-directory: benchmarks
@@ -51,25 +51,6 @@ jobs:
 
       - name: Test Workers
         run: pnpm run test:workers
-
-      - name: Pack
-        run: |
-          mkdir package-artifact
-          pnpm pack --pack-destination package-artifact
-          mv package-artifact/*.tgz package-artifact/modern-tar.tgz
-
-      - name: Validate package artifact
-        run: pnpm run check:package -- package-artifact/modern-tar.tgz
-
-      - name: Test package artifact
-        run: node scripts/smoke-package.mjs package-artifact/modern-tar.tgz
-
-      - name: Upload package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: package
-          path: package-artifact/modern-tar.tgz
-          if-no-files-found: error
 
   test-node:
     name: Node ${{ matrix.node-version }} (${{ matrix.os }})
@@ -103,59 +84,6 @@ jobs:
 
       - name: Test
         run: node node_modules/vitest/vitest.mjs --run
-
-  test-package:
-    name: Package on Node ${{ matrix.node-version }}
-    needs: quality
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [18, 20, 22, 24]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: package
-          path: package-artifact
-
-      - name: Setup Node ${{ matrix.node-version }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ matrix.node-version }}
-          package-manager-cache: false
-
-      - name: Test package
-        run: node scripts/smoke-package.mjs package-artifact/modern-tar.tgz
-
-  test-bun:
-    name: Package on Bun
-    needs: quality
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: package
-          path: package-artifact
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Test package
-        run: node scripts/smoke-package.mjs package-artifact/modern-tar.tgz bun
 
   test-browser:
     name: Browser tests

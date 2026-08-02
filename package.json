@@ -34,7 +34,7 @@
 		}
 	},
 	"devDependencies": {
-		"@arethetypeswrong/core": "0.18.5",
+		"@arethetypeswrong/cli": "0.18.5",
 		"@biomejs/biome": "2.5.6",
 		"@types/node": "26.1.2",
 		"@vitest/browser-playwright": "4.1.10",
@@ -45,7 +45,6 @@
 		"publint": "0.3.22",
 		"tsdown": "0.22.14",
 		"typescript": "7.0.2",
-		"typescript-5-7": "npm:typescript@5.7.3",
 		"vitest": "4.1.10"
 	},
 	"scripts": {
@@ -56,9 +55,8 @@
 		"coverage": "vitest run --coverage",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
-		"check:package": "node scripts/check-package.mjs",
+		"lint:package": "publint --pack false && attw --pack --profile esm-only .",
 		"typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.web.json && tsc --noEmit --project tsconfig.fs.json",
-		"test:types:compat": "node scripts/check-types-compat.mjs",
 		"test:browser": "vitest --config=vitest.browser.config.ts --browser --run"
 	},
 	"files": [

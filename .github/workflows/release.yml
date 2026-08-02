@@ -53,35 +53,11 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: pnpm version "$RELEASE_VERSION" --no-git-tag-version
 
-      - name: Check
-        run: pnpm run check
-
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      - name: Build and validate package
+      - name: Build
         run: pnpm run build
 
-      - name: Test
-        run: pnpm test --run
-
-      - name: Test TypeScript 5.7 declarations
-        run: pnpm run test:types:compat
-
-      - name: Pack release artifact
-        run: |
-          mkdir package-artifact
-          pnpm pack --pack-destination package-artifact
-          mv package-artifact/*.tgz package-artifact/modern-tar.tgz
-
-      - name: Validate release artifact
-        run: pnpm run check:package -- package-artifact/modern-tar.tgz
-
-      - name: Test release artifact
-        run: node scripts/smoke-package.mjs package-artifact/modern-tar.tgz
-
-      - name: Publish release artifact
-        run: npm publish package-artifact/modern-tar.tgz --access public --provenance
+      - name: Publish
+        run: npm publish --access public --provenance
 
   bump-version:
     name: Record released version

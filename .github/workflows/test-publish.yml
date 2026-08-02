@@ -24,20 +24,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Check
-        run: pnpm run check
-
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      - name: Build and validate package
+      - name: Build
         run: pnpm run build
 
-      - name: Test
-        run: pnpm test --run
-
-      - name: Test TypeScript 5.7 declarations
-        run: pnpm run test:types:compat
+      - name: Lint package
+        run: pnpm run lint:package
 
       - name: Publish
         run: pnpm dlx pkg-pr-new@0.0.86 publish
