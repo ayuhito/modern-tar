@@ -9,3 +9,14 @@ export function* chunkBytes(
 		yield bytes.subarray(offset, offset + size);
 	}
 }
+
+export function streamFromChunks(
+	chunks: Iterable<Uint8Array>,
+): ReadableStream<Uint8Array> {
+	return new ReadableStream({
+		start(controller) {
+			for (const chunk of chunks) controller.enqueue(chunk);
+			controller.close();
+		},
+	});
+}
