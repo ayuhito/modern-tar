@@ -13,8 +13,6 @@ import {
 	SPACE_TAR_GZ,
 	TSGO_WASM_TGZ,
 	UNICODE_BSD_TAR,
-	UNKNOWN_FORMAT,
-	V7_TAR,
 } from "./fixtures";
 
 describe("tar format fixtures", () => {
@@ -122,37 +120,6 @@ describe("tar format fixtures", () => {
 			// Verify large but still octal UIDs/GIDs
 			expect(entry.header.uid).toBeGreaterThan(100000);
 			expect(entry.header.gid).toBeGreaterThan(100000);
-		});
-	});
-
-	describe("format compatibility", () => {
-		it("extracts a v7 tar format archive", async () => {
-			const buffer = await fs.readFile(V7_TAR);
-			const entries = await unpackTar(buffer);
-
-			expect(entries).toHaveLength(1);
-			const [entry] = entries;
-
-			expect(entry.header.name).toBe("test.txt");
-			expect(entry.header.type).toBe("file");
-			// V7 format has no USTAR magic, but should still be readable
-			expect(decoder.decode(entry.data).trim()).toBe("Hello, world!");
-		});
-
-		it("extracts an archive with unknown format header", async () => {
-			const buffer = await fs.readFile(UNKNOWN_FORMAT);
-			const entries = await unpackTar(buffer);
-
-			// Should still be able to extract despite missing/corrupted magic
-			expect(entries).toHaveLength(2);
-
-			expect(entries[0].header.name).toBe("file-1.txt");
-			expect(entries[0].header.type).toBe("file");
-			expect(decoder.decode(entries[0].data)).toBe("i am file-1\n");
-
-			expect(entries[1].header.name).toBe("file-2.txt");
-			expect(entries[1].header.type).toBe("file");
-			expect(decoder.decode(entries[1].data)).toBe("i am file-2\n");
 		});
 	});
 

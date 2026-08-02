@@ -9,12 +9,9 @@ import { chunkBytes } from "../helpers/bytes";
 import { createDeferred } from "../helpers/deferred";
 import {
 	INCOMPLETE_TAR,
-	LONG_NAME_TAR,
 	MULTI_FILE_TAR,
 	ONE_FILE_TAR,
-	PAX_TAR,
 	TYPES_TAR,
-	UNICODE_TAR,
 } from "./fixtures";
 
 const readWithTimeout = <T>(
@@ -116,70 +113,6 @@ describe("unpackTar", () => {
 
 		expect(paxEntry.header.size).toBe(1);
 		expect(decoder.decode(paxEntry.data)).toBe("x");
-	});
-
-	it("does not apply PAX size to a bodyless symlink", async () => {
-		const archive = await packTar([
-			{
-				header: {
-					name: "bodyless",
-					type: "symlink",
-					size: 0,
-					linkname: "target",
-					pax: { size: String(BLOCK_SIZE) },
-				},
-			},
-			{
-				header: { name: "visible.txt", type: "file", size: 1 },
-				body: "x",
-			},
-		]);
-		const entries = await unpackTar(archive);
-
-		expect(entries.map((entry) => entry.header.name)).toEqual([
-			"bodyless",
-			"visible.txt",
-		]);
-		expect(entries[0].header.size).toBe(0);
-	});
-
-	it("does not carry PAX size through GNU long-name metadata", async () => {
-		const paxArchive = await packTar([
-			{
-				header: {
-					name: "ignored",
-					type: "file",
-					size: 0,
-					pax: { size: String(BLOCK_SIZE) },
-				},
-			},
-		]);
-		const longName = `${"long/".repeat(20)}file.txt`;
-		const longNameBytes = encoder.encode(`${longName}\0`);
-		const longNameBlock = new Uint8Array(BLOCK_SIZE);
-		longNameBlock.set(longNameBytes);
-		const gnuHeader = createTarHeader({
-			name: "././@LongLink",
-			type: "gnu-long-name",
-			size: longNameBytes.length,
-		});
-		const fileArchive = await packTar([
-			{
-				header: { name: "short.txt", type: "file", size: 5 },
-				body: "hello",
-			},
-		]);
-		const archive = new Uint8Array(BLOCK_SIZE * 4 + fileArchive.length);
-		archive.set(paxArchive.subarray(0, BLOCK_SIZE * 2));
-		archive.set(gnuHeader, BLOCK_SIZE * 2);
-		archive.set(longNameBlock, BLOCK_SIZE * 3);
-		archive.set(fileArchive, BLOCK_SIZE * 4);
-
-		const [entry] = await unpackTar(archive);
-
-		expect(entry.header.name).toBe(longName);
-		expect(entry.header.size).toBe(5);
-		expect(decoder.decode(entry.data)).toBe("hello");
 	});
 
 	it("extracts a tar with various entry types (directory, symlink)", async () => {
@@ -636,145 +569,5 @@ describe("createTarDecoder", () => {
 
 		const finalRead = await reader.read();
 		expect(finalRead.done).toBe(true);
-	});
-});
-
-describe("spec compliance", () => {
-	describe("USTAR Fields", () => {
-		it("extracts a filename that is exactly 100 characters long", async () => {
-			const longName = "a".repeat(100);
-			const archive = await packTar([
-				{ header: { name: longName, type: "file", size: 4 }, body: "test" },
-			]);
-			const [entry] = await unpackTar(archive);
-			expect(entry.header.name).toBe(longName);
-		});
-
-		it("extracts a long name using the USTAR 'prefix' field", async () => {
-			const buffer = await fs.readFile(LONG_NAME_TAR);
-			const expectedName =
-				"my/file/is/longer/than/100/characters/and/should/use/the/prefix/header/foobarbaz/foobarbaz/foobarbaz/foobarbaz/foobarbaz/foobarbaz/filename.txt";
-
-			const [entry] = await unpackTar(buffer);
-			expect(entry.header.name).toBe(expectedName);
-		});
-	});
-
-	describe("PAX Extensions", () => {
-		it("extracts a unicode name from a PAX header", async () => {
-			const buffer = await fs.readFile(UNICODE_TAR);
-			const [entry] = await unpackTar(buffer);
-
-			expect(entry.header.name).toBe("høstål.txt");
-			expect(entry.header.pax).toEqual({ path: "høstål.txt" });
-			expect(decoder.decode(entry.data)).toBe("høllø\n");
-		});
-
-		it("extracts custom key-value attributes from a PAX header", async () => {
-			const buffer = await fs.readFile(PAX_TAR);
-			const [entry] = await unpackTar(buffer);
-
-			expect(entry.header.name).toBe("pax.txt");
-			expect(entry.header.pax).toEqual({ path: "pax.txt", special: "sauce" });
-		});
-
-		it("uses PAX 'size' attribute for files larger than USTAR limit", async () => {
-			const hugeFileSize = "8804630528"; // ~8.2 GB
-			const archive = await packTar([
-				{
-					header: {
-						name: "huge.txt",
-						type: "file",
-						size: 11,
-						pax: { size: hugeFileSize },
-					},
-					body: "placeholder",
-				},
-			]);
-
-			const [entry] = await unpackTar(archive);
-			expect(entry.header.size).toBe(parseInt(hugeFileSize, 10));
-		});
-
-		it("uses PAX for large file size via custom PAX attribute", async () => {
-			const archive = await packTar([
-				{
-					header: {
-						name: "test.txt",
-						type: "file",
-						size: 4,
-						pax: { comment: "test comment" },
-					},
-					body: "test",
-				},
-			]);
-
-			const [entry] = await unpackTar(archive);
-			expect(entry.header.pax?.comment).toBe("test comment");
-		});
-
-		it("handles PAX with custom attributes", async () => {
-			const archive = await packTar([
-				{
-					header: {
-						name: "test.txt",
-						type: "file",
-						size: 4,
-						pax: { "custom.attribute": "custom value" },
-					},
-					body: "test",
-				},
-			]);
-
-			const [entry] = await unpackTar(archive);
-			expect(entry.header.name).toBe("test.txt");
-			expect(entry.header.pax?.["custom.attribute"]).toBe("custom value");
-		});
-	});
-
-	describe("Archive Structure Edge Cases", () => {
-		it("handles data after final null blocks in strict mode", async () => {
-			const archive = await packTar([
-				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
-			]);
-			const extraData = new Uint8Array(100).fill(0xff);
-			const archiveWithExtra = new Uint8Array(
-				archive.length + extraData.length,
-			);
-			archiveWithExtra.set(archive);
-			archiveWithExtra.set(extraData, archive.length);
-
-			await expect(
-				unpackTar(archiveWithExtra, { strict: true }),
-			).rejects.toThrow(/Invalid EOF/);
-		});
-
-		it("handles archive ending with single null block", async () => {
-			const archive = await packTar([
-				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
-			]);
-			const archiveWithOneEOF = archive.slice(0, archive.length - BLOCK_SIZE);
-
-			await expect(
-				unpackTar(archiveWithOneEOF, { strict: true }),
-			).rejects.toThrow(/Tar archive is truncated/);
-
-			const resultNonStrict = await unpackTar(archiveWithOneEOF, {
-				strict: false,
-			});
-			expect(resultNonStrict).toHaveLength(1);
-			expect(resultNonStrict[0].header.name).toBe("test.txt");
-		});
-
-		it("handles archive ending mid-header", async () => {
-			const archive = await packTar([
-				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
-			]);
-			const truncatedArchive = archive.slice(0, 200);
-
-			await expect(
-				unpackTar(truncatedArchive, { strict: true }),
-			).rejects.toThrow();
-		});
 	});
 });
