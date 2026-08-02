@@ -46,9 +46,9 @@ export async function packTar(
 	entries: readonly (TarEntry | ParsedTarEntryWithData)[],
 ): Promise<Uint8Array<ArrayBuffer>> {
 	const { readable, controller } = createTarPacker();
+	const archive = streamToBuffer(readable);
 
-	// This promise runs the packing process in the background.
-	const packingPromise = (async () => {
+	try {
 		for (const entry of entries) {
 			const entryStream = controller.add(entry.header);
 
@@ -84,14 +84,13 @@ export async function packTar(
 				}
 			}
 		}
-	})()
-		.then(() => controller.finalize())
-		.catch((err) => controller.error(err));
 
-	// Await the packing promise to ensure any background errors are thrown.
-	await packingPromise;
+		controller.finalize();
+	} catch (error) {
+		controller.error(error);
+	}
 
-	return streamToBuffer(readable);
+	return archive;
 }
 
 /**

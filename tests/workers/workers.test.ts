@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Miniflare } from "miniflare";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { packTar } from "../../src/web/helpers";
+import { packTar, unpackTar } from "../../src/web/helpers";
 import { chunkBytes } from "../helpers/bytes";
 
 type Dataset = { count: number; size: number };
@@ -61,6 +61,19 @@ const postArchive = async (
 };
 
 describe.sequential("Cloudflare Workers", () => {
+	it("packs an archive", async () => {
+		const response = await worker.dispatchFetch(
+			"http://localhost:8787/?mode=pack",
+		);
+		const entries = await unpackTar(await response.arrayBuffer());
+
+		expect(entries.map(({ header }) => header.name)).toEqual([
+			"worker/",
+			"worker/data.bin",
+		]);
+		expect(entries[1].data).toEqual(Uint8Array.of(1, 2, 3, 4));
+	});
+
 	it.each(["response", "reader", "iterator", "buffered"] as const)(
 		"decodes fragmented uploads using the %s body API",
 		async (mode) => {

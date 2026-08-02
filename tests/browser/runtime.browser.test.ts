@@ -1,5 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { createTarDecoder, packTar, unpackTar } from "../../src/web";
+import {
+	createTarDecoder,
+	createTarPacker,
+	packTar,
+	unpackTar,
+} from "../../src/web";
 import { chunkBytes } from "../helpers/bytes";
 
 const TSGO_WASM_URL = new URL(
@@ -72,6 +77,19 @@ describe("browser runtime", () => {
 		expect(second.value.header.name).toBe("pkg/module.wasm");
 		await second.value.body.cancel();
 		await expect(reader.read()).resolves.toMatchObject({ done: true });
+	});
+
+	it("aborts an active pack entry while output is blocked", async () => {
+		const reason = new Error("cancelled");
+		const { readable, controller } = createTarPacker();
+		const reader = readable.getReader();
+		const writer = controller.add({ name: "file", size: 1 }).getWriter();
+		const writing = writer.write(Uint8Array.of(1)).catch((error) => error);
+		const closed = reader.closed.catch((error) => error);
+
+		await writer.abort(reason);
+		await expect(writing).resolves.toBe(reason);
+		await expect(closed).resolves.toBe(reason);
 	});
 
 	it("filters fragmented archive streams", async () => {
