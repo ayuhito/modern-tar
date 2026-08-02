@@ -40,7 +40,11 @@ describe("PAX format", () => {
 	] as const)(
 		"selects PAX for %s values by UTF-8 bytes",
 		(field, value, expected) => {
-			const generated = generatePax({ name: "entry", [field]: value });
+			const generated = generatePax({
+				name: "entry",
+				size: 0,
+				[field]: value,
+			});
 			expect(generated !== null).toBe(expected);
 		},
 	);
@@ -56,6 +60,7 @@ describe("PAX format", () => {
 				{
 					header: {
 						name,
+						size: 0,
 						type: "symlink",
 						linkname,
 						uname,
@@ -84,6 +89,7 @@ describe("PAX format", () => {
 				{
 					header: {
 						name: "link",
+						size: 0,
 						type: "symlink",
 						linkname: "target",
 						pax: { size: String(BLOCK_SIZE) },

@@ -37,6 +37,7 @@ describe("V7 compatibility", () => {
 	it("ignores encoded sizes for bodyless V7 links", async () => {
 		const link = createTarHeader({
 			name: "link-entry",
+			size: 0,
 			type: LINK,
 			linkname: "target",
 		});

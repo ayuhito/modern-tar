@@ -18,6 +18,7 @@ describe("PAX properties", () => {
 			const custom = tc.draw(unicodeText);
 			const generated = generatePax({
 				name: path,
+				size: 0,
 				pax: { comment, custom },
 			});
 			expect(generated).not.toBeNull();
