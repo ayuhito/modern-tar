@@ -1,12 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { Readable } from "node:stream";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { describe, expect, it } from "vitest";
 import { unpackTar } from "../../src/fs";
 import { normalizeName } from "../../src/fs/path";
 import { packTar, type TarEntry } from "../../src/web";
-import { archiveStream } from "../helpers/archive";
 import { useTempDirectory } from "../helpers/temp-directory";
 
 describe("fs path normalization", () => {
@@ -20,7 +19,7 @@ describe("fs path normalization", () => {
 		entries: TarEntry[],
 	): Promise<Readable> => {
 		const tarBuffer = await packTar(entries);
-		return archiveStream(tarBuffer);
+		return Readable.from([tarBuffer]);
 	};
 
 	describe("normalizeName function", () => {

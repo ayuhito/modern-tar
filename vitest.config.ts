@@ -1,5 +1,5 @@
 import { playwright } from "@vitest/browser-playwright";
-import { defineConfig, defineProject } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 const server = {
 	watch: {
@@ -10,21 +10,21 @@ const server = {
 export default defineConfig({
 	test: {
 		projects: [
-			defineProject({
+			{
 				server,
 				test: {
 					name: "node",
 					include: ["tests/{fs,tar,web}/**/*.test.ts"],
 				},
-			}),
-			defineProject({
+			},
+			{
 				server,
 				test: {
 					name: "workers",
 					include: ["tests/workers/**/*.test.ts"],
 				},
-			}),
-			defineProject({
+			},
+			{
 				server,
 				test: {
 					name: "browser",
@@ -37,7 +37,7 @@ export default defineConfig({
 						instances: [{ browser: "chromium" }, { browser: "firefox" }],
 					},
 				},
-			}),
+			},
 		],
 		coverage: {
 			provider: "v8",

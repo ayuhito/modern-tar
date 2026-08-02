@@ -5,10 +5,10 @@ import {
 	type TarEntry,
 	unpackTar,
 } from "../../src/web";
-import { fixtureNames } from "../web/fixtures/manifest";
+import { TSGO_WASM_FIXTURE } from "../web/fixtures/manifest";
 
 const TSGO_WASM_URL = new URL(
-	`../web/fixtures/${fixtureNames.tsgoWasm}`,
+	`../web/fixtures/${TSGO_WASM_FIXTURE}`,
 	import.meta.url,
 ).href;
 

@@ -1,45 +1,43 @@
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { fixtureNames } from "./manifest";
+import { join } from "node:path";
+import { TSGO_WASM_FIXTURE } from "./manifest";
 
-const directory = dirname(fileURLToPath(import.meta.url));
-const fixturePath = (name: string) => join(directory, name);
+const fixturePath = (name: string) => join(import.meta.dirname, name);
 
 // Copied from https://github.com/mafintosh/tar-stream/tree/master/test/fixtures
-export const ONE_FILE_TAR = fixturePath(fixtureNames.oneFile);
-export const MULTI_FILE_TAR = fixturePath(fixtureNames.multiFile);
-export const PAX_TAR = fixturePath(fixtureNames.pax);
-export const TYPES_TAR = fixturePath(fixtureNames.types);
-export const LONG_NAME_TAR = fixturePath(fixtureNames.longName);
-export const UNICODE_BSD_TAR = fixturePath(fixtureNames.unicodeBsd);
-export const UNICODE_TAR = fixturePath(fixtureNames.unicode);
-export const NAME_IS_100_TAR = fixturePath(fixtureNames.nameIs100);
-export const INVALID_TGZ = fixturePath(fixtureNames.invalidTgz);
-export const SPACE_TAR_GZ = fixturePath(fixtureNames.space);
-export const GNU_LONG_PATH = fixturePath(fixtureNames.gnuLongPath);
-export const BASE_256_UID_GID = fixturePath(fixtureNames.base256UidGid);
-export const LARGE_UID_GID = fixturePath(fixtureNames.largeUidGid);
-export const BASE_256_SIZE = fixturePath(fixtureNames.base256Size);
-export const HUGE = fixturePath(fixtureNames.huge);
-export const LATIN1_TAR = fixturePath(fixtureNames.latin1);
-export const INCOMPLETE_TAR = fixturePath(fixtureNames.incomplete);
+export const ONE_FILE_TAR = fixturePath("one-file.tar");
+export const MULTI_FILE_TAR = fixturePath("multi-file.tar");
+export const PAX_TAR = fixturePath("pax.tar");
+export const TYPES_TAR = fixturePath("types.tar");
+export const LONG_NAME_TAR = fixturePath("long-name.tar");
+export const UNICODE_BSD_TAR = fixturePath("unicode-bsd.tar");
+export const UNICODE_TAR = fixturePath("unicode.tar");
+export const NAME_IS_100_TAR = fixturePath("name-is-100.tar");
+export const INVALID_TGZ = fixturePath("invalid.tgz");
+export const SPACE_TAR_GZ = fixturePath("space.tar");
+export const GNU_LONG_PATH = fixturePath("gnu-long-path.tar");
+export const BASE_256_UID_GID = fixturePath("base-256-uid-gid.tar");
+export const LARGE_UID_GID = fixturePath("large-uid-gid.tar");
+export const BASE_256_SIZE = fixturePath("base-256-size.tar");
+export const HUGE = fixturePath("huge.tar.gz");
+export const LATIN1_TAR = fixturePath("latin1.tar");
+export const INCOMPLETE_TAR = fixturePath("incomplete.tar");
 
 // Created using gnu tar: tar cf gnu-incremental.tar --format gnu --owner=myuser:12345 --group=mygroup:67890 test.txt
-export const GNU_TAR = fixturePath(fixtureNames.gnu);
+export const GNU_TAR = fixturePath("gnu.tar");
 // Created using gnu tar: tar cf gnu-incremental.tar -G --format gnu --owner=myuser:12345 --group=mygroup:67890 test.txt
-export const GNU_INCREMENTAL_TAR = fixturePath(fixtureNames.gnuIncremental);
+export const GNU_INCREMENTAL_TAR = fixturePath("gnu-incremental.tar");
 // Created from multi-file.tar, removing the magic and recomputing the checksum
-export const UNKNOWN_FORMAT = fixturePath(fixtureNames.unknownFormat);
+export const UNKNOWN_FORMAT = fixturePath("unknown-format.tar");
 // Created using gnu tar: tar cf v7.tar --format v7 test.txt
-export const V7_TAR = fixturePath(fixtureNames.v7);
-export const INVALID_TAR = fixturePath(fixtureNames.invalidTar);
+export const V7_TAR = fixturePath("v7.tar");
+export const INVALID_TAR = fixturePath("invalid.tar");
 
 // Real-world large packages for complex testing
-export const LODASH_TGZ = fixturePath(fixtureNames.lodash);
-export const NEXT_SWC_TGZ = fixturePath(fixtureNames.nextSwc);
-export const SHARP_TGZ = fixturePath(fixtureNames.sharp);
-export const ELECTRON_TGZ = fixturePath(fixtureNames.electron);
+export const LODASH_TGZ = fixturePath("lodash-4.17.21.tgz");
+export const NEXT_SWC_TGZ = fixturePath("next-swc-linux-14.2.15.tgz");
+export const SHARP_TGZ = fixturePath("sharp-0.33.5.tgz");
+export const ELECTRON_TGZ = fixturePath("electron-33.0.2.tgz");
 export const NODE_V25_DARWIN_ARM64_TAR_GZ = fixturePath(
-	fixtureNames.nodeDarwinArm64,
+	"node-v25.2.0-darwin-arm64.tar.gz",
 );
-export const TSGO_WASM_TGZ = fixturePath(fixtureNames.tsgoWasm);
+export const TSGO_WASM_TGZ = fixturePath(TSGO_WASM_FIXTURE);

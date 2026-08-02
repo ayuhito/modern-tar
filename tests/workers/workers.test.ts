@@ -1,12 +1,10 @@
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
 import { describe, expect, it } from "vitest";
 import { packTar } from "../../src/web/helpers";
 import { fragments } from "../helpers/fragments";
 
-const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
-const fixturePath = (name: string) => resolve(__dirname, name);
+const fixturePath = (name: string) => resolve(import.meta.dirname, name);
 
 type DatasetOptions = {
 	count: number;

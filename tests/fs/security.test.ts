@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 import { packTar as packTarFS, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/encoding";
 import { packTar, type TarEntry } from "../../src/web";
-import { archiveStream } from "../helpers/archive";
 import { useTempDirectory } from "../helpers/temp-directory";
 import { INVALID_TAR } from "../web/fixtures";
 
@@ -49,7 +48,7 @@ describe("security", () => {
 		];
 
 		const tarBuffer = await packTar(entries);
-		return archiveStream(tarBuffer);
+		return Readable.from([tarBuffer]);
 	};
 
 	const createTarWithMaliciousDirectory = async (
@@ -81,7 +80,7 @@ describe("security", () => {
 		];
 
 		const tarBuffer = await packTar(entries);
-		return archiveStream(tarBuffer);
+		return Readable.from([tarBuffer]);
 	};
 
 	const createTarWithMaliciousHardlink = async (
@@ -116,7 +115,7 @@ describe("security", () => {
 		];
 
 		const tarBuffer = await packTar(entries);
-		return archiveStream(tarBuffer);
+		return Readable.from([tarBuffer]);
 	};
 
 	const createTarWithSymlink = async (
@@ -150,7 +149,7 @@ describe("security", () => {
 		];
 
 		const tarBuffer = await packTar(entries);
-		return archiveStream(tarBuffer);
+		return Readable.from([tarBuffer]);
 	};
 
 	const writeChunk = (
@@ -364,7 +363,7 @@ describe("security", () => {
 						},
 					},
 				]);
-				await pipeline(archiveStream(tarBuffer), unpackTar(extractDir));
+				await pipeline(Readable.from([tarBuffer]), unpackTar(extractDir));
 
 				const [targetStat, linkStat] = await Promise.all([
 					fs.stat(path.join(extractDir, targetName)),
@@ -392,7 +391,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const tarStream = archiveStream(tarBuffer);
+				const tarStream = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(
@@ -431,7 +430,7 @@ describe("security", () => {
 					];
 
 					const tarBuffer = await packTar(entries);
-					const tarStream = archiveStream(tarBuffer);
+					const tarStream = Readable.from([tarBuffer]);
 					const unpackStream = unpackTar(extractDir);
 
 					// Each case should complete successfully without creating files
@@ -489,7 +488,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const tarStream = archiveStream(tarBuffer);
+				const tarStream = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(
@@ -570,7 +569,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -623,7 +622,7 @@ describe("security", () => {
 				]);
 
 				await expect(
-					pipeline(archiveStream(tarBuffer), unpackTar(extractDir)),
+					pipeline(Readable.from([tarBuffer]), unpackTar(extractDir)),
 				).rejects.toThrow("points outside the extraction directory");
 				expect(
 					await fs.readFile(
@@ -647,7 +646,7 @@ describe("security", () => {
 
 				const tarBuffer = await packTar([symlinkEntry("root", "redirect")]);
 				await expect(
-					pipeline(archiveStream(tarBuffer), unpackTar(extractDir)),
+					pipeline(Readable.from([tarBuffer]), unpackTar(extractDir)),
 				).rejects.toThrow(
 					'Symlink "redirect" points outside the extraction directory.',
 				);
@@ -694,7 +693,7 @@ describe("security", () => {
 					symlinkEntry("root", "redirect/target.txt"),
 				]);
 				await expect(
-					pipeline(archiveStream(tarBuffer), unpackTar(extractDir)),
+					pipeline(Readable.from([tarBuffer]), unpackTar(extractDir)),
 				).rejects.toThrow(
 					'Symlink "redirect/target.txt" points outside the extraction directory.',
 				);
@@ -715,7 +714,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -739,7 +738,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -762,7 +761,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await pipeline(maliciousTar, unpackStream);
@@ -880,7 +879,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -1004,7 +1003,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -1067,7 +1066,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir, { concurrency: 1 });
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -1113,7 +1112,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const safeTar = archiveStream(tarBuffer);
+			const safeTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(safeTar, unpackStream)).resolves.toBeUndefined();
@@ -1209,7 +1208,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(
@@ -1338,7 +1337,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -1380,7 +1379,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				// This should be blocked - hardlink validation should use fs.realpath
@@ -1493,7 +1492,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				// This attack should be blocked
@@ -1546,7 +1545,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow();
@@ -1608,7 +1607,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow();
@@ -1668,7 +1667,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow();
@@ -1712,7 +1711,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -1773,7 +1772,7 @@ describe("security", () => {
 				];
 
 				const tarBuffer = await packTar(entries);
-				const maliciousTar = archiveStream(tarBuffer);
+				const maliciousTar = Readable.from([tarBuffer]);
 				const unpackStream = unpackTar(extractDir);
 
 				// Should be blocked by path validation
@@ -1812,7 +1811,7 @@ describe("security", () => {
 		];
 
 		const tarBuffer = await packTar(entries);
-		const maliciousTar = archiveStream(tarBuffer);
+		const maliciousTar = Readable.from([tarBuffer]);
 		const unpackStream = unpackTar(extractDir, { maxDepth: 30 }); // Set limit lower than our path
 
 		// Should be blocked due to excessive path depth
@@ -1845,7 +1844,7 @@ describe("security", () => {
 		];
 
 		const tarBuffer = await packTar(entries);
-		const maliciousTar = archiveStream(tarBuffer);
+		const maliciousTar = Readable.from([tarBuffer]);
 		const unpackStream = unpackTar(extractDir, { maxDepth: expectedDepth });
 
 		// Should succeed as it's exactly at the limit
@@ -1876,7 +1875,7 @@ describe("security", () => {
 		];
 
 		const tarBuffer = await packTar(entries);
-		const maliciousTar = archiveStream(tarBuffer);
+		const maliciousTar = Readable.from([tarBuffer]);
 		const unpackStream = unpackTar(extractDir, { maxDepth: 4 });
 
 		// Should be blocked due to custom maxDepth of 4
@@ -1907,7 +1906,7 @@ describe("security", () => {
 		];
 
 		const tarBuffer = await packTar(entries);
-		const maliciousTar = archiveStream(tarBuffer);
+		const maliciousTar = Readable.from([tarBuffer]);
 		const unpackStream = unpackTar(extractDir, { maxDepth: Infinity });
 
 		// Should succeed with infinite depth
@@ -1939,7 +1938,7 @@ describe("security", () => {
 		}
 
 		const tarBuffer = await packTar(entries);
-		const maliciousTar = archiveStream(tarBuffer);
+		const maliciousTar = Readable.from([tarBuffer]);
 		const unpackStream = unpackTar(extractDir, { maxDepth: 15 }); // Limit to 15 levels
 
 		// Should be blocked due to exceeding maxDepth
@@ -1990,7 +1989,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			// Should fail due to symlink pointing outside extraction directory
@@ -2066,7 +2065,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow(
@@ -2111,7 +2110,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(maliciousTar, unpackStream)).rejects.toThrow();
@@ -2160,7 +2159,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			// Should reject due to path conflict
@@ -2205,7 +2204,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			// Should reject due to path conflict
@@ -2261,7 +2260,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			// Should reject due to type conflict
@@ -2306,7 +2305,7 @@ describe("security", () => {
 
 			const tarBuffer = await packTar(entries);
 			const extraction = pipeline(
-				archiveStream(tarBuffer),
+				Readable.from([tarBuffer]),
 				unpackTar(extractDir),
 			);
 			if (namesAlias) {
@@ -2373,7 +2372,7 @@ describe("security", () => {
 			});
 
 			const tarBuffer = await packTar(entries);
-			const tarStream = archiveStream(tarBuffer);
+			const tarStream = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			await expect(pipeline(tarStream, unpackStream)).resolves.toBeUndefined();
@@ -2415,7 +2414,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const tarStream = archiveStream(tarBuffer);
+			const tarStream = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			// Should succeed - creating same directory twice is OK
@@ -2457,7 +2456,7 @@ describe("security", () => {
 			];
 
 			const tarBuffer = await packTar(entries);
-			const maliciousTar = archiveStream(tarBuffer);
+			const maliciousTar = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(extractDir);
 
 			// Should handle path normalization correctly and reject conflict
@@ -2506,7 +2505,7 @@ describe("security", () => {
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const extractStream = unpackTar(extractDir);
-				await pipeline(archiveStream(tarBuffer), extractStream);
+				await pipeline(Readable.from([tarBuffer]), extractStream);
 
 				// The archive should only contain the safe file, not the symlinked file
 				const extractedFiles = await fs.readdir(extractDir);
@@ -2560,7 +2559,7 @@ describe("security", () => {
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const extractStream = unpackTar(extractDir);
-				await pipeline(archiveStream(tarBuffer), extractStream);
+				await pipeline(Readable.from([tarBuffer]), extractStream);
 
 				// Should only contain the nested directory, not the symlinked file
 				const extractedFiles = await fs.readdir(extractDir);
@@ -2603,7 +2602,7 @@ describe("security", () => {
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const extractStream = unpackTar(extractDir);
-				await pipeline(archiveStream(tarBuffer), extractStream);
+				await pipeline(Readable.from([tarBuffer]), extractStream);
 
 				// Should contain both the original file and the symlinked file
 				const extractedFiles = await fs.readdir(extractDir);
@@ -2674,7 +2673,7 @@ describe("security", () => {
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const extractStream = unpackTar(extractDir);
-				await pipeline(archiveStream(tarBuffer), extractStream);
+				await pipeline(Readable.from([tarBuffer]), extractStream);
 
 				const extractedFiles = await fs.readdir(extractDir);
 
@@ -2727,7 +2726,7 @@ describe("security", () => {
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const extractStream = unpackTar(extractDir);
-				await pipeline(archiveStream(tarBuffer), extractStream);
+				await pipeline(Readable.from([tarBuffer]), extractStream);
 
 				// Should be empty - the unsafe symlink should have been filtered out
 				const extractedFiles = await fs.readdir(extractDir);
@@ -2789,7 +2788,7 @@ describe("security", () => {
 				await fs.mkdir(extractDir, { recursive: true });
 
 				const extractStream = unpackTar(extractDir);
-				await pipeline(archiveStream(tarBuffer), extractStream);
+				await pipeline(Readable.from([tarBuffer]), extractStream);
 
 				const extractedFiles = await fs.readdir(extractDir);
 				expect(extractedFiles).toEqual([]);
@@ -2880,7 +2879,7 @@ describe("security", () => {
 			const tarBuffer = Buffer.concat([headerBlock, paddedBody]);
 
 			const unpackStream = unpackTar(destDir);
-			await pipeline(archiveStream(tarBuffer), unpackStream);
+			await pipeline(Readable.from([tarBuffer]), unpackStream);
 
 			// Check for pollution
 			// @ts-expect-error
@@ -2913,7 +2912,7 @@ describe("security", () => {
 
 			const tarBuffer = await packTar(entries);
 			const unpackStream = unpackTar(destDir);
-			await pipeline(archiveStream(tarBuffer), unpackStream);
+			await pipeline(Readable.from([tarBuffer]), unpackStream);
 
 			const stats = await fs.stat(path.join(destDir, "suid-file"));
 

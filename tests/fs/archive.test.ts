@@ -3,7 +3,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/encoding";
@@ -11,8 +10,7 @@ import { useTempDirectory } from "../helpers/temp-directory";
 
 const isWindows = process.platform === "win32";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES_DIR = path.join(__dirname, "fixtures");
+const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
 
 let expectedHelloContent: string;
 let expectedTestContent: string;

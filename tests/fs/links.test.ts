@@ -1,11 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { describe, expect, it } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
 import { packTar as packTarWeb } from "../../src/web";
-import { archiveStream } from "../helpers/archive";
 import { useTempDirectory } from "../helpers/temp-directory";
 
 const linkEntry = (
@@ -61,7 +61,7 @@ describe("links", () => {
 
 			await expect(
 				pipeline(
-					archiveStream(tarBuffer),
+					Readable.from([tarBuffer]),
 					unpackTar(destDir, { concurrency: 2 }),
 				),
 			).rejects.toThrow(
@@ -156,7 +156,7 @@ describe("links", () => {
 			]);
 
 			await pipeline(
-				archiveStream(tarBuffer),
+				Readable.from([tarBuffer]),
 				unpackTar(destDir, { concurrency: 1 }),
 			);
 
