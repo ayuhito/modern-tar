@@ -9,8 +9,16 @@ export function writeString(
 	size: number,
 	value?: string,
 ) {
-	if (value) {
-		encoder.encodeInto(value, view.subarray(offset, offset + size));
+	if (!value) return;
+
+	// Copy ASCII directly, but leave Unicode truncation to TextEncoder.
+	for (let i = 0; i < value.length && i < size; i++) {
+		const charCode = value.charCodeAt(i);
+		if (charCode > 0x7f) {
+			encoder.encodeInto(value, view.subarray(offset, offset + size));
+			return;
+		}
+		view[offset + i] = charCode;
 	}
 }
 
@@ -23,10 +31,21 @@ export function writeOctal(
 ) {
 	if (value === undefined) return;
 
-	// Format to an octal string, pad with leading zeros to size - 1.
-	// The final byte is left as 0 (NUL terminator), assuming a zero-filled view.
-	const octalString = value.toString(8).padStart(size - 1, "0");
-	encoder.encodeInto(octalString, view.subarray(offset, offset + size - 1));
+	// TAR numeric fields are zero-padded ASCII octal with a final NUL byte. As an
+	// optimization, fill digits right-to-left instead of encoding a padded string.
+	let remaining = value;
+	for (let i = offset + size - 2; i >= offset; i--) {
+		view[i] = 48 + (remaining % 8); // 48 is ASCII '0'.
+		remaining = Math.floor(remaining / 8);
+	}
+	if (remaining === 0 && value % 1 === 0) return;
+
+	// If digits remain or the value is not an integer, use the previous formatter.
+	// PAX overflows still need compatible placeholder bytes in the base header.
+	encoder.encodeInto(
+		value.toString(8).padStart(size - 1, "0"),
+		view.subarray(offset, offset + size - 1),
+	);
 }
 
 // Reads a NUL-terminated string from the view.
