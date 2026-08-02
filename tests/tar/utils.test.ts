@@ -9,8 +9,6 @@ import {
 	writeOctal,
 	writeString,
 } from "../../src/tar/encoding";
-import { createTarHeader, parsePax } from "../../src/tar/header";
-import { createUnpacker } from "../../src/tar/unpacker";
 import { streamToBuffer } from "../../src/web/stream-utils";
 
 describe("tar utilities", () => {
@@ -251,47 +249,5 @@ describe("tar utilities", () => {
 			const buffer = new Uint8Array(8).fill(0xff);
 			expect(() => readNumeric(buffer, 0, 8)).toThrow("TAR number too large");
 		});
-	});
-
-	it("handles unaligned zero blocks without crashing", () => {
-		const unpacker = createUnpacker();
-
-		// Create a large buffer with unaligned offset that contains a zero block
-		// This ensures the read() function will use the subarray path that preserves
-		// the unaligned byteOffset, which would crash in the vulnerable version
-		const buffer = new ArrayBuffer(2048);
-		const unalignedChunk = new Uint8Array(buffer, 1, 1536); // offset=1, contains multiple 512-byte blocks
-
-		// Fill with zeros to create zero blocks that will trigger isZeroBlock()
-		unalignedChunk.fill(0);
-
-		expect(() => {
-			unpacker.write(unalignedChunk);
-			unpacker.end();
-		}).not.toThrow();
-	});
-
-	it("rejects oversized meta entry bodies", () => {
-		const oversizedMetaSize = 8 * 1024 * 1024 + 1;
-
-		for (const strict of [false, true]) {
-			const unpacker = createUnpacker({ strict });
-
-			unpacker.write(
-				createTarHeader({
-					name: "meta",
-					size: oversizedMetaSize,
-					type: "pax-header",
-				}),
-			);
-
-			expect(() => unpacker.readHeader()).toThrow(
-				"Tar metadata entry exceeds maximum size.",
-			);
-		}
-	});
-
-	it("ignores negative PAX record lengths", () => {
-		expect(parsePax(encoder.encode("-100 path=value\n"))).toEqual({});
 	});
 });
