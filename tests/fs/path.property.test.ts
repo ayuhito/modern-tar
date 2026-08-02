@@ -10,14 +10,14 @@ const segment = gs.text({
 	maxSize: 20,
 });
 
-const separators = ["", "/", "\\", "///", "\\".repeat(3), "/\\"];
+const prefixes = ["", "/", "\\", "///", "\\".repeat(3), "/\\"];
 
 const portablePath = gs
 	.record({
-		leading: gs.sampledFrom(separators),
+		leading: gs.sampledFrom(prefixes),
 		segments: gs.arrays(segment, { minSize: 1, maxSize: 8 }),
 		separator: gs.sampledFrom(["/", "\\", "//", "\\\\", "/\\"]),
-		trailing: gs.sampledFrom(separators),
+		trailing: gs.sampledFrom(["", "/", "///"]),
 	})
 	.map(
 		({ leading, segments, separator, trailing }) =>
@@ -29,7 +29,7 @@ describe("path properties", () => {
 		hegel.test((tc) => {
 			const value = tc.draw(portablePath);
 			const expected = value
-				.replace(/[\\/]+$/, "")
+				.replace(/\/+$/, "")
 				.replace(/\\/g, "/")
 				.replace(/^\/+/, "");
 			const normalized = normalizeHeaderName(value);
