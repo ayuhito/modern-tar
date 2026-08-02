@@ -37,8 +37,8 @@ export function writeChecksum(block: Uint8Array): void {
 
 	// Sum the entire block to get the checksum value.
 	let checksum = 0;
-	for (const byte of block) {
-		checksum += byte;
+	for (let i = block.length; i > 0; ) {
+		checksum += block[--i];
 	}
 
 	// Write checksum as a 6-digit octal string directly into the block.
