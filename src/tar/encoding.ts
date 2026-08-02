@@ -31,7 +31,8 @@ export function writeOctal(
 ) {
 	if (value === undefined) return;
 
-	// Write digits directly, then fall back if the value does not fit.
+	// TAR numeric fields are zero-padded ASCII octal, with the final byte reserved
+	// for NUL. Fill the digits right-to-left from the least significant digit.
 	let remaining = value;
 	for (let i = offset + size - 2; i >= offset; i--) {
 		view[i] = 48 + (remaining % 8); // 48 is ASCII '0'.
@@ -39,7 +40,8 @@ export function writeOctal(
 	}
 	if (remaining === 0 && value % 1 === 0) return;
 
-	// Preserve the previous bytes for overflow and non-integer values.
+	// If digits remain or the value is not an integer, use the previous formatter.
+	// PAX overflows still need compatible placeholder bytes in the base header.
 	encoder.encodeInto(
 		value.toString(8).padStart(size - 1, "0"),
 		view.subarray(offset, offset + size - 1),
