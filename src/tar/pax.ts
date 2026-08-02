@@ -14,7 +14,7 @@ const USTAR_SPLIT_MAX_SIZE = USTAR_PREFIX_SIZE + USTAR_NAME_SIZE + 1;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: The full ASCII byte range is intentional.
 const NON_ASCII = /[^\x00-\x7f]/;
 
-function exceedsUtf8Limit(value: string, limit: number): boolean {
+function isUtf8TooLong(value: string, limit: number): boolean {
 	// UTF-16 length gives cheap lower and upper bounds for UTF-8 bytes.
 	if (value.length * 3 <= limit) return false;
 	if (value.length > limit) return true;
@@ -32,7 +32,7 @@ export function generatePax(header: TarHeader): {
 	const paxRecords: Record<string, string> = {};
 
 	// Check max filename length (using byte length for multi-byte safety).
-	if (exceedsUtf8Limit(header.name, USTAR_NAME_SIZE)) {
+	if (isUtf8TooLong(header.name, USTAR_NAME_SIZE)) {
 		const split = findUstarSplit(header.name);
 
 		// If a valid USTAR split is not possible, we must use a PAX record.
@@ -42,16 +42,16 @@ export function generatePax(header: TarHeader): {
 	}
 
 	// Check max linkname length.
-	if (header.linkname && exceedsUtf8Limit(header.linkname, USTAR_NAME_SIZE)) {
+	if (header.linkname && isUtf8TooLong(header.linkname, USTAR_NAME_SIZE)) {
 		paxRecords.linkpath = header.linkname;
 	}
 
 	// Check user/group names.
-	if (header.uname && exceedsUtf8Limit(header.uname, USTAR_UNAME_SIZE)) {
+	if (header.uname && isUtf8TooLong(header.uname, USTAR_UNAME_SIZE)) {
 		paxRecords.uname = header.uname;
 	}
 
-	if (header.gname && exceedsUtf8Limit(header.gname, USTAR_GNAME_SIZE)) {
+	if (header.gname && isUtf8TooLong(header.gname, USTAR_GNAME_SIZE)) {
 		paxRecords.gname = header.gname;
 	}
 
@@ -129,8 +129,8 @@ export function findUstarSplit(
 	// Returning null here signals to the caller that a USTAR split is not possible
 	// and a PAX record should be used instead.
 	if (
-		!exceedsUtf8Limit(path, USTAR_NAME_SIZE) ||
-		exceedsUtf8Limit(path, USTAR_SPLIT_MAX_SIZE)
+		!isUtf8TooLong(path, USTAR_NAME_SIZE) ||
+		isUtf8TooLong(path, USTAR_SPLIT_MAX_SIZE)
 	)
 		return null;
 
@@ -142,8 +142,8 @@ export function findUstarSplit(
 		const name = path.slice(i + 1);
 
 		if (
-			!exceedsUtf8Limit(prefix, USTAR_PREFIX_SIZE) &&
-			!exceedsUtf8Limit(name, USTAR_NAME_SIZE)
+			!isUtf8TooLong(prefix, USTAR_PREFIX_SIZE) &&
+			!isUtf8TooLong(name, USTAR_NAME_SIZE)
 		)
 			return { prefix, name };
 	}
