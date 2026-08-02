@@ -1,0 +1,17 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"moduleDetection": "force",
+		"resolveJsonModule": true,
+		"strict": true,
+		"noUnusedLocals": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true
+	}
+}

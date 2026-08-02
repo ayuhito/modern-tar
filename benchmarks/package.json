@@ -13,12 +13,12 @@
 	"dependencies": {
 		"mitata": "^1.0.34",
 		"modern-tar": "file:..",
-		"tar": "^7.5.20",
+		"tar": "^7.5.22",
 		"tar-fs": "^3.1.3"
 	},
 	"devDependencies": {
-		"@types/node": "^26.1.1",
+		"@types/node": "^26.1.2",
 		"@types/tar-fs": "^2.0.4",
-		"typescript": "^6.0.3"
+		"typescript": "^7.0.2"
 	}
 }

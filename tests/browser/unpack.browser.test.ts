@@ -44,7 +44,7 @@ describe("unpack tar", () => {
 		const tarBuffer = await createWasmArchive();
 
 		// Compress the tar buffer
-		const compressedChunks: Uint8Array[] = [];
+		const compressedChunks: Uint8Array<ArrayBuffer>[] = [];
 		const encoder = new CompressionStream("gzip");
 		const writer = encoder.writable.getWriter();
 		const reader = encoder.readable.getReader();
@@ -64,7 +64,7 @@ describe("unpack tar", () => {
 		await readPromise;
 
 		// Create a stream from the compressed chunks
-		const compressed = new ReadableStream<Uint8Array>({
+		const compressed = new ReadableStream<Uint8Array<ArrayBuffer>>({
 			start(controller) {
 				for (const chunk of compressedChunks) {
 					controller.enqueue(chunk);

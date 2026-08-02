@@ -1,24 +1,8 @@
 {
+	"extends": "./tsconfig.base.json",
 	"compilerOptions": {
-		"target": "esnext",
-		"module": "preserve",
-		"moduleResolution": "bundler",
-		"moduleDetection": "force",
-		"resolveJsonModule": true,
-		"strict": true,
-		"noUnusedLocals": true,
-		"declaration": true,
-		"emitDeclarationOnly": true,
-		"esModuleInterop": true,
-		"isolatedModules": true,
-		"verbatimModuleSyntax": true,
-		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true,
-
-		"composite": true,
 		"lib": ["ES2023"],
 		"types": ["node"]
 	},
-	"include": ["src/fs/**/*.ts", "src/tar/**/*.ts", "tests/fs/**/*.ts"],
-	"references": [{ "path": "./tsconfig.web.json" }]
+	"include": ["src/fs/**/*.ts", "src/tar/**/*.ts"]
 }

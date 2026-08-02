@@ -172,9 +172,9 @@ describe("extract", () => {
 				body,
 			},
 		]);
-		let failWrite: ((error: Error) => void) | null = null;
+		const pendingWrite: { fail?: (error: Error) => void } = {};
 		interceptWrite = (_, fail) => {
-			failWrite = fail;
+			pendingWrite.fail = fail;
 			return true;
 		};
 		const source = new Readable({ read() {} });
@@ -184,10 +184,10 @@ describe("extract", () => {
 		source.push(archive.subarray(0, 513));
 		await vi.waitFor(() => expect(unpackStream.writableLength).toBe(0));
 		source.push(archive.subarray(513, 512 + body.length));
-		await vi.waitFor(() => expect(failWrite).toBeTypeOf("function"));
+		await vi.waitFor(() => expect(pendingWrite.fail).toBeTypeOf("function"));
 
 		const writeError = new Error("disk write failed");
-		failWrite?.(writeError);
+		pendingWrite.fail?.(writeError);
 		await expect(extraction).rejects.toBe(writeError);
 	});
 

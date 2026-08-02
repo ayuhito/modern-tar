@@ -46,10 +46,7 @@ export function transformHeader(
 	// Skip entries with empty names, whitespace only names, or paths that would resolve to extraction root.
 	if (
 		result &&
-		(!result.name ||
-			!result.name.trim() ||
-			result.name === "." ||
-			result.name === "/")
+		(!result.name?.trim() || result.name === "." || result.name === "/")
 	) {
 		return null;
 	}

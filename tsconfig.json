@@ -1,8 +1,8 @@
 {
-	"files": [],
-	"references": [
-		{ "path": "./tsconfig.web.json" },
-		{ "path": "./tsconfig.fs.json" },
-		{ "path": "./benchmarks/tsconfig.json" }
-	]
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["ES2023", "DOM", "DOM.AsyncIterable"],
+		"types": ["node"]
+	},
+	"include": ["src/**/*.ts", "tests/**/*.ts", "tsdown.config.ts", "vitest.*.ts"]
 }

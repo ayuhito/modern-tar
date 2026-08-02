@@ -84,12 +84,15 @@ describe("unpackTar", () => {
 			{ header: { name: "file.txt", type: "file", size: 5 }, body: "hello" },
 		]);
 		const [entry] = await unpackTar(archive);
+		const data = entry.data;
+		expect(data).toBeDefined();
+		if (!data) throw new Error("Expected file data");
 
-		entry.data[0] = "x".charCodeAt(0);
+		data[0] = "x".charCodeAt(0);
 		expect(archive[BLOCK_SIZE]).toBe("h".charCodeAt(0));
 
 		archive[BLOCK_SIZE] = "y".charCodeAt(0);
-		expect(entry.data[0]).toBe("x".charCodeAt(0));
+		expect(data[0]).toBe("x".charCodeAt(0));
 	});
 
 	it("does not retain impossible file sizes for non-strict data", async () => {
