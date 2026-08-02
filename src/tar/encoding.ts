@@ -9,8 +9,19 @@ export function writeString(
 	size: number,
 	value?: string,
 ) {
-	if (value) {
-		encoder.encodeInto(value, view.subarray(offset, offset + size));
+	if (!value) return;
+
+	// ASCII code units are already UTF-8 bytes. Write that common case directly
+	// so each header field does not allocate a subarray or enter TextEncoder.
+	for (let i = 0; i < value.length && i < size; i++) {
+		const charCode = value.charCodeAt(i);
+		if (charCode > 0x7f) {
+			// Restart from the beginning so TextEncoder remains the source of truth
+			// for multibyte characters, lone surrogates, and field truncation.
+			encoder.encodeInto(value, view.subarray(offset, offset + size));
+			return;
+		}
+		view[offset + i] = charCode;
 	}
 }
 
@@ -23,10 +34,22 @@ export function writeOctal(
 ) {
 	if (value === undefined) return;
 
-	// Format to an octal string, pad with leading zeros to size - 1.
-	// The final byte is left as 0 (NUL terminator), assuming a zero-filled view.
-	const octalString = value.toString(8).padStart(size - 1, "0");
-	encoder.encodeInto(octalString, view.subarray(offset, offset + size - 1));
+	// Octal digits can be written from least to most significant without
+	// allocating a padded string, subarray, or TextEncoder call.
+	let remaining = value;
+	for (let i = offset + size - 2; i >= offset; i--) {
+		view[i] = 48 + (remaining % 8); // 48 is ASCII '0'.
+		remaining = Math.floor(remaining / 8);
+	}
+	if (remaining === 0 && value % 1 === 0) return;
+
+	// Preserve the previous truncation behavior for values that do not fit the
+	// field, including the placeholder fields used alongside PAX extensions. The
+	// padded encoding overwrites every digit written by the speculative fast path.
+	encoder.encodeInto(
+		value.toString(8).padStart(size - 1, "0"),
+		view.subarray(offset, offset + size - 1),
+	);
 }
 
 // Reads a NUL-terminated string from the view.

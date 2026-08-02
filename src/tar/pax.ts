@@ -11,6 +11,20 @@ import { createTarHeader } from "./header";
 import type { TarHeader } from "./types";
 
 const USTAR_SPLIT_MAX_SIZE = USTAR_PREFIX_SIZE + USTAR_NAME_SIZE + 1;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: The full ASCII byte range is intentional.
+const NON_ASCII = /[^\x00-\x7f]/;
+
+function exceedsUtf8Limit(value: string, limit: number): boolean {
+	// A string's UTF-8 length is between one and three bytes per UTF-16 code
+	// unit. These bounds avoid encoding when they can prove the result.
+	if (value.length * 3 <= limit) return false;
+	if (value.length > limit) return true;
+
+	// In the uncertain range, ASCII still has one byte per code unit. Delegate
+	// any Unicode case to TextEncoder, including surrogate pairs and lone halves.
+	if (!NON_ASCII.test(value)) return false;
+	return encoder.encode(value).length > limit;
+}
 
 // Checks a tar header for fields that exceed USTAR limits and generates a PAX header entry if necessary.
 export function generatePax(header: TarHeader): {
@@ -20,7 +34,7 @@ export function generatePax(header: TarHeader): {
 	const paxRecords: Record<string, string> = {};
 
 	// Check max filename length (using byte length for multi-byte safety).
-	if (encoder.encode(header.name).length > USTAR_NAME_SIZE) {
+	if (exceedsUtf8Limit(header.name, USTAR_NAME_SIZE)) {
 		const split = findUstarSplit(header.name);
 
 		// If a valid USTAR split is not possible, we must use a PAX record.
@@ -30,19 +44,16 @@ export function generatePax(header: TarHeader): {
 	}
 
 	// Check max linkname length.
-	if (
-		header.linkname &&
-		encoder.encode(header.linkname).length > USTAR_NAME_SIZE
-	) {
+	if (header.linkname && exceedsUtf8Limit(header.linkname, USTAR_NAME_SIZE)) {
 		paxRecords.linkpath = header.linkname;
 	}
 
 	// Check user/group names.
-	if (header.uname && encoder.encode(header.uname).length > USTAR_UNAME_SIZE) {
+	if (header.uname && exceedsUtf8Limit(header.uname, USTAR_UNAME_SIZE)) {
 		paxRecords.uname = header.uname;
 	}
 
-	if (header.gname && encoder.encode(header.gname).length > USTAR_GNAME_SIZE) {
+	if (header.gname && exceedsUtf8Limit(header.gname, USTAR_GNAME_SIZE)) {
 		paxRecords.gname = header.gname;
 	}
 
@@ -114,16 +125,14 @@ export function generatePax(header: TarHeader): {
 export function findUstarSplit(
 	path: string,
 ): { name: string; prefix: string } | null {
-	const totalPathBytes = encoder.encode(path).length;
-
 	// A USTAR split only applies to UTF-8 paths that overflow name[100] but
 	// still fit within prefix[155] + "/" + name[100].
 	//
 	// Returning null here signals to the caller that a USTAR split is not possible
 	// and a PAX record should be used instead.
 	if (
-		totalPathBytes <= USTAR_NAME_SIZE ||
-		totalPathBytes > USTAR_SPLIT_MAX_SIZE
+		!exceedsUtf8Limit(path, USTAR_NAME_SIZE) ||
+		exceedsUtf8Limit(path, USTAR_SPLIT_MAX_SIZE)
 	)
 		return null;
 
@@ -135,8 +144,8 @@ export function findUstarSplit(
 		const name = path.slice(i + 1);
 
 		if (
-			encoder.encode(prefix).length <= USTAR_PREFIX_SIZE &&
-			encoder.encode(name).length <= USTAR_NAME_SIZE
+			!exceedsUtf8Limit(prefix, USTAR_PREFIX_SIZE) &&
+			!exceedsUtf8Limit(name, USTAR_NAME_SIZE)
 		)
 			return { prefix, name };
 	}

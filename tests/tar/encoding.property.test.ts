@@ -13,6 +13,25 @@ import {
 
 const offsets = gs.integers({ minValue: 0, maxValue: 16 });
 
+function writeStringReference(
+	view: Uint8Array,
+	offset: number,
+	size: number,
+	value?: string,
+) {
+	if (value) encoder.encodeInto(value, view.subarray(offset, offset + size));
+}
+
+function writeOctalReference(
+	view: Uint8Array,
+	offset: number,
+	size: number,
+	value: number,
+) {
+	const octalString = value.toString(8).padStart(size - 1, "0");
+	encoder.encodeInto(octalString, view.subarray(offset, offset + size - 1));
+}
+
 describe("tar encoding properties", () => {
 	it("round-trips strings that fit in their field", () =>
 		hegel.test((tc) => {
@@ -34,6 +53,20 @@ describe("tar encoding properties", () => {
 			);
 		}));
 
+	it("matches TextEncoder for arbitrary string field boundaries", () =>
+		hegel.test((tc) => {
+			const value = tc.draw(gs.text({ maxSize: 64 }));
+			const offset = tc.draw(offsets);
+			const size = tc.draw(gs.integers({ minValue: 0, maxValue: 64 }));
+			const actual = new Uint8Array(offset + size + 16).fill(0xaa);
+			const expected = actual.slice();
+
+			writeString(actual, offset, size, value);
+			writeStringReference(expected, offset, size, value);
+
+			expect(actual).toEqual(expected);
+		}));
+
 	it("round-trips octal values that fit in their field", () =>
 		hegel.test((tc) => {
 			const size = tc.draw(gs.integers({ minValue: 2, maxValue: 12 }));
@@ -52,6 +85,27 @@ describe("tar encoding properties", () => {
 			);
 			expect(buffer[offset + size - 1]).toBe(0);
 			expect(readOctal(buffer, offset, size)).toBe(value);
+		}));
+
+	it("preserves formatted bytes when octal values overflow their field", () =>
+		hegel.test((tc) => {
+			const size = tc.draw(gs.integers({ minValue: 2, maxValue: 12 }));
+			const value = tc.draw(
+				gs.integers({
+					minValue: 8 ** (size - 1),
+					maxValue: Number.MAX_SAFE_INTEGER,
+				}),
+			);
+			const offset = tc.draw(offsets);
+			const actual = new Uint8Array(offset + size + 16).fill(0xaa);
+			const expected = actual.slice();
+			actual.fill(0, offset, offset + size);
+			expected.fill(0, offset, offset + size);
+
+			writeOctal(actual, offset, size, value);
+			writeOctalReference(expected, offset, size, value);
+
+			expect(actual).toEqual(expected);
 		}));
 
 	it("decodes positive base-256 values", () =>

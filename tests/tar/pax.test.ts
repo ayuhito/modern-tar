@@ -33,6 +33,16 @@ describe("PAX format", () => {
 	});
 
 	it.each([
+		["linkname", "x".repeat(100), false],
+		["linkname", "x".repeat(101), true],
+		["linkname", "é".repeat(50), false],
+		["linkname", "é".repeat(51), true],
+		["linkname", "🚀".repeat(25), false],
+		["linkname", "🚀".repeat(26), true],
+		["uname", "x".repeat(32), false],
+		["uname", "x".repeat(33), true],
+		["gname", "\ud800".repeat(10), false],
+		["gname", "\ud800".repeat(11), true],
 		["name", "가".repeat(33), false],
 		["name", "가".repeat(34), true],
 		["linkname", "가".repeat(33), false],

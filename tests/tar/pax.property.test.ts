@@ -11,6 +11,26 @@ const unicodeText = gs.text({
 });
 
 describe("PAX properties", () => {
+	it("uses encoded byte length for unsplittable paths", () =>
+		hegel.test((tc) => {
+			const name = tc.draw(unicodeText).replaceAll("/", "_");
+			const generated = generatePax({ name, size: 0 });
+
+			expect(generated !== null).toBe(encoder.encode(name).length > 100);
+		}));
+
+	it("uses encoded byte length for optional USTAR fields", () =>
+		hegel.test((tc) => {
+			const field = tc.draw(
+				gs.sampledFrom(["linkname", "uname", "gname"] as const),
+			);
+			const value = tc.draw(unicodeText);
+			const limit = field === "linkname" ? 100 : 32;
+			const generated = generatePax({ name: "entry", size: 0, [field]: value });
+
+			expect(generated !== null).toBe(encoder.encode(value).length > limit);
+		}));
+
 	it("frames every generated record by its declared UTF-8 byte length", () =>
 		hegel.test((tc) => {
 			const path = tc.draw(unicodeText).replaceAll("/", "_").padEnd(101, "x");
