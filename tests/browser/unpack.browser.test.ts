@@ -44,7 +44,7 @@ describe("unpack tar", () => {
 		const tarBuffer = await createWasmArchive();
 
 		// Compress the tar buffer
-		const compressedChunks: Uint8Array[] = [];
+		const compressedChunks: Uint8Array<ArrayBuffer>[] = [];
 		const encoder = new CompressionStream("gzip");
 		const writer = encoder.writable.getWriter();
 		const reader = encoder.readable.getReader();
@@ -64,7 +64,7 @@ describe("unpack tar", () => {
 		await readPromise;
 
 		// Create a stream from the compressed chunks
-		const compressed = new ReadableStream<Uint8Array>({
+		const compressed = new ReadableStream<Uint8Array<ArrayBuffer>>({
 			start(controller) {
 				for (const chunk of compressedChunks) {
 					controller.enqueue(chunk);
@@ -73,13 +73,8 @@ describe("unpack tar", () => {
 			},
 		});
 
-		// TypeScript 7 widens the writable side to BufferSource, although this
-		// stream always writes Uint8Array chunks.
 		const decompressed = compressed.pipeThrough(
-			new DecompressionStream("gzip") as ReadableWritablePair<
-				Uint8Array,
-				Uint8Array
-			>,
+			new DecompressionStream("gzip"),
 		);
 		const [wasm] = await unpackTar(decompressed, {
 			strip: 1,
