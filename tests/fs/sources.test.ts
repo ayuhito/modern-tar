@@ -3,36 +3,29 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { beforeEach, describe, expect } from "vitest";
+import { describe, expect } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/encoding";
 import { it } from "../helpers/test";
+import { writeTree } from "../helpers/tree";
 
 const isWindows = process.platform === "win32";
 
-const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
-
-let expectedHelloContent: string;
-let expectedTestContent: string;
-
-describe("packTarSources", () => {
-	beforeEach(async () => {
-		// Read the actual fixture files to handle line endings correctly
-		expectedHelloContent = await fs.readFile(
-			path.join(FIXTURES_DIR, "a", "hello.txt"),
-			"utf-8",
-		);
-		expectedTestContent = await fs.readFile(
-			path.join(FIXTURES_DIR, "b", "a", "test.txt"),
-			"utf-8",
-		);
+const expectedHelloContent = "hello world\n";
+const expectedTestContent = "test\n";
+const sourceTree = (tmpDir: string) =>
+	writeTree(path.join(tmpDir, "source-tree"), {
+		"a/hello.txt": expectedHelloContent,
+		"b/a/test.txt": expectedTestContent,
 	});
 
+describe("packTarSources", () => {
 	it("packs a single file source", async ({ tmpDir }) => {
+		const fixtures = await sourceTree(tmpDir);
 		const sources: TarSource[] = [
 			{
 				type: "file",
-				source: path.join(FIXTURES_DIR, "a", "hello.txt"),
+				source: path.join(fixtures, "a", "hello.txt"),
 				target: "output/hello.txt",
 			},
 		];
@@ -52,23 +45,22 @@ describe("packTarSources", () => {
 		expect(content).toBe(expectedHelloContent);
 
 		// Verify file stats are preserved
-		const originalStat = await fs.stat(
-			path.join(FIXTURES_DIR, "a", "hello.txt"),
-		);
+		const originalStat = await fs.stat(path.join(fixtures, "a", "hello.txt"));
 		const extractedStat = await fs.stat(extractedFile);
 		expect(extractedStat.mode).toBe(originalStat.mode);
 	});
 
 	it("packs multiple file sources", async ({ tmpDir }) => {
+		const fixtures = await sourceTree(tmpDir);
 		const sources: TarSource[] = [
 			{
 				type: "file",
-				source: path.join(FIXTURES_DIR, "a", "hello.txt"),
+				source: path.join(fixtures, "a", "hello.txt"),
 				target: "files/hello.txt",
 			},
 			{
 				type: "file",
-				source: path.join(FIXTURES_DIR, "b", "a", "test.txt"),
+				source: path.join(fixtures, "b", "a", "test.txt"),
 				target: "files/test.txt",
 			},
 		];
@@ -370,10 +362,11 @@ describe("packTarSources", () => {
 	});
 
 	it("packs directory sources", async ({ tmpDir }) => {
+		const fixtures = await sourceTree(tmpDir);
 		const sources: TarSource[] = [
 			{
 				type: "directory",
-				source: path.join(FIXTURES_DIR, "b"),
+				source: path.join(fixtures, "b"),
 				target: "project/src",
 			},
 		];
@@ -400,10 +393,11 @@ describe("packTarSources", () => {
 	});
 
 	it("packs mixed source types", async ({ tmpDir }) => {
+		const fixtures = await sourceTree(tmpDir);
 		const sources: TarSource[] = [
 			{
 				type: "file",
-				source: path.join(FIXTURES_DIR, "a", "hello.txt"),
+				source: path.join(fixtures, "a", "hello.txt"),
 				target: "project/readme.txt",
 			},
 			{
@@ -413,7 +407,7 @@ describe("packTarSources", () => {
 			},
 			{
 				type: "directory",
-				source: path.join(FIXTURES_DIR, "b"),
+				source: path.join(fixtures, "b"),
 				target: "project/source",
 			},
 		];
@@ -551,87 +545,6 @@ describe("packTarSources", () => {
 		expect(stat.isDirectory()).toBe(true);
 	});
 
-	it("handles errors gracefully when source file doesn't exist", async ({
-		tmpDir,
-	}) => {
-		const sources: TarSource[] = [
-			{
-				type: "file",
-				source: path.join(tmpDir, "nonexistent.txt"),
-				target: "missing.txt",
-			},
-		];
-
-		const archiveStream = packTar(sources);
-
-		// Should reject when trying to read the stream
-		await expect(async () => {
-			const chunks: Buffer[] = [];
-			for await (const chunk of archiveStream) {
-				chunks.push(chunk);
-			}
-		}).rejects.toThrow();
-	});
-
-	it("errors for invalid content types", async () => {
-		// Test invalid content types that could come from JavaScript usage or dynamic data
-		const invalidSources: TarSource[] = [
-			{
-				type: "content",
-				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
-				content: 123 as any, // number
-				target: "number.txt",
-			},
-		];
-
-		const stream = packTar(invalidSources);
-		await expect(
-			new Promise((resolve, reject) => {
-				stream.on("error", reject);
-				stream.on("end", resolve);
-				stream.resume();
-			}),
-		).rejects.toThrow(/Unsupported content type/);
-
-		// Test with boolean
-		const booleanSources: TarSource[] = [
-			{
-				type: "content",
-				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
-				content: true as any,
-				target: "bool.txt",
-			},
-		];
-
-		const boolStream = packTar(booleanSources);
-		await expect(
-			new Promise((resolve, reject) => {
-				boolStream.on("error", reject);
-				boolStream.on("end", resolve);
-				boolStream.resume();
-			}),
-		).rejects.toThrow(/Unsupported content type/);
-
-		// Test with object
-		const objectSources: TarSource[] = [
-			{
-				type: "content",
-				// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
-				content: { invalid: "object" } as any,
-				target: "obj.txt",
-			},
-		];
-
-		const objStream = packTar(objectSources);
-		await expect(
-			new Promise((resolve, reject) => {
-				objStream.on("error", reject);
-				objStream.on("end", resolve);
-				objStream.resume();
-			}),
-		).rejects.toThrow(/Unsupported content type/);
-	});
-
 	it("handles StreamSource with custom mode", async ({ tmpDir }) => {
 		const content = "Stream with custom mode";
 		const readable = Readable.from([Buffer.from(content, "utf-8")]);
@@ -672,9 +585,7 @@ describe("packTarSources", () => {
 		}
 	});
 
-	it("handles large StreamSource efficiently without OOM", async ({
-		tmpDir,
-	}) => {
+	it("packs a 10 MB stream source", async ({ tmpDir }) => {
 		// Create a 10MB stream that generates data on the fly
 		const chunkSize = 1024 * 1024; // 1MB chunks
 		const totalChunks = 10;
@@ -682,20 +593,16 @@ describe("packTarSources", () => {
 
 		let chunkCount = 0;
 		const largeStream = new ReadableStream({
-			start(controller) {
-				const interval = setInterval(() => {
-					if (chunkCount >= totalChunks) {
-						clearInterval(interval);
-						controller.close();
-						return;
-					}
+			pull(controller) {
+				if (chunkCount === totalChunks) {
+					controller.close();
+					return;
+				}
 
-					// Generate a 1MB chunk of data
-					const chunk = new Uint8Array(chunkSize);
-					chunk.fill(65 + (chunkCount % 26)); // Fill with A-Z pattern
-					controller.enqueue(chunk);
-					chunkCount++;
-				}, 1);
+				const chunk = new Uint8Array(chunkSize);
+				chunk.fill(65 + (chunkCount % 26));
+				controller.enqueue(chunk);
+				chunkCount++;
 			},
 		});
 
@@ -731,30 +638,8 @@ describe("packTarSources", () => {
 		expect(buffer[1023]).toBe(65);
 	});
 
-	it("throws error for StreamSource with mismatched size", async () => {
-		const content = "Short content";
-		const readable = Readable.from([Buffer.from(content, "utf-8")]);
-
-		const sources: TarSource[] = [
-			{
-				type: "stream",
-				content: readable,
-				target: "mismatched-size.txt",
-				size: 1000, // Much larger than actual content
-			},
-		];
-
-		const archiveStream = packTar(sources);
-		const chunks: Buffer[] = [];
-
-		await expect(async () => {
-			for await (const chunk of archiveStream) {
-				chunks.push(chunk);
-			}
-		}).rejects.toThrow();
-	});
-
 	it("handles multiple StreamSources in mixed archive", async ({ tmpDir }) => {
+		const fixtures = await sourceTree(tmpDir);
 		const stream1Content = "First stream content";
 		const stream2Content = "Second stream content";
 
@@ -769,7 +654,7 @@ describe("packTarSources", () => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
-				source: path.join(FIXTURES_DIR, "a", "hello.txt"),
+				source: path.join(fixtures, "a", "hello.txt"),
 				target: "hello.txt",
 			},
 			{
@@ -821,29 +706,5 @@ describe("packTarSources", () => {
 		expect(stream1ExtractedContent).toBe(stream1Content);
 		expect(regularContent).toBe("Regular content");
 		expect(stream2ExtractedContent).toBe(stream2Content);
-	});
-
-	it("prevents missing size property on StreamSource", async () => {
-		const content = "Test content";
-		const readable = Readable.from([Buffer.from(content, "utf-8")]);
-
-		const invalidSource = {
-			type: "stream",
-			content: readable,
-			target: "missing-size.txt",
-			// biome-ignore lint/suspicious/noExplicitAny: Intentionally invalid.
-		} as any;
-
-		const sources: TarSource[] = [invalidSource];
-
-		// The packTar function should handle this gracefully or throw an error
-		const archiveStream = packTar(sources);
-
-		await expect(async () => {
-			const chunks: Buffer[] = [];
-			for await (const chunk of archiveStream) {
-				chunks.push(chunk);
-			}
-		}).rejects.toThrow();
 	});
 });

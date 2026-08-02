@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { afterEach, describe, expect, vi } from "vitest";
 import { it } from "../helpers/test";
 
@@ -9,6 +10,7 @@ const originalFs =
 	await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
 let mkdirDelay: Promise<void> | null = null;
 let releaseMkdir: (() => void) | null = null;
+let startDelayedMkdir: (() => void) | null = null;
 let finishDelayedMkdir: (() => void) | null = null;
 let afterSymlinkRm: (() => Promise<void>) | null = null;
 let beforeLink: (() => Promise<void>) | null = null;
@@ -60,7 +62,10 @@ vi.mock("node:fs/promises", async () => {
 					const delayed = Boolean(
 						mkdirDelay && target.includes("delayed-extracted"),
 					);
-					if (delayed) await mkdirDelay;
+					if (delayed) {
+						startDelayedMkdir?.();
+						await mkdirDelay;
+					}
 					const result = await actual.mkdir(target, options);
 					if (delayed) finishDelayedMkdir?.();
 					return result;
@@ -91,14 +96,14 @@ import { packTar, unpackTar } from "../../src/fs";
 import { packTar as packTarWeb } from "../../src/web";
 import { chunkBytes } from "../helpers/bytes";
 import { createDeferred } from "../helpers/deferred";
-
-const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
+import { writeTree } from "../helpers/tree";
 
 describe("extract", () => {
 	afterEach(async () => {
 		mkdirDelay = null;
 		releaseMkdir?.();
 		releaseMkdir = null;
+		startDelayedMkdir = null;
 		afterSymlinkRm = null;
 		beforeLink = null;
 		afterLinkExists = null;
@@ -300,7 +305,9 @@ describe("extract", () => {
 	});
 
 	it("strips path components on extract", async ({ tmpDir }) => {
-		const sourceDir = path.join(FIXTURES_DIR, "b");
+		const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+			"a/test.txt": "test\n",
+		});
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
@@ -313,7 +320,9 @@ describe("extract", () => {
 	});
 
 	it("maps headers on extract", async ({ tmpDir }) => {
-		const sourceDir = path.join(FIXTURES_DIR, "a");
+		const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+			"hello.txt": "hello world\n",
+		});
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
@@ -331,7 +340,9 @@ describe("extract", () => {
 	});
 
 	it("filters entries on extract", async ({ tmpDir }) => {
-		const sourceDir = path.join(FIXTURES_DIR, "c");
+		const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+			".gitignore": "link\n",
+		});
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
@@ -387,8 +398,10 @@ describe("extract", () => {
 
 		// Set up the delay for mkdir
 		const delayedMkdir = createDeferred();
+		const delayedMkdirStarted = createDeferred();
 		mkdirDelay = delayedMkdir.promise;
 		releaseMkdir = delayedMkdir.resolve;
+		startDelayedMkdir = delayedMkdirStarted.resolve;
 
 		try {
 			const entries = [
@@ -405,17 +418,20 @@ describe("extract", () => {
 			const packStream = Readable.from([tarBuffer]);
 			const unpackStream = unpackTar(destDir, { filter: () => false });
 
+			let settled = false;
 			const pipelinePromise = pipeline(packStream, unpackStream);
+			void pipelinePromise.then(
+				() => {
+					settled = true;
+				},
+				() => {
+					settled = true;
+				},
+			);
 
-			// Test that pipeline doesn't complete immediately due to race condition
-			const result = await Promise.race([
-				pipelinePromise.then(() => "finished"),
-				new Promise<string>((resolve) =>
-					setTimeout(() => resolve("timeout"), 200),
-				),
-			]);
-
-			expect(result).toBe("timeout");
+			await delayedMkdirStarted.promise;
+			await Promise.resolve();
+			expect(settled).toBe(false);
 
 			// Release the mkdir and let the pipeline complete
 			releaseMkdir?.();
@@ -430,7 +446,9 @@ describe("extract", () => {
 	});
 
 	it("extracts files with correct permissions", async ({ tmpDir }) => {
-		const sourceDir = path.join(FIXTURES_DIR, "a");
+		const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+			"hello.txt": "hello world\n",
+		});
 		const destDir = path.join(tmpDir, "extracted");
 
 		const packStream = packTar(sourceDir);
@@ -1415,9 +1433,7 @@ describe("extract", () => {
 	});
 
 	describe("error handling", () => {
-		it("handles file close errors gracefully without unhandled rejections", async ({
-			tmpDir,
-		}) => {
+		it("does not detach file close rejections", async ({ tmpDir }) => {
 			// Test that file close/futimes errors don't cause unhandled rejections
 			// which would crash the process in Node.js >=15
 
@@ -1461,8 +1477,8 @@ describe("extract", () => {
 
 				await pipeline(Readable.from([tarBuffer]), unpackStream);
 
-				// Wait a bit for any potential unhandled rejections to fire
-				await new Promise((resolve) => setTimeout(resolve, 100));
+				// Give Node one event-loop turn to report a detached rejection.
+				await nextTurn();
 
 				// Verify no unhandled rejections occurred
 				expect(unhandledRejections).toHaveLength(0);

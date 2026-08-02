@@ -5,8 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { describe, expect } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
 import { it } from "../helpers/test";
-
-const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
+import { writeTree } from "../helpers/tree";
 
 describe("options fs", () => {
 	describe("pack options fs", () => {
@@ -96,7 +95,9 @@ describe("options fs", () => {
 		});
 
 		it("uses map option to transform headers", async ({ tmpDir }) => {
-			const sourceDir = path.join(FIXTURES_DIR, "a");
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"hello.txt": "hello world\n",
+			});
 			const packStream = packTar(sourceDir, {
 				map: (header) => ({
 					...header,
@@ -213,7 +214,9 @@ describe("options fs", () => {
 		});
 
 		it("inherits core strip option", async ({ tmpDir }) => {
-			const sourceDir = path.join(FIXTURES_DIR, "b");
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"a/test.txt": "test\n",
+			});
 			const packStream = packTar(sourceDir);
 			const extractDir = path.join(tmpDir, "extract");
 
@@ -293,7 +296,9 @@ describe("options fs", () => {
 		});
 
 		it("combines core options with filesystem options", async ({ tmpDir }) => {
-			const sourceDir = path.join(FIXTURES_DIR, "a");
+			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+				"hello.txt": "hello world\n",
+			});
 			const packStream = packTar(sourceDir);
 			const extractDir = path.join(tmpDir, "extract");
 
@@ -355,47 +360,16 @@ describe("options fs", () => {
 		});
 	});
 
-	describe("error handling", () => {
-		it("handles permission errors gracefully", async ({ tmpDir }) => {
-			// This test might be platform-specific, so we'll keep it simple
-			const sourceDir = path.join(FIXTURES_DIR, "a");
-			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
-
-			// Try to extract with very restrictive permissions
-			const unpackStream = unpackTar(extractDir, {
-				fmode: 0o000, // No permissions (this might cause issues on some systems)
-				dmode: 0o755,
-			});
-
-			// Should not throw, even if permissions are weird
-			await expect(pipeline(packStream, unpackStream)).resolves.not.toThrow();
+	it("drops entries when strip exceeds their path depth", async ({
+		tmpDir,
+	}) => {
+		const sourceDir = await writeTree(path.join(tmpDir, "source"), {
+			"hello.txt": "hello world\n",
 		});
+		const extractDir = path.join(tmpDir, "extract");
 
-		it("handles invalid strip values gracefully", async ({ tmpDir }) => {
-			const sourceDir = path.join(FIXTURES_DIR, "a");
-			const packStream = packTar(sourceDir);
-			const extractDir = path.join(tmpDir, "extract");
+		await pipeline(packTar(sourceDir), unpackTar(extractDir, { strip: 999 }));
 
-			const unpackStream = unpackTar(extractDir, {
-				strip: 999, // Strip way too many components
-			});
-
-			// Should complete without error, just with no files extracted
-			await pipeline(packStream, unpackStream);
-
-			// Check if extract directory was created
-			const dirExists = await fs
-				.access(extractDir)
-				.then(() => true)
-				.catch(() => false);
-			if (dirExists) {
-				const files = await fs.readdir(extractDir);
-				expect(files).toHaveLength(0);
-			} else {
-				// Directory not created because no files were extracted - this is acceptable
-				expect(true).toBe(true);
-			}
-		});
+		expect(await fs.readdir(extractDir)).toEqual([]);
 	});
 });
