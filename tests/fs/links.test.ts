@@ -1,12 +1,12 @@
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
 import { packTar as packTarWeb } from "../../src/web";
+import { it } from "../helpers/test";
 
 const linkEntry = (
 	type: "link" | "symlink",
@@ -15,47 +15,40 @@ const linkEntry = (
 ) => ({ header: { name, linkname, size: 0, type } });
 
 describe("links", () => {
-	let tmpDir: string;
+	it.skipIf(process.platform === "win32")(
+		"handles symlinks",
+		async ({ tmpDir }) => {
+			const sourceDir = path.join(tmpDir, "source");
+			await fs.mkdir(sourceDir, { recursive: true });
 
-	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "modern-tar-links-test-"));
-	});
+			// Create a file and a symlink to it
+			const targetFile = path.join(sourceDir, ".gitignore");
+			const linkFile = path.join(sourceDir, "link");
 
-	afterEach(async () => {
-		await fs.rm(tmpDir, { recursive: true, force: true });
-	});
+			await fs.writeFile(targetFile, "node_modules/\n");
+			await fs.symlink(".gitignore", linkFile);
 
-	it.skipIf(process.platform === "win32")("handles symlinks", async () => {
-		const sourceDir = path.join(tmpDir, "source");
-		await fs.mkdir(sourceDir, { recursive: true });
+			const destDir = path.join(tmpDir, "extracted");
+			const packStream = packTar(sourceDir);
+			const unpackStream = unpackTar(destDir);
 
-		// Create a file and a symlink to it
-		const targetFile = path.join(sourceDir, ".gitignore");
-		const linkFile = path.join(sourceDir, "link");
+			await pipeline(packStream, unpackStream);
 
-		await fs.writeFile(targetFile, "node_modules/\n");
-		await fs.symlink(".gitignore", linkFile);
+			const files = (await fs.readdir(destDir)).sort();
+			expect(files).toEqual([".gitignore", "link"]);
 
-		const destDir = path.join(tmpDir, "extracted");
-		const packStream = packTar(sourceDir);
-		const unpackStream = unpackTar(destDir);
+			const copiedLinkPath = path.join(destDir, "link");
+			const linkStat = await fs.lstat(copiedLinkPath);
+			expect(linkStat.isSymbolicLink()).toBe(true);
 
-		await pipeline(packStream, unpackStream);
-
-		const files = (await fs.readdir(destDir)).sort();
-		expect(files).toEqual([".gitignore", "link"]);
-
-		const copiedLinkPath = path.join(destDir, "link");
-		const linkStat = await fs.lstat(copiedLinkPath);
-		expect(linkStat.isSymbolicLink()).toBe(true);
-
-		const linkTarget = await fs.readlink(copiedLinkPath);
-		expect(linkTarget).toBe(".gitignore");
-	});
+			const linkTarget = await fs.readlink(copiedLinkPath);
+			expect(linkTarget).toBe(".gitignore");
+		},
+	);
 
 	it.skipIf(process.platform === "win32")(
 		"reports symlink validation errors in archive order",
-		async () => {
+		async ({ tmpDir }) => {
 			const destDir = path.join(tmpDir, "extracted");
 			const tarBuffer = await packTarWeb([
 				linkEntry("symlink", "first", "first-hop/.."),
@@ -82,7 +75,7 @@ describe("links", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"dereferences symlinks when specified",
-		async () => {
+		async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			await fs.mkdir(sourceDir, { recursive: true });
 
@@ -113,43 +106,46 @@ describe("links", () => {
 		},
 	);
 
-	it.skipIf(process.platform === "win32")("handles hard links", async () => {
-		const sourceDir = path.join(tmpDir, "source");
-		await fs.mkdir(sourceDir, { recursive: true });
+	it.skipIf(process.platform === "win32")(
+		"handles hard links",
+		async ({ tmpDir }) => {
+			const sourceDir = path.join(tmpDir, "source");
+			await fs.mkdir(sourceDir, { recursive: true });
 
-		// Create a file and a hard link to it
-		const originalFilePath = path.join(sourceDir, "hardlink-a.txt");
-		const hardlinkPath = path.join(sourceDir, "hardlink-b.txt");
+			// Create a file and a hard link to it
+			const originalFilePath = path.join(sourceDir, "hardlink-a.txt");
+			const hardlinkPath = path.join(sourceDir, "hardlink-b.txt");
 
-		await fs.writeFile(originalFilePath, "hardlink test content\n");
-		await fs.link(originalFilePath, hardlinkPath);
+			await fs.writeFile(originalFilePath, "hardlink test content\n");
+			await fs.link(originalFilePath, hardlinkPath);
 
-		const destDir = path.join(tmpDir, "extracted");
-		const packStream = packTar(sourceDir);
-		const unpackStream = unpackTar(destDir);
+			const destDir = path.join(tmpDir, "extracted");
+			const packStream = packTar(sourceDir);
+			const unpackStream = unpackTar(destDir);
 
-		await pipeline(packStream, unpackStream);
+			await pipeline(packStream, unpackStream);
 
-		const originalExtractedPath = path.join(destDir, "hardlink-a.txt");
-		const hardlinkExtractedPath = path.join(destDir, "hardlink-b.txt");
+			const originalExtractedPath = path.join(destDir, "hardlink-a.txt");
+			const hardlinkExtractedPath = path.join(destDir, "hardlink-b.txt");
 
-		const stat1 = await fs.stat(originalExtractedPath);
-		const stat2 = await fs.stat(hardlinkExtractedPath);
+			const stat1 = await fs.stat(originalExtractedPath);
+			const stat2 = await fs.stat(hardlinkExtractedPath);
 
-		// Check that they point to the same inode
-		expect(stat1.ino).toBe(stat2.ino);
-		// Check that the link count is 2
-		expect(stat1.nlink).toBe(2);
-		expect(stat2.nlink).toBe(2);
+			// Check that they point to the same inode
+			expect(stat1.ino).toBe(stat2.ino);
+			// Check that the link count is 2
+			expect(stat1.nlink).toBe(2);
+			expect(stat2.nlink).toBe(2);
 
-		const content = await fs.readFile(hardlinkExtractedPath, "utf-8");
-		const originalContent = await fs.readFile(originalFilePath, "utf-8");
-		expect(content).toBe(originalContent);
-	});
+			const content = await fs.readFile(hardlinkExtractedPath, "utf-8");
+			const originalContent = await fs.readFile(originalFilePath, "utf-8");
+			expect(content).toBe(originalContent);
+		},
+	);
 
 	it.skipIf(process.platform === "win32")(
 		"creates hardlink chains with concurrency one",
-		async () => {
+		async ({ tmpDir }) => {
 			const destDir = path.join(tmpDir, "extracted");
 			const tarBuffer = await packTarWeb([
 				{
@@ -175,7 +171,7 @@ describe("links", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"preserves symlink timestamps",
-		async () => {
+		async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			await fs.mkdir(sourceDir, { recursive: true });
 
@@ -208,7 +204,7 @@ describe("links", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"replaces existing link leaves",
-		async () => {
+		async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			await fs.mkdir(sourceDir, { recursive: true });
 

@@ -1,28 +1,16 @@
 import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { finished, pipeline } from "node:stream/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { packTar as packTarFS, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/encoding";
 import { packTar, type TarEntry } from "../../src/web";
+import { it } from "../helpers/test";
 import { INVALID_TAR } from "../web/fixtures";
 
 describe("security", () => {
-	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(
-			path.join(os.tmpdir(), "modern-tar-security-test-"),
-		);
-	});
-
-	afterEach(async () => {
-		await fs.rm(tmpDir, { recursive: true, force: true });
-	});
-
 	// Helper functions for creating malicious archives
 	const createTarWithMaliciousFile = async (
 		fileName: string,
@@ -172,7 +160,7 @@ describe("security", () => {
 
 	describe("path traversal prevention", () => {
 		describe("file path traversal", () => {
-			it("prevents files with relative path traversal", async () => {
+			it("prevents files with relative path traversal", async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -186,7 +174,7 @@ describe("security", () => {
 				);
 			});
 
-			it("strips absolute paths from files", async () => {
+			it("strips absolute paths from files", async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -205,7 +193,7 @@ describe("security", () => {
 				expect(fileContent).toBe("malicious data");
 			});
 
-			it("prevents files with complex path traversal", async () => {
+			it("prevents files with complex path traversal", async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -219,7 +207,9 @@ describe("security", () => {
 				);
 			});
 
-			it("allows safe file paths within extraction directory", async () => {
+			it("allows safe file paths within extraction directory", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -233,7 +223,9 @@ describe("security", () => {
 				expect(fileContent).toBe("malicious data");
 			});
 
-			it("rejects paths with traversal patterns even if they resolve safely", async () => {
+			it("rejects paths with traversal patterns even if they resolve safely", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -250,7 +242,9 @@ describe("security", () => {
 		});
 
 		describe("directory path traversal", () => {
-			it("prevents directories with relative path traversal", async () => {
+			it("prevents directories with relative path traversal", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -263,7 +257,7 @@ describe("security", () => {
 				);
 			});
 
-			it("strips absolute paths from directories", async () => {
+			it("strips absolute paths from directories", async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -282,7 +276,7 @@ describe("security", () => {
 				expect(dirStat.isDirectory()).toBe(true);
 			});
 
-			it("allows safe directory paths", async () => {
+			it("allows safe directory paths", async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -298,7 +292,9 @@ describe("security", () => {
 		});
 
 		describe("hardlink path traversal", () => {
-			it("prevents hardlinks with relative path traversal in target", async () => {
+			it("prevents hardlinks with relative path traversal in target", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -313,7 +309,9 @@ describe("security", () => {
 				);
 			});
 
-			it("prevents hardlinks with absolute paths in target", async () => {
+			it("prevents hardlinks with absolute paths in target", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -328,7 +326,9 @@ describe("security", () => {
 				);
 			});
 
-			it("allows safe hardlinks within extraction directory", async () => {
+			it("allows safe hardlinks within extraction directory", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -350,7 +350,9 @@ describe("security", () => {
 				expect(linkStat.nlink).toBe(2);
 			});
 
-			it("preserves Unicode spelling for hardlink targets", async () => {
+			it("preserves Unicode spelling for hardlink targets", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const targetName = "café.txt";
 				const linkName = "cafe\u0301.txt";
@@ -380,7 +382,9 @@ describe("security", () => {
 				expect(await fs.readdir(extractDir)).toContain(targetName);
 			});
 
-			it("should silently skip self-referential hardlinks without erroring", async () => {
+			it("should silently skip self-referential hardlinks without erroring", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -410,7 +414,9 @@ describe("security", () => {
 				expect(files).toEqual([]);
 			});
 
-			it("should skip self-referential hardlinks with various path formats", async () => {
+			it("should skip self-referential hardlinks with various path formats", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -456,7 +462,9 @@ describe("security", () => {
 				expect(nestedFiles).toEqual([]);
 			});
 
-			it("should handle mixed archive with self-referential and normal hardlinks", async () => {
+			it("should handle mixed archive with self-referential and normal hardlinks", async ({
+				tmpDir,
+			}) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -536,7 +544,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents symlinks pointing outside extraction directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -551,7 +559,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents symlinks with absolute paths outside extraction directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -566,7 +574,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents symlink graphs that resolve outside extraction directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -589,7 +597,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents pre-existing symlink components from escaping the extraction directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 				await fs.symlink(".", path.join(extractDir, "noop"));
@@ -609,7 +617,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"invalidates cached directories after replacing a symlink",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const outsidePath = path.join(tmpDir, "escaped.txt");
 				await fs.mkdir(path.join(extractDir, "safe"), { recursive: true });
@@ -643,7 +651,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"rejects dangling escapes through pre-existing symlinks",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 				await fs.symlink(
@@ -663,7 +671,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents pre-existing symlinks from redirecting targets outside the extraction directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const outsideDir = path.join(tmpDir, "outside");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -685,7 +693,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"rejects canonical sibling paths that share the destination prefix",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const siblingDir = path.join(tmpDir, "extract-sibling");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -710,7 +718,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents repeated symlink graph rewrites from escaping",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -734,7 +742,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents absolute symlink graphs that resolve outside extraction directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -758,7 +766,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"does not treat backslashes as path separators on POSIX",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -781,7 +789,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"allows safe symlinks within extraction directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -801,7 +809,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"allows symlinks to subdirectories within extraction directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -821,7 +829,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"validates symlinks with complex relative paths",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -838,7 +846,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents clever path traversal attempts",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -855,7 +863,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"validates symlinks in nested directories",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -897,7 +905,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"allows symlinks to the extraction directory root",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -917,7 +925,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents symlinks that resolve to parent through multiple levels",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -934,7 +942,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"validates symlinks and prevents traversal attacks",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -951,7 +959,7 @@ describe("security", () => {
 	describe("malformed archives", () => {
 		it.skipIf(process.platform === "win32")(
 			"rejects unpacking a tar with an invalid symlink pointing outside",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extracted");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -967,7 +975,9 @@ describe("security", () => {
 	});
 
 	describe("mixed and advanced attacks", () => {
-		it("prevents multiple types of traversal in single archive", async () => {
+		it("prevents multiple types of traversal in single archive", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -1018,7 +1028,9 @@ describe("security", () => {
 			);
 		});
 
-		it("processes safe entries before encountering traversal attempt", async () => {
+		it("processes safe entries before encountering traversal attempt", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -1099,7 +1111,7 @@ describe("security", () => {
 	});
 
 	describe("edge cases", () => {
-		it("allows files at extraction directory root", async () => {
+		it("allows files at extraction directory root", async ({ tmpDir }) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -1128,7 +1140,7 @@ describe("security", () => {
 			expect(await fs.readFile(filePath, "utf8")).toBe("malicious data");
 		});
 
-		it("handles empty path components correctly", async () => {
+		it("handles empty path components correctly", async ({ tmpDir }) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -1143,7 +1155,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents traversal with Windows-style paths on Unix",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				await fs.mkdir(extractDir, { recursive: true });
 
@@ -1172,7 +1184,7 @@ describe("security", () => {
 	describe("pre-existing path attacks", () => {
 		it.skipIf(process.platform === "win32")(
 			"replaces pre-existing link leaves without following them",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const outsideDir = path.join(tmpDir, "outside");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1230,7 +1242,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents file bodies from following a replaced parent directory",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const outsideDir = path.join(tmpDir, "outside");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1266,7 +1278,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents deferred hardlinks from following a replaced target parent",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const outsideDir = path.join(tmpDir, "outside");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1326,7 +1338,7 @@ describe("security", () => {
 	describe("CVE-specific attacks", () => {
 		it.skipIf(process.platform === "win32")(
 			"prevents tar-fs symlink traversal vulnerability (CVE-2025-59343)",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const evilDir = path.join(tmpDir, "extract-evil");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1359,7 +1371,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents hardlink through existing symlink vulnerability (CVE-2025-48387)",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const siblingDir = path.join(tmpDir, "sibling");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1402,7 +1414,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"rejects leaf symlink hardlink targets without deleting external targets",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const outsideDir = path.join(tmpDir, "outside");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1432,7 +1444,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents CVE-2025-48387 multi-stage symlink+hardlink attack",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const flagDir = path.join(tmpDir, "flag");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1515,7 +1527,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents symlink chain bypass attack (CVE-2025-48387 variant)",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const externalDir = path.join(tmpDir, "external");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1564,7 +1576,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents multi-level symlink+hardlink combinations",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const externalFile = path.join(tmpDir, "external.txt");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1626,7 +1638,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents overwrite via directory symlink+hardlink",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const targetDir = path.join(tmpDir, "target");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1686,7 +1698,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents directory symlink overwrite cache poisoning (CVE-2021-32804)",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const outsideDir = path.join(tmpDir, "outside");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1733,7 +1745,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents symlink cache poisoning with manual directory removal",
-			async () => {
+			async ({ tmpDir }) => {
 				const extractDir = path.join(tmpDir, "extract");
 				const targetDir = path.join(tmpDir, "target");
 				await fs.mkdir(extractDir, { recursive: true });
@@ -1794,7 +1806,7 @@ describe("security", () => {
 		);
 	});
 
-	it("prevents DoS attacks via deeply nested paths", async () => {
+	it("prevents DoS attacks via deeply nested paths", async ({ tmpDir }) => {
 		const extractDir = path.join(tmpDir, "extract");
 		await fs.mkdir(extractDir, { recursive: true });
 
@@ -1831,7 +1843,9 @@ describe("security", () => {
 		await expect(fs.access(firstLevel)).rejects.toThrow();
 	});
 
-	it("allows extraction when path depth is within limit", async () => {
+	it("allows extraction when path depth is within limit", async ({
+		tmpDir,
+	}) => {
 		const extractDir = path.join(tmpDir, "extract");
 		await fs.mkdir(extractDir, { recursive: true });
 
@@ -1864,7 +1878,7 @@ describe("security", () => {
 		expect(content).toBe("test");
 	});
 
-	it("respects custom maxDepth option", async () => {
+	it("respects custom maxDepth option", async ({ tmpDir }) => {
 		const extractDir = path.join(tmpDir, "extract");
 		await fs.mkdir(extractDir, { recursive: true });
 
@@ -1895,7 +1909,9 @@ describe("security", () => {
 		await expect(fs.access(firstLevel)).rejects.toThrow();
 	});
 
-	it("allows infinite depth when maxDepth is set to Infinity", async () => {
+	it("allows infinite depth when maxDepth is set to Infinity", async ({
+		tmpDir,
+	}) => {
 		const extractDir = path.join(tmpDir, "extract");
 		await fs.mkdir(extractDir, { recursive: true });
 
@@ -1926,7 +1942,9 @@ describe("security", () => {
 		expect(content).toBe("test");
 	});
 
-	it("prevents resource exhaustion from many nested directories", async () => {
+	it("prevents resource exhaustion from many nested directories", async ({
+		tmpDir,
+	}) => {
 		const extractDir = path.join(tmpDir, "extract");
 		await fs.mkdir(extractDir, { recursive: true });
 		const entries: TarEntry[] = [];
@@ -1960,7 +1978,7 @@ describe("security", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"prevents symlink to parent followed by file creation attack",
-		async () => {
+		async ({ tmpDir }) => {
 			const extractDir = path.join(tmpDir, "extract");
 			const parentDir = path.dirname(extractDir);
 			await fs.mkdir(extractDir, { recursive: true });
@@ -2012,7 +2030,7 @@ describe("security", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"prevents nested symlink chain traversal attack",
-		async () => {
+		async ({ tmpDir }) => {
 			const extractDir = path.join(tmpDir, "extract");
 			const parentDir = path.dirname(extractDir);
 			await fs.mkdir(extractDir, { recursive: true });
@@ -2086,7 +2104,7 @@ describe("security", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"prevents type confusion attack (directory vs file)",
-		async () => {
+		async ({ tmpDir }) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -2135,7 +2153,9 @@ describe("security", () => {
 	);
 
 	describe("path collision and concurrency edge cases", () => {
-		it("handles directory then file with same normalized path", async () => {
+		it("handles directory then file with same normalized path", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -2180,7 +2200,9 @@ describe("security", () => {
 			expect(stats.isDirectory()).toBe(true);
 		});
 
-		it("handles file then directory with same normalized path", async () => {
+		it("handles file then directory with same normalized path", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -2225,7 +2247,9 @@ describe("security", () => {
 			expect(stats.isFile()).toBe(true);
 		});
 
-		it("handles multiple entries with conflicting normalized paths", async () => {
+		it("handles multiple entries with conflicting normalized paths", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -2279,7 +2303,9 @@ describe("security", () => {
 			expect(stats.isDirectory()).toBe(true);
 		});
 
-		it("follows filesystem semantics for Unicode-equivalent names", async () => {
+		it("follows filesystem semantics for Unicode-equivalent names", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -2331,7 +2357,9 @@ describe("security", () => {
 			}
 		});
 
-		it("preserves duplicate path tracking beyond cache-sized archives", async () => {
+		it("preserves duplicate path tracking beyond cache-sized archives", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -2391,7 +2419,9 @@ describe("security", () => {
 			expect(dupContent).toBe("FIRST");
 		}, 20_000);
 
-		it("allows legitimate same-type operations on same path", async () => {
+		it("allows legitimate same-type operations on same path", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -2432,7 +2462,7 @@ describe("security", () => {
 			expect(stats.isDirectory()).toBe(true);
 		});
 
-		it("handles path separator edge cases", async () => {
+		it("handles path separator edge cases", async ({ tmpDir }) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fs.mkdir(extractDir, { recursive: true });
 
@@ -2476,7 +2506,7 @@ describe("security", () => {
 	describe("pack security vulnerabilities", () => {
 		it.skipIf(process.platform === "win32")(
 			"prevents symlink directory traversal during packing with dereference: true",
-			async () => {
+			async ({ tmpDir }) => {
 				const sourceDir = path.join(tmpDir, "source");
 				await fs.mkdir(sourceDir, { recursive: true });
 
@@ -2532,7 +2562,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents complex symlink directory traversal during packing",
-			async () => {
+			async ({ tmpDir }) => {
 				const sourceDir = path.join(tmpDir, "source");
 				await fs.mkdir(sourceDir, { recursive: true });
 
@@ -2579,7 +2609,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"allows legitimate symlinks within base directory with dereference: true",
-			async () => {
+			async ({ tmpDir }) => {
 				const sourceDir = path.join(tmpDir, "source");
 				await fs.mkdir(sourceDir, { recursive: true });
 
@@ -2631,7 +2661,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"allows manual baseDir specification for custom security boundaries",
-			async () => {
+			async ({ tmpDir }) => {
 				const tmpRoot = path.join(tmpDir, "workspace");
 				const allowedDir = path.join(tmpRoot, "allowed");
 				const forbiddenDir = path.join(tmpRoot, "forbidden");
@@ -2697,7 +2727,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"prevents pack time symlink path traversal vulnerability",
-			async () => {
+			async ({ tmpDir }) => {
 				const sourceDir = path.join(tmpDir, "source");
 				const evilDir = path.join(tmpDir, "source-evil");
 				await fs.mkdir(sourceDir, { recursive: true });
@@ -2743,7 +2773,7 @@ describe("security", () => {
 
 		it.skipIf(process.platform === "win32")(
 			"show path prefix vulnerability would be exploitable with just vulnerable startsWith check",
-			async () => {
+			async ({ tmpDir }) => {
 				const baseDir = path.join(tmpDir, "archive");
 				const maliciousDir = path.join(tmpDir, "archive-evil");
 				await fs.mkdir(baseDir, { recursive: true });
@@ -2803,7 +2833,9 @@ describe("security", () => {
 		);
 	});
 
-	it("prevents alignment DoS vulnerability in isZeroBlock", async () => {
+	it("prevents alignment DoS vulnerability in isZeroBlock", async ({
+		tmpDir,
+	}) => {
 		// Verifies that unaligned data chunks don't cause RangeError crashes
 		const extractDir = path.join(tmpDir, "extract");
 		await fs.mkdir(extractDir, { recursive: true });
@@ -2843,7 +2875,7 @@ describe("security", () => {
 	});
 
 	describe("prototype pollution via PAX headers", () => {
-		it("should NOT pollute prototype via PAX headers", async () => {
+		it("should NOT pollute prototype via PAX headers", async ({ tmpDir }) => {
 			const destDir = path.join(tmpDir, "extracted");
 			await fs.mkdir(destDir, { recursive: true });
 
@@ -2897,7 +2929,9 @@ describe("security", () => {
 	});
 
 	describe("privilege escalation prevention", () => {
-		it("should strip SUID/SGID bits from extracted files", async () => {
+		it("should strip SUID/SGID bits from extracted files", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "suid-check");
 			await fs.mkdir(destDir, { recursive: true });
 

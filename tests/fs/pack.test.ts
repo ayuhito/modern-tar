@@ -1,16 +1,14 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import * as os from "node:os";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { createTarDecoder, type TarHeader } from "../../src/web";
+import { it } from "../helpers/test";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES_DIR = path.join(__dirname, "fixtures");
+const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
 
 // Helper to get mtime in seconds, like in tar headers
 const mtime = (stat: { mtime: Date }) =>
@@ -23,17 +21,9 @@ const readArchiveText = async (stream: AsyncIterable<Uint8Array>) => {
 };
 
 describe("pack", () => {
-	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "modern-tar-pack-test-"));
-	});
-
-	afterEach(async () => {
-		await fsp.rm(tmpDir, { recursive: true, force: true });
-	});
-
-	it("packs and extracts a directory with a single file", async () => {
+	it("packs and extracts a directory with a single file", async ({
+		tmpDir,
+	}) => {
 		const sourceDir = path.join(FIXTURES_DIR, "a");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -59,7 +49,7 @@ describe("pack", () => {
 		expect(mtime(copiedStat)).toBe(mtime(originalStat));
 	});
 
-	it("packs and extracts a nested directory", async () => {
+	it("packs and extracts a nested directory", async ({ tmpDir }) => {
 		const sourceDir = path.join(FIXTURES_DIR, "b");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -82,7 +72,7 @@ describe("pack", () => {
 		expect(copiedContent).toBe(originalContent);
 	});
 
-	it("handles USTAR long filenames on a round trip", async () => {
+	it("handles USTAR long filenames on a round trip", async ({ tmpDir }) => {
 		const longDirName =
 			"a-very-long-directory-name-that-is-over-100-characters-long";
 		const nestedDirName =
@@ -112,7 +102,7 @@ describe("pack", () => {
 		expect(content).toBe("long path test");
 	});
 
-	it("handles PAX long filenames on a round trip", async () => {
+	it("handles PAX long filenames on a round trip", async ({ tmpDir }) => {
 		// This filename has a component longer than 100 chars and cannot use USTAR prefixing.
 		const longFileName =
 			"a-very-long-directory-name-that-is-well-over-one-hundred-characters-long-and-cannot-be-split-easily/file.txt";
@@ -135,7 +125,7 @@ describe("pack", () => {
 		expect(content).toBe("pax path test");
 	});
 
-	it("filters entries on pack", async () => {
+	it("filters entries on pack", async ({ tmpDir }) => {
 		const sourceDir = path.join(FIXTURES_DIR, "c");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -150,7 +140,9 @@ describe("pack", () => {
 		expect(files.includes(".gitignore")).toBe(false);
 	});
 
-	it("snapshots caller-provided source arrays and descriptors", async () => {
+	it("snapshots caller-provided source arrays and descriptors", async ({
+		tmpDir,
+	}) => {
 		const sourceDir = path.join(tmpDir, "source");
 		await fsp.mkdir(sourceDir);
 		await fsp.writeFile(path.join(sourceDir, "child.txt"), "child");
@@ -190,7 +182,7 @@ describe("pack", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"skips files swapped after validation",
-		async () => {
+		async ({ tmpDir }) => {
 			const emptyFile = path.join(tmpDir, "empty.txt");
 			const file = path.join(tmpDir, "file.txt");
 			const secret = path.join(tmpDir, "secret.txt");
@@ -221,7 +213,7 @@ describe("pack", () => {
 		},
 	);
 
-	it("reads only the file size captured in its header", async () => {
+	it("reads only the file size captured in its header", async ({ tmpDir }) => {
 		const file = path.join(tmpDir, "file.txt");
 		await fsp.writeFile(file, "SAFE");
 
@@ -241,7 +233,7 @@ describe("pack", () => {
 		);
 	});
 
-	it("handles partial reads from small files", async () => {
+	it("handles partial reads from small files", async ({ tmpDir }) => {
 		const file = path.join(tmpDir, "file.txt");
 		await fsp.writeFile(file, "partial reads");
 
@@ -281,7 +273,9 @@ describe("pack", () => {
 		);
 	});
 
-	it("rejects small files truncated after their header is captured", async () => {
+	it("rejects small files truncated after their header is captured", async ({
+		tmpDir,
+	}) => {
 		const file = path.join(tmpDir, "file.txt");
 		await fsp.writeFile(file, "SAFE");
 
@@ -299,7 +293,7 @@ describe("pack", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"does not follow dereferenced symlink swaps outside the base",
-		async () => {
+		async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			await fsp.mkdir(sourceDir);
 
@@ -336,7 +330,7 @@ describe("pack", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"skips dereferenced symlinks with final targets outside the base",
-		async () => {
+		async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			await fsp.mkdir(sourceDir);
 
@@ -363,7 +357,7 @@ describe("pack", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"allows dereferenced targets with dot-prefixed names inside the base",
-		async () => {
+		async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			await fsp.mkdir(sourceDir);
 
@@ -387,7 +381,7 @@ describe("pack", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"skips directories swapped after validation",
-		async () => {
+		async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			const childDir = path.join(sourceDir, "child");
 			const outsideDir = path.join(tmpDir, "outside");
@@ -420,7 +414,7 @@ describe("pack", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"skips entries enumerated through a swapped directory",
-		async () => {
+		async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			const childDir = path.join(sourceDir, "child");
 			const outsideDir = path.join(tmpDir, "outside");
@@ -458,7 +452,7 @@ describe("pack", () => {
 		},
 	);
 
-	it("handles empty files", async () => {
+	it("handles empty files", async ({ tmpDir }) => {
 		const sourceDir = path.join(tmpDir, "source");
 		await fsp.mkdir(sourceDir, { recursive: true });
 
@@ -481,7 +475,7 @@ describe("pack", () => {
 		expect(stats.size).toBe(0);
 	});
 
-	it("handles various file sizes correctly", async () => {
+	it("handles various file sizes correctly", async ({ tmpDir }) => {
 		const sourceDir = path.join(tmpDir, "source");
 		await fsp.mkdir(sourceDir, { recursive: true });
 
@@ -595,7 +589,7 @@ describe("pack", () => {
 			},
 		);
 
-		it("works correctly with valid StreamSource size", async () => {
+		it("works correctly with valid StreamSource size", async ({ tmpDir }) => {
 			const content = "test content for valid stream";
 			const sources = [
 				{
@@ -623,7 +617,7 @@ describe("pack", () => {
 		});
 	});
 
-	it("allows overriding file and directory modes", async () => {
+	it("allows overriding file and directory modes", async ({ tmpDir }) => {
 		// Create test files with specific permissions
 		const testFile = path.join(tmpDir, "test.txt");
 		const testDir = path.join(tmpDir, "testdir");
@@ -692,7 +686,9 @@ describe("pack", () => {
 		expect(nestedContent).toBe("nested content");
 	});
 
-	it("allows overriding all metadata properties for all source types", async () => {
+	it("allows overriding all metadata properties for all source types", async ({
+		tmpDir,
+	}) => {
 		// Create test files
 		const testFile = path.join(tmpDir, "test.txt");
 		const testDir = path.join(tmpDir, "testdir");
@@ -792,7 +788,9 @@ describe("pack", () => {
 		expect(nestedFileContent).toBe("nested content");
 	});
 
-	it("uses safe defaults for uid and gid in ContentSource and StreamSource", async () => {
+	it("uses safe defaults for uid and gid in ContentSource and StreamSource", async ({
+		tmpDir,
+	}) => {
 		const sources = [
 			{
 				type: "content" as const,
@@ -816,7 +814,9 @@ describe("pack", () => {
 		expect(stat.size).toBe(12); // "test content".length
 	});
 
-	it("allows partial metadata overrides while preserving filesystem values", async () => {
+	it("allows partial metadata overrides while preserving filesystem values", async ({
+		tmpDir,
+	}) => {
 		const testFile = path.join(tmpDir, "partial.txt");
 		await fsp.writeFile(testFile, "partial override test");
 
@@ -1130,7 +1130,7 @@ describe("pack", () => {
 		expect(fileEntry?.header.mode).toBe(customFileMode);
 	});
 
-	it("strips absolute paths during packing", async () => {
+	it("strips absolute paths during packing", async ({ tmpDir }) => {
 		const sources = [
 			{
 				type: "content" as const,

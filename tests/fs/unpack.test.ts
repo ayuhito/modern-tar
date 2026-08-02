@@ -1,9 +1,8 @@
-import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, vi } from "vitest";
+import { it } from "../helpers/test";
 
 // Mock fs/promises to control filesystem races.
 const originalFs =
@@ -90,19 +89,12 @@ vi.mock("node:fs/promises", async () => {
 import * as fs from "node:fs/promises";
 import { packTar, unpackTar } from "../../src/fs";
 import { packTar as packTarWeb } from "../../src/web";
+import { chunkBytes } from "../helpers/bytes";
+import { createDeferred } from "../helpers/deferred";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES_DIR = path.join(__dirname, "fixtures");
+const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
 
 describe("extract", () => {
-	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(
-			path.join(os.tmpdir(), "modern-tar-extract-test-"),
-		);
-	});
-
 	afterEach(async () => {
 		mkdirDelay = null;
 		releaseMkdir?.();
@@ -117,10 +109,9 @@ describe("extract", () => {
 		releaseWrite?.();
 		releaseWrite = null;
 		finishDelayedMkdir = null;
-		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
-	it("propagates file write backpressure to the source", async () => {
+	it("propagates file write backpressure to the source", async ({ tmpDir }) => {
 		const body = new Uint8Array(16 * 1024 * 1024).fill(97);
 		const archive = await packTarWeb([
 			{
@@ -132,9 +123,9 @@ describe("extract", () => {
 		const maxBufferedChunks = (8 * 1024 * 1024) / chunkSize;
 		let pulledChunks = 0;
 		function* chunks() {
-			for (let offset = 0; offset < archive.length; offset += chunkSize) {
+			for (const chunk of chunkBytes(archive, chunkSize)) {
 				pulledChunks++;
-				yield archive.subarray(offset, offset + chunkSize);
+				yield chunk;
 			}
 		}
 
@@ -164,7 +155,7 @@ describe("extract", () => {
 		);
 	});
 
-	it("rejects an active asynchronous file write error", async () => {
+	it("rejects an active asynchronous file write error", async ({ tmpDir }) => {
 		const body = new Uint8Array(256 * 1024 + 1).fill(97);
 		const archive = await packTarWeb([
 			{
@@ -191,7 +182,9 @@ describe("extract", () => {
 		await expect(extraction).rejects.toBe(writeError);
 	});
 
-	it("rejects clean cancellation while file writes are backpressured", async () => {
+	it("rejects clean cancellation while file writes are backpressured", async ({
+		tmpDir,
+	}) => {
 		const body = new Uint8Array(16 * 1024 * 1024).fill(97);
 		const archive = await packTarWeb([
 			{
@@ -220,7 +213,9 @@ describe("extract", () => {
 		});
 	});
 
-	it("cancels detached file writes without waiting for their callbacks", async () => {
+	it("cancels detached file writes without waiting for their callbacks", async ({
+		tmpDir,
+	}) => {
 		const body = new Uint8Array(256 * 1024).fill(97);
 		const archive = await packTarWeb([
 			{
@@ -250,19 +245,20 @@ describe("extract", () => {
 		});
 	});
 
-	it("does not open an entry after path preparation is cancelled", async () => {
+	it("does not open an entry after path preparation is cancelled", async ({
+		tmpDir,
+	}) => {
 		const archive = await packTarWeb([
 			{
 				header: { name: "late.txt", type: "file", size: 4 },
 				body: "late",
 			},
 		]);
-		mkdirDelay = new Promise<void>((resolve) => {
-			releaseMkdir = resolve;
-		});
-		const mkdirFinished = new Promise<void>((resolve) => {
-			finishDelayedMkdir = resolve;
-		});
+		const delayedMkdir = createDeferred();
+		mkdirDelay = delayedMkdir.promise;
+		releaseMkdir = delayedMkdir.resolve;
+		const mkdirFinished = createDeferred();
+		finishDelayedMkdir = mkdirFinished.resolve;
 		const destDir = path.join(tmpDir, "delayed-extracted-cancelled");
 		const unpackStream = unpackTar(destDir);
 		const extraction = pipeline(Readable.from([archive]), unpackStream);
@@ -274,7 +270,7 @@ describe("extract", () => {
 		unpackStream.destroy(cancelError);
 		await expect(extraction).rejects.toBe(cancelError);
 		releaseMkdir?.();
-		await mkdirFinished;
+		await mkdirFinished.promise;
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		await expect(fs.access(path.join(destDir, "late.txt"))).rejects.toThrow();
@@ -282,7 +278,9 @@ describe("extract", () => {
 		releaseMkdir = null;
 	});
 
-	it("flushes a partial file when non-strict input ends mid-entry", async () => {
+	it("flushes a partial file when non-strict input ends mid-entry", async ({
+		tmpDir,
+	}) => {
 		const archive = await packTarWeb([
 			{
 				header: { name: "partial.txt", type: "file", size: 3 },
@@ -301,7 +299,7 @@ describe("extract", () => {
 		);
 	});
 
-	it("strips path components on extract", async () => {
+	it("strips path components on extract", async ({ tmpDir }) => {
 		const sourceDir = path.join(FIXTURES_DIR, "b");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -314,7 +312,7 @@ describe("extract", () => {
 		expect(files).toEqual(["test.txt"]);
 	});
 
-	it("maps headers on extract", async () => {
+	it("maps headers on extract", async ({ tmpDir }) => {
 		const sourceDir = path.join(FIXTURES_DIR, "a");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -332,7 +330,7 @@ describe("extract", () => {
 		expect(files).toEqual(["hello.txt"]);
 	});
 
-	it("filters entries on extract", async () => {
+	it("filters entries on extract", async ({ tmpDir }) => {
 		const sourceDir = path.join(FIXTURES_DIR, "c");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -347,7 +345,9 @@ describe("extract", () => {
 		expect(files.includes(".gitignore")).toBe(false);
 	});
 
-	it("preserves Unicode spelling in the destination and entry name", async () => {
+	it("preserves Unicode spelling in the destination and entry name", async ({
+		tmpDir,
+	}) => {
 		const destDir = path.join(tmpDir, "Masaüstü", "project");
 		const decomposedDest = destDir.normalize("NFD");
 		const fileName = "café.txt";
@@ -380,13 +380,15 @@ describe("extract", () => {
 			await expect(fs.lstat(decomposedDest)).rejects.toThrow();
 	});
 
-	it("waits for destination directory creation when all entries are filtered", async () => {
+	it("waits for destination directory creation when all entries are filtered", async ({
+		tmpDir,
+	}) => {
 		const destDir = path.join(tmpDir, "delayed-extracted");
 
 		// Set up the delay for mkdir
-		mkdirDelay = new Promise<void>((resolve) => {
-			releaseMkdir = resolve;
-		});
+		const delayedMkdir = createDeferred();
+		mkdirDelay = delayedMkdir.promise;
+		releaseMkdir = delayedMkdir.resolve;
 
 		try {
 			const entries = [
@@ -427,7 +429,7 @@ describe("extract", () => {
 		}
 	});
 
-	it("extracts files with correct permissions", async () => {
+	it("extracts files with correct permissions", async ({ tmpDir }) => {
 		const sourceDir = path.join(FIXTURES_DIR, "a");
 		const destDir = path.join(tmpDir, "extracted");
 
@@ -442,7 +444,7 @@ describe("extract", () => {
 		expect(extractedStat.mode).toBe(originalStat.mode);
 	});
 
-	it("handles directory mode override", async () => {
+	it("handles directory mode override", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const entries = [
@@ -475,7 +477,9 @@ describe("extract", () => {
 		}
 	});
 
-	it("handles symlink validation with cache invalidation", async () => {
+	it("handles symlink validation with cache invalidation", async ({
+		tmpDir,
+	}) => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		// First create a directory, then replace it with a symlink
@@ -517,7 +521,7 @@ describe("extract", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"rejects symlink parent swaps without writing outside",
-		async () => {
+		async ({ tmpDir }) => {
 			const destDir = path.join(tmpDir, "extracted");
 			const parentDir = path.join(destDir, "dir");
 			const outsideDir = path.join(tmpDir, "outside");
@@ -551,7 +555,7 @@ describe("extract", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"keeps same-chunk parent replacement from redirecting pending file opens",
-		async () => {
+		async ({ tmpDir }) => {
 			const destDir = path.join(tmpDir, "extracted");
 			const safeDir = path.join(destDir, "safe");
 			const outsideDir = path.join(tmpDir, "outside");
@@ -564,15 +568,14 @@ describe("extract", () => {
 				await originalFs.realpath(safeDir),
 				"inside.txt",
 			);
-			const openStarted = new Promise<string>((resolve) => {
-				interceptOpen = (target, resumeOpen) => {
-					if (path.basename(target) !== "inside.txt") return false;
-					interceptOpen = null;
-					releaseOpen = resumeOpen;
-					resolve(target);
-					return true;
-				};
-			});
+			const openStarted = createDeferred<string>();
+			interceptOpen = (target, resumeOpen) => {
+				if (path.basename(target) !== "inside.txt") return false;
+				interceptOpen = null;
+				releaseOpen = resumeOpen;
+				openStarted.resolve(target);
+				return true;
+			};
 
 			const tarBuffer = await packTarWeb([
 				{
@@ -599,7 +602,7 @@ describe("extract", () => {
 				),
 			).rejects.toThrow("points outside the extraction directory");
 
-			expect(await openStarted).toBe(expectedOpenPath);
+			expect(await openStarted.promise).toBe(expectedOpenPath);
 			await vi.waitFor(async () => {
 				expect(await originalFs.readlink(path.join(destDir, "cached"))).toBe(
 					"redirect",
@@ -618,7 +621,9 @@ describe("extract", () => {
 		},
 	);
 
-	it("handles file permissions and timestamps correctly", async () => {
+	it("handles file permissions and timestamps correctly", async ({
+		tmpDir,
+	}) => {
 		const destDir = path.join(tmpDir, "extracted");
 		const testTime = new Date("2020-01-01T12:00:00Z");
 
@@ -657,7 +662,7 @@ describe("extract", () => {
 		expect(content).toBe("hello world\n");
 	});
 
-	it("handles maxDepth validation", async () => {
+	it("handles maxDepth validation", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const entries = [
@@ -680,7 +685,7 @@ describe("extract", () => {
 		).rejects.toThrow("Tar exceeds max specified depth.");
 	});
 
-	it("strips absolute paths in entries", async () => {
+	it("strips absolute paths in entries", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const entries = [
@@ -709,7 +714,7 @@ describe("extract", () => {
 		expect(fileContent).toBe("hello world\n");
 	});
 
-	it("handles hardlink with absolute target", async () => {
+	it("handles hardlink with absolute target", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const entries = [
@@ -735,7 +740,7 @@ describe("extract", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"retries when an existing hardlink output disappears",
-		async () => {
+		async ({ tmpDir }) => {
 			const targetPath = path.join(tmpDir, "target.txt");
 			const outPath = path.join(tmpDir, "link.txt");
 			await fs.writeFile(targetPath, "target");
@@ -769,7 +774,7 @@ describe("extract", () => {
 
 	it.skipIf(process.platform === "win32")(
 		"keeps an existing hardlink when its target path disappears",
-		async () => {
+		async ({ tmpDir }) => {
 			const targetPath = path.join(tmpDir, "target.txt");
 			const outPath = path.join(tmpDir, "link.txt");
 			await fs.writeFile(targetPath, "target");
@@ -795,7 +800,7 @@ describe("extract", () => {
 		},
 	);
 
-	it("handles timestamps on symlinks", async () => {
+	it("handles timestamps on symlinks", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 		const testTime = new Date("2020-01-01T00:00:00Z");
 
@@ -822,7 +827,7 @@ describe("extract", () => {
 		expect(linkTarget).toBe("target");
 	});
 
-	it("handles multiple files with different mtimes", async () => {
+	it("handles multiple files with different mtimes", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 		const mtime1 = new Date("2023-01-01T00:00:00Z");
 		const mtime2 = new Date("2023-06-15T12:00:00Z");
@@ -875,7 +880,7 @@ describe("extract", () => {
 		expect(file3Stats.mtime.getTime()).toBe(mtime3.getTime());
 	});
 
-	it("handles empty files with mtime", async () => {
+	it("handles empty files with mtime", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 		const testMtime = new Date("2023-07-20T10:15:30Z");
 
@@ -903,7 +908,9 @@ describe("extract", () => {
 		expect(stats.size).toBe(0);
 	});
 
-	it("handles files with very old and very new timestamps", async () => {
+	it("handles files with very old and very new timestamps", async ({
+		tmpDir,
+	}) => {
 		const destDir = path.join(tmpDir, "extracted");
 		const oldMtime = new Date("1990-01-01T00:00:00Z");
 		const newMtime = new Date("2030-12-31T23:59:59Z");
@@ -943,7 +950,7 @@ describe("extract", () => {
 		expect(newStats.mtime.getTime()).toBe(newMtime.getTime());
 	});
 
-	it("handles nested directories with file mtimes", async () => {
+	it("handles nested directories with file mtimes", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 		const dirMtime = new Date("2023-05-01T12:00:00Z");
 		const fileMtime = new Date("2023-05-02T14:30:00Z");
@@ -988,7 +995,7 @@ describe("extract", () => {
 		expect(content).toBe("deep file");
 	});
 
-	it("safely skips unsupported file types", async () => {
+	it("safely skips unsupported file types", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		const entries = [
@@ -1040,7 +1047,7 @@ describe("extract", () => {
 		expect(content).toBe("hello world\n");
 	});
 
-	it("handles errors during processing", async () => {
+	it("handles errors during processing", async ({ tmpDir }) => {
 		const destDir = path.join(tmpDir, "extracted");
 
 		// Create a tar with an invalid symlink that will cause an error
@@ -1067,7 +1074,9 @@ describe("extract", () => {
 	});
 
 	describe("edge cases", () => {
-		it("handles validate path with non-directory/non-symlink file blocking path", async () => {
+		it("handles validate path with non-directory/non-symlink file blocking path", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 			await fs.mkdir(destDir, { recursive: true });
 
@@ -1097,7 +1106,9 @@ describe("extract", () => {
 	});
 
 	describe("malformed archive handling", () => {
-		it("should correctly unpack a file entry with erroneous trailing slashes", async () => {
+		it("should correctly unpack a file entry with erroneous trailing slashes", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 
 			// Arrange: Create an archive where a file entry's path incorrectly ends with a slash.
@@ -1127,7 +1138,9 @@ describe("extract", () => {
 			expect(stats.isFile()).toBe(false);
 		});
 
-		it("should handle multiple trailing slashes on files", async () => {
+		it("should handle multiple trailing slashes on files", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 
 			const entries = [
@@ -1153,7 +1166,9 @@ describe("extract", () => {
 			expect(stats.isDirectory()).toBe(true);
 		});
 
-		it("should handle trailing slashes on directories (which is valid)", async () => {
+		it("should handle trailing slashes on directories (which is valid)", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 
 			const entries = [
@@ -1178,7 +1193,9 @@ describe("extract", () => {
 			expect(stats.isDirectory()).toBe(true);
 		});
 
-		it("should handle nested paths with trailing slashes", async () => {
+		it("should handle nested paths with trailing slashes", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 
 			const content = "nested\n";
@@ -1205,7 +1222,9 @@ describe("extract", () => {
 			expect(stats.isDirectory()).toBe(true);
 		});
 
-		it("converts to directory when PAX header overrides name with trailing slash", async () => {
+		it("converts to directory when PAX header overrides name with trailing slash", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "pax-override");
 			await fs.mkdir(destDir, { recursive: true });
 
@@ -1231,7 +1250,9 @@ describe("extract", () => {
 			expect(stats.isDirectory()).toBe(true);
 		});
 
-		it("does NOT convert symlinks to directories even with trailing slash", async () => {
+		it("does NOT convert symlinks to directories even with trailing slash", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "symlink-slash");
 			await fs.mkdir(destDir, { recursive: true });
 
@@ -1260,7 +1281,9 @@ describe("extract", () => {
 			expect(stats.isDirectory()).toBe(false);
 		});
 
-		it("discards body content when a FILE is converted to a DIRECTORY", async () => {
+		it("discards body content when a FILE is converted to a DIRECTORY", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "content-discard");
 			await fs.mkdir(destDir, { recursive: true });
 
@@ -1307,7 +1330,7 @@ describe("extract", () => {
 			]);
 		});
 
-		it("map filters out empty directory names", async () => {
+		it("map filters out empty directory names", async ({ tmpDir }) => {
 			const sourceDir = path.join(tmpDir, "source");
 			await fs.mkdir(path.join(sourceDir, "dir"), { recursive: true });
 
@@ -1340,7 +1363,7 @@ describe("extract", () => {
 			}
 		}, 2000);
 
-		it("handles mapping with subdir extraction", async () => {
+		it("handles mapping with subdir extraction", async ({ tmpDir }) => {
 			// Create a test archive that mimics GitHub tarball structure
 			const sourceDir = path.join(tmpDir, "source");
 			const rootDir = path.join(sourceDir, "withastro-starlight-abc123");
@@ -1392,7 +1415,9 @@ describe("extract", () => {
 	});
 
 	describe("error handling", () => {
-		it("handles file close errors gracefully without unhandled rejections", async () => {
+		it("handles file close errors gracefully without unhandled rejections", async ({
+			tmpDir,
+		}) => {
 			// Test that file close/futimes errors don't cause unhandled rejections
 			// which would crash the process in Node.js >=15
 

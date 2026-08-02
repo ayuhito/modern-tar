@@ -1,34 +1,53 @@
+import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
+
+const server = {
+	watch: {
+		ignored: ["**/tests/fs/fixtures/e/symlink"],
+	},
+};
 
 export default defineConfig({
 	test: {
-		exclude: [
-			"**/node_modules/**",
-			"**/dist/**",
-			"**/cypress/**",
-			"**/.{idea,git,cache,output,temp}/**",
-			"**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
-			"**/tests/browser/**",
-			"**/tests/workers/**",
-			// Exclude problematic symlink fixtures that cause ELOOP errors
-			"**/tests/fs/fixtures/e/symlink",
+		projects: [
+			{
+				server,
+				test: {
+					name: "node",
+					include: ["tests/{fs,tar,web}/**/*.test.ts"],
+				},
+			},
+			{
+				server,
+				test: {
+					name: "workers",
+					include: ["tests/workers/**/*.test.ts"],
+				},
+			},
+			{
+				server,
+				test: {
+					name: "browser",
+					include: ["tests/browser/**/*.test.ts"],
+					browser: {
+						enabled: true,
+						headless: true,
+						screenshotFailures: false,
+						provider: playwright(),
+						instances: [{ browser: "chromium" }, { browser: "firefox" }],
+					},
+				},
+			},
 		],
 		coverage: {
-			exclude: [
-				"**/node_modules/**",
-				"**/dist/**",
-				"**/.{idea,git,cache,output,temp}/**",
-				"**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
-				"**/tests/**",
-				"**/benchmarks/**",
-				"tsdown.config.ts",
-			],
-		},
-	},
-	server: {
-		watch: {
-			// Disable file system watching for symlinks to prevent infinite loops
-			ignored: ["**/tests/fs/fixtures/e/symlink"],
+			provider: "v8",
+			include: ["src/**/*.ts"],
+			thresholds: {
+				statements: -135,
+				branches: -131,
+				functions: -6,
+				lines: -76,
+			},
 		},
 	},
 });

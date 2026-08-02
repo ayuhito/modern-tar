@@ -1,11 +1,10 @@
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
 import { describe, expect, it } from "vitest";
 import { packTar } from "../../src/web/helpers";
+import { chunkBytes } from "../helpers/bytes";
 
-const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
-const fixturePath = (name: string) => resolve(__dirname, name);
+const fixturePath = (name: string) => resolve(import.meta.dirname, name);
 
 type DatasetOptions = {
 	count: number;
@@ -102,17 +101,8 @@ async function writeArchive(
 	// If there are remaining bytes after the initial chunk, write them in parts with optional delays.
 	if (remaining > 0) {
 		const chunkSize = Math.max(1, Math.ceil(remaining / parts));
-		for (
-			let offset = initialBytes;
-			offset < tarBuffer.length;
-			offset += chunkSize
-		) {
-			await writer.write(
-				tarBuffer.subarray(
-					offset,
-					Math.min(tarBuffer.length, offset + chunkSize),
-				),
-			);
+		for (const fragment of chunkBytes(tarBuffer, chunkSize, initialBytes)) {
+			await writer.write(fragment);
 		}
 	}
 

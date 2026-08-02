@@ -5,6 +5,8 @@ import { decoder, encoder } from "../../src/tar/encoding";
 import { createTarHeader } from "../../src/tar/header";
 
 import { createTarDecoder, packTar, unpackTar } from "../../src/web";
+import { chunkBytes } from "../helpers/bytes";
+import { createDeferred } from "../helpers/deferred";
 import {
 	INCOMPLETE_TAR,
 	LONG_NAME_TAR,
@@ -14,12 +16,6 @@ import {
 	TYPES_TAR,
 	UNICODE_TAR,
 } from "./fixtures";
-
-const createBaseArchive = (
-	entries: Parameters<typeof packTar>[0],
-): Promise<Uint8Array> => {
-	return packTar(entries);
-};
 
 const readWithTimeout = <T>(
 	promise: Promise<T>,
@@ -80,7 +76,7 @@ describe("unpackTar", () => {
 	});
 
 	it("returns file data independent from the source archive buffer", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{ header: { name: "file.txt", type: "file", size: 5 }, body: "hello" },
 		]);
 		const [entry] = await unpackTar(archive);
@@ -105,7 +101,7 @@ describe("unpackTar", () => {
 
 		expect(entry.data?.buffer.byteLength).toBe(0);
 
-		const paxArchive = await createBaseArchive([
+		const paxArchive = await packTar([
 			{
 				header: {
 					name: "negative-pax-size.txt",
@@ -123,7 +119,7 @@ describe("unpackTar", () => {
 	});
 
 	it("does not apply PAX size to a bodyless symlink", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{
 				header: {
 					name: "bodyless",
@@ -148,7 +144,7 @@ describe("unpackTar", () => {
 	});
 
 	it("does not carry PAX size through GNU long-name metadata", async () => {
-		const paxArchive = await createBaseArchive([
+		const paxArchive = await packTar([
 			{
 				header: {
 					name: "ignored",
@@ -167,7 +163,7 @@ describe("unpackTar", () => {
 			type: "gnu-long-name",
 			size: longNameBytes.length,
 		});
-		const fileArchive = await createBaseArchive([
+		const fileArchive = await packTar([
 			{
 				header: { name: "short.txt", type: "file", size: 5 },
 				body: "hello",
@@ -218,7 +214,7 @@ describe("unpackTar", () => {
 	});
 
 	it("should ignore extra data after the final null blocks in non-strict mode", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{ header: { name: "test.txt", type: "file", size: 5 }, body: "hello" },
 		]);
 		const extraData = new Uint8Array([1, 2, 3]);
@@ -234,7 +230,7 @@ describe("unpackTar", () => {
 
 describe("createTarDecoder", () => {
 	it("streams entries as data arrives", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{ header: { name: "file.txt", type: "file", size: 5 }, body: "hello" },
 			{ header: { name: "dir/", type: "directory", size: 0 } },
 			{
@@ -294,7 +290,7 @@ describe("createTarDecoder", () => {
 	});
 
 	it("iterate over headers by cancelling", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{ header: { name: "dir/", type: "directory", size: 0 } },
 			{
 				header: { name: "dir/file.txt", type: "file", size: 5 },
@@ -326,7 +322,7 @@ describe("createTarDecoder", () => {
 	});
 
 	it("pauses body streaming until the current entry is cancelled", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{
 				header: { name: "large.bin", type: "file", size: 2048 },
 				body: new Uint8Array(2048).fill(97),
@@ -339,8 +335,8 @@ describe("createTarDecoder", () => {
 		const writer = decoder.writable.getWriter();
 
 		const writeAll = (async () => {
-			for (let i = 0; i < archive.length; i += 128) {
-				await writer.write(archive.subarray(i, i + 128));
+			for (const fragment of chunkBytes(archive, 128)) {
+				await writer.write(fragment);
 			}
 		})();
 
@@ -381,7 +377,7 @@ describe("createTarDecoder", () => {
 
 	it("propagates unread body backpressure and cancellation to the source", async () => {
 		const body = new Uint8Array(8 * 1024 * 1024).fill(97);
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{
 				header: { name: "large.bin", type: "file", size: body.length },
 				body,
@@ -389,19 +385,16 @@ describe("createTarDecoder", () => {
 		]);
 		const chunkSize = 64 * 1024;
 		let pulledChunks = 0;
-		let offset = 0;
-		let cancelSource!: () => void;
-		const sourceCanceled = new Promise<void>((resolve) => {
-			cancelSource = resolve;
-		});
+		const sourceFragments = chunkBytes(archive, chunkSize)[Symbol.iterator]();
+		const sourceCanceled = createDeferred();
 		const source = new ReadableStream<Uint8Array>({
 			pull(controller) {
-				if (offset >= archive.length) return controller.close();
+				const { done, value } = sourceFragments.next();
+				if (done) return controller.close();
 				pulledChunks++;
-				controller.enqueue(archive.subarray(offset, offset + chunkSize));
-				offset += chunkSize;
+				controller.enqueue(value);
 			},
-			cancel: () => cancelSource(),
+			cancel: () => sourceCanceled.resolve(),
 		});
 		const reader = source.pipeThrough(createTarDecoder()).getReader();
 		const result = await reader.read();
@@ -412,7 +405,7 @@ describe("createTarDecoder", () => {
 		const pulledBeforeCancel = pulledChunks;
 		await reader.cancel();
 		await readWithTimeout(
-			sourceCanceled,
+			sourceCanceled.promise,
 			"Timed out waiting for source cancellation",
 		);
 
@@ -422,7 +415,7 @@ describe("createTarDecoder", () => {
 
 	it("aborts while an unread body backpressures the writable side", async () => {
 		const body = new Uint8Array(2 * 1024 * 1024).fill(97);
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{
 				header: { name: "large.bin", type: "file", size: body.length },
 				body,
@@ -445,8 +438,9 @@ describe("createTarDecoder", () => {
 		);
 
 		const writes: Promise<void>[] = [];
-		for (let offset = chunkSize; offset < archive.length; offset += chunkSize)
-			writes.push(writer.write(archive.subarray(offset, offset + chunkSize)));
+		for (const fragment of chunkBytes(archive, chunkSize, chunkSize)) {
+			writes.push(writer.write(fragment));
+		}
 		const writesSettled = Promise.allSettled(writes);
 		await expectToStayPending(writesSettled);
 
@@ -460,7 +454,7 @@ describe("createTarDecoder", () => {
 	});
 
 	it("continues serving buffered headers before the source closes", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{ header: { name: "one/", type: "directory", size: 0 } },
 			{ header: { name: "two/", type: "directory", size: 0 } },
 			{ header: { name: "three/", type: "directory", size: 0 } },
@@ -514,7 +508,7 @@ describe("createTarDecoder", () => {
 	});
 
 	it("flushes trailing buffered entries when the source closes", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{ header: { name: "one/", type: "directory", size: 0 } },
 			{ header: { name: "two/", type: "directory", size: 0 } },
 			{ header: { name: "three/", type: "directory", size: 0 } },
@@ -548,7 +542,7 @@ describe("createTarDecoder", () => {
 	});
 
 	it("rejects a stream with an invalid checksum in strict mode", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{ header: { name: "test.txt", type: "file", size: 0 }, body: "" },
 		]);
 		// Corrupt the checksum
@@ -568,7 +562,7 @@ describe("createTarDecoder", () => {
 	});
 
 	it("rejects a stream with unexpected data at the end in strict mode", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{ header: { name: "test.txt", type: "file", size: 1 }, body: "h" },
 		]);
 		const stream = new ReadableStream({
@@ -587,7 +581,7 @@ describe("createTarDecoder", () => {
 	});
 
 	it("rejects a stream truncated mid-entry in strict mode", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{
 				header: { name: "test.txt", size: 10, type: "file" },
 				body: "1234567890",
@@ -610,7 +604,7 @@ describe("createTarDecoder", () => {
 	});
 
 	it("gracefully handles a stream truncated mid-entry in non-strict mode", async () => {
-		const archive = await createBaseArchive([
+		const archive = await packTar([
 			{
 				header: { name: "test.txt", size: 10, type: "file" },
 				body: "1234567890",
@@ -649,7 +643,7 @@ describe("spec compliance", () => {
 	describe("USTAR Fields", () => {
 		it("extracts a filename that is exactly 100 characters long", async () => {
 			const longName = "a".repeat(100);
-			const archive = await createBaseArchive([
+			const archive = await packTar([
 				{ header: { name: longName, type: "file", size: 4 }, body: "test" },
 			]);
 			const [entry] = await unpackTar(archive);
@@ -686,7 +680,7 @@ describe("spec compliance", () => {
 
 		it("uses PAX 'size' attribute for files larger than USTAR limit", async () => {
 			const hugeFileSize = "8804630528"; // ~8.2 GB
-			const archive = await createBaseArchive([
+			const archive = await packTar([
 				{
 					header: {
 						name: "huge.txt",
@@ -740,7 +734,7 @@ describe("spec compliance", () => {
 
 	describe("Archive Structure Edge Cases", () => {
 		it("handles data after final null blocks in strict mode", async () => {
-			const archive = await createBaseArchive([
+			const archive = await packTar([
 				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
 			]);
 			const extraData = new Uint8Array(100).fill(0xff);
@@ -756,7 +750,7 @@ describe("spec compliance", () => {
 		});
 
 		it("handles archive ending with single null block", async () => {
-			const archive = await createBaseArchive([
+			const archive = await packTar([
 				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
 			]);
 			const archiveWithOneEOF = archive.slice(0, archive.length - BLOCK_SIZE);
@@ -773,7 +767,7 @@ describe("spec compliance", () => {
 		});
 
 		it("handles archive ending mid-header", async () => {
-			const archive = await createBaseArchive([
+			const archive = await packTar([
 				{ header: { name: "test.txt", size: 5, type: "file" }, body: "hello" },
 			]);
 			const truncatedArchive = archive.slice(0, 200);

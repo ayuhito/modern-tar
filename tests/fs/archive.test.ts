@@ -1,30 +1,22 @@
 import { createReadStream, createWriteStream } from "node:fs";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
 import { encoder } from "../../src/tar/encoding";
+import { it } from "../helpers/test";
 
 const isWindows = process.platform === "win32";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES_DIR = path.join(__dirname, "fixtures");
+const FIXTURES_DIR = path.join(import.meta.dirname, "fixtures");
 
 let expectedHelloContent: string;
 let expectedTestContent: string;
 
 describe("packTarSources", () => {
-	let tmpDir: string;
-
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(
-			path.join(os.tmpdir(), "modern-tar-archive-test-"),
-		);
-
 		// Read the actual fixture files to handle line endings correctly
 		expectedHelloContent = await fs.readFile(
 			path.join(FIXTURES_DIR, "a", "hello.txt"),
@@ -36,11 +28,7 @@ describe("packTarSources", () => {
 		);
 	});
 
-	afterEach(async () => {
-		await fs.rm(tmpDir, { recursive: true, force: true });
-	});
-
-	it("packs a single file source", async () => {
+	it("packs a single file source", async ({ tmpDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
@@ -71,7 +59,7 @@ describe("packTarSources", () => {
 		expect(extractedStat.mode).toBe(originalStat.mode);
 	});
 
-	it("packs multiple file sources", async () => {
+	it("packs multiple file sources", async ({ tmpDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
@@ -107,7 +95,7 @@ describe("packTarSources", () => {
 		expect(testContent).toBe(expectedTestContent);
 	});
 
-	it("packs content sources", async () => {
+	it("packs content sources", async ({ tmpDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "content",
@@ -153,7 +141,9 @@ describe("packTarSources", () => {
 		expect(uint8Content).toBe("Hello from Uint8Array!");
 	});
 
-	it("packs content sources with new TarEntryData types", async () => {
+	it("packs content sources with new TarEntryData types", async ({
+		tmpDir,
+	}) => {
 		// Create test data for various types
 		const testString = "Hello from ArrayBuffer!";
 		const arrayBuffer = new ArrayBuffer(testString.length);
@@ -229,7 +219,7 @@ describe("packTarSources", () => {
 		expect(emptyContent).toBe("");
 	});
 
-	it("packs StreamSource with Node Readable", async () => {
+	it("packs StreamSource with Node Readable", async ({ tmpDir }) => {
 		const readableContent = "Hello from Readable!";
 		const readable = Readable.from([Buffer.from(readableContent, "utf-8")]);
 
@@ -258,7 +248,9 @@ describe("packTarSources", () => {
 		expect(extractedContent).toBe("Hello from Readable!");
 	});
 
-	it("packs content sources with Node Readable streams of different chunk types", async () => {
+	it("packs content sources with Node Readable streams of different chunk types", async ({
+		tmpDir,
+	}) => {
 		// Test with string chunks
 		const stringChunks = Readable.from([
 			"Hello ",
@@ -314,7 +306,7 @@ describe("packTarSources", () => {
 		expect(mixedContent).toBe("Mixed: Buffer and Uint8");
 	});
 
-	it("packs StreamSource with Web ReadableStream", async () => {
+	it("packs StreamSource with Web ReadableStream", async ({ tmpDir }) => {
 		const webStreamContent = "Hello from Web ReadableStream!";
 		const webStream = new ReadableStream({
 			start(controller) {
@@ -348,7 +340,7 @@ describe("packTarSources", () => {
 		expect(extractedContent).toBe("Hello from Web ReadableStream!");
 	});
 
-	it("packs content source with custom mode", async () => {
+	it("packs content source with custom mode", async ({ tmpDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "content",
@@ -377,7 +369,7 @@ describe("packTarSources", () => {
 		}
 	});
 
-	it("packs directory sources", async () => {
+	it("packs directory sources", async ({ tmpDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "directory",
@@ -407,7 +399,7 @@ describe("packTarSources", () => {
 		expect(content).toBe(expectedTestContent);
 	});
 
-	it("packs mixed source types", async () => {
+	it("packs mixed source types", async ({ tmpDir }) => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
@@ -455,7 +447,9 @@ describe("packTarSources", () => {
 		).toBe(true);
 	});
 
-	it("handles Windows paths by normalizing to forward slashes", async () => {
+	it("handles Windows paths by normalizing to forward slashes", async ({
+		tmpDir,
+	}) => {
 		const sources: TarSource[] = [
 			{
 				type: "content",
@@ -478,7 +472,7 @@ describe("packTarSources", () => {
 		expect(content).toBe("test content");
 	});
 
-	it("handles empty sources array", async () => {
+	it("handles empty sources array", async ({ tmpDir }) => {
 		const sources: TarSource[] = [];
 
 		const archiveStream = packTar(sources);
@@ -492,7 +486,7 @@ describe("packTarSources", () => {
 		expect(stats.size).toBeLessThan(2048); // Should be small for empty archive
 	});
 
-	it("preserves file timestamps and modes", async () => {
+	it("preserves file timestamps and modes", async ({ tmpDir }) => {
 		// Create a test file with specific timestamp
 		const testFile = path.join(tmpDir, "timestamptest.txt");
 		await fs.writeFile(testFile, "timestamp test");
@@ -530,7 +524,7 @@ describe("packTarSources", () => {
 		expect(extractedStat.mode).toBe(originalStat.mode);
 	});
 
-	it("handles directory with no files", async () => {
+	it("handles directory with no files", async ({ tmpDir }) => {
 		// Create empty directory
 		const emptyDir = path.join(tmpDir, "empty");
 		await fs.mkdir(emptyDir);
@@ -557,7 +551,9 @@ describe("packTarSources", () => {
 		expect(stat.isDirectory()).toBe(true);
 	});
 
-	it("handles errors gracefully when source file doesn't exist", async () => {
+	it("handles errors gracefully when source file doesn't exist", async ({
+		tmpDir,
+	}) => {
 		const sources: TarSource[] = [
 			{
 				type: "file",
@@ -636,7 +632,7 @@ describe("packTarSources", () => {
 		).rejects.toThrow(/Unsupported content type/);
 	});
 
-	it("handles StreamSource with custom mode", async () => {
+	it("handles StreamSource with custom mode", async ({ tmpDir }) => {
 		const content = "Stream with custom mode";
 		const readable = Readable.from([Buffer.from(content, "utf-8")]);
 
@@ -676,7 +672,9 @@ describe("packTarSources", () => {
 		}
 	});
 
-	it("handles large StreamSource efficiently without OOM", async () => {
+	it("handles large StreamSource efficiently without OOM", async ({
+		tmpDir,
+	}) => {
 		// Create a 10MB stream that generates data on the fly
 		const chunkSize = 1024 * 1024; // 1MB chunks
 		const totalChunks = 10;
@@ -756,7 +754,7 @@ describe("packTarSources", () => {
 		}).rejects.toThrow();
 	});
 
-	it("handles multiple StreamSources in mixed archive", async () => {
+	it("handles multiple StreamSources in mixed archive", async ({ tmpDir }) => {
 		const stream1Content = "First stream content";
 		const stream2Content = "Second stream content";
 

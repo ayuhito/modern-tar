@@ -1,24 +1,14 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import { packTar, unpackTar } from "../../src/fs";
+import { it } from "../helpers/test";
 
 describe("stream coordination cases", () => {
-	let tmpDir: string;
-
-	beforeEach(async () => {
-		tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "vitest-unpack-tar-"));
-	});
-
-	afterEach(async () => {
-		await fsp.rm(tmpDir, { recursive: true, force: true });
-	});
-
 	const createTestArchive = async (
 		archivePath: string,
 		files: { name: string; content: string }[],
@@ -49,7 +39,9 @@ describe("stream coordination cases", () => {
 	};
 
 	describe("creation and destruction", () => {
-		it("should handle immediate destruction without race condition errors", async () => {
+		it("should handle immediate destruction without race condition errors", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fsp.mkdir(extractDir);
 			const unpackStream = unpackTar(extractDir);
@@ -63,30 +55,30 @@ describe("stream coordination cases", () => {
 			errors.forEach(assertNoRaceConditionError);
 		});
 
-		it.each([
-			["immediate end()", (stream: Writable) => stream.end()],
-			[
-				"empty buffer write then end()",
-				(stream: Writable) => {
+		it.for([
+			{ name: "immediate end()", action: (stream: Writable) => stream.end() },
+			{
+				name: "empty buffer write then end()",
+				action: (stream: Writable) => {
 					stream.write(Buffer.alloc(0));
 					stream.end();
 				},
-			],
-			[
-				"end() followed by immediate destroy()",
-				(stream: Writable) => {
+			},
+			{
+				name: "end() followed by immediate destroy()",
+				action: (stream: Writable) => {
 					stream.end();
 					stream.destroy();
 				},
-			],
-			[
-				"write then destroy()",
-				(stream: Writable) => {
+			},
+			{
+				name: "write then destroy()",
+				action: (stream: Writable) => {
 					stream.write(Buffer.from("some data"));
 					stream.destroy();
 				},
-			],
-		])("should complete quickly on %s", async (_, action) => {
+			},
+		])("should complete quickly on $name", async ({ action }, { tmpDir }) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fsp.mkdir(extractDir);
 			const unpackStream = unpackTar(extractDir);
@@ -99,7 +91,9 @@ describe("stream coordination cases", () => {
 			expect(Date.now() - startTime).toBeLessThan(1000);
 		});
 
-		it("should handle multiple rapid end() calls gracefully", async () => {
+		it("should handle multiple rapid end() calls gracefully", async ({
+			tmpDir,
+		}) => {
 			const extractDir = path.join(tmpDir, "extract");
 			await fsp.mkdir(extractDir);
 			const unpackStream = unpackTar(extractDir);
@@ -112,7 +106,9 @@ describe("stream coordination cases", () => {
 			await new Promise((resolve) => unpackStream.on("close", resolve));
 		});
 
-		it("handles ReadableStream cancel with non Error reason", async () => {
+		it("handles ReadableStream cancel with non Error reason", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 			const unpackStream = unpackTar(destDir);
 
@@ -132,7 +128,9 @@ describe("stream coordination cases", () => {
 			});
 		});
 
-		it("handles immediate stream destruction gracefully", async () => {
+		it("handles immediate stream destruction gracefully", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 			const unpackStream = unpackTar(destDir);
 
@@ -160,7 +158,9 @@ describe("stream coordination cases", () => {
 			}
 		});
 
-		it("prevents TransformStream race condition during concurrent write/processing", async () => {
+		it("prevents TransformStream race condition during concurrent write/processing", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 
 			// Test the specific race condition scenario where writes happen
@@ -193,7 +193,9 @@ describe("stream coordination cases", () => {
 			}
 		});
 
-		it("handles write operations after processing completion", async () => {
+		it("handles write operations after processing completion", async ({
+			tmpDir,
+		}) => {
 			const destDir = path.join(tmpDir, "extracted");
 			const unpackStream = unpackTar(destDir);
 
@@ -220,7 +222,9 @@ describe("stream coordination cases", () => {
 	});
 
 	describe("pipeline stress tests", () => {
-		it("should handle various destruction patterns during pipeline processing", async () => {
+		it("should handle various destruction patterns during pipeline processing", async ({
+			tmpDir,
+		}) => {
 			const tarPath = path.join(tmpDir, "test.tar.gz");
 			await createTestArchive(tarPath, [{ name: "test.txt", content: "data" }]);
 
@@ -264,7 +268,9 @@ describe("stream coordination cases", () => {
 			expect(raceConditionDetected).toBe(false);
 		});
 
-		it("should handle pipelines with empty archives gracefully", async () => {
+		it("should handle pipelines with empty archives gracefully", async ({
+			tmpDir,
+		}) => {
 			const tarPath = path.join(tmpDir, "empty.tar.gz");
 			await createTestArchive(tarPath, []);
 			const extractDir = path.join(tmpDir, "extract-empty");
@@ -279,7 +285,9 @@ describe("stream coordination cases", () => {
 			});
 		});
 
-		it("should handle many concurrent pipelines without race conditions", async () => {
+		it("should handle many concurrent pipelines without race conditions", async ({
+			tmpDir,
+		}) => {
 			const tarPath = path.join(tmpDir, "concurrent.tar.gz");
 			await createTestArchive(tarPath, [{ name: "test.txt", content: "data" }]);
 			let raceConditionDetected = false;
