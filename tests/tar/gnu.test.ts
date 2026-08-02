@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { writeChecksum } from "../../src/tar/checksum";
-import { BLOCK_SIZE, USTAR_TYPEFLAG_OFFSET } from "../../src/tar/constants";
+import {
+	BLOCK_SIZE,
+	USTAR_MAGIC_OFFSET,
+	USTAR_TYPEFLAG_OFFSET,
+	USTAR_UNAME_OFFSET,
+} from "../../src/tar/constants";
 import { decoder, encoder } from "../../src/tar/encoding";
 import { createTarHeader } from "../../src/tar/header";
 import type { TarHeader } from "../../src/tar/types";
@@ -22,7 +27,10 @@ const createGnuMetadataArchive = (
 	});
 	// GNU identifies itself with `ustar  ` and reuses USTAR prefix bytes for
 	// timestamp metadata, so the parser must not join them to the file name.
-	encoder.encodeInto("ustar  ", metadataHeader.subarray(257, 265));
+	encoder.encodeInto(
+		"ustar  ",
+		metadataHeader.subarray(USTAR_MAGIC_OFFSET, USTAR_UNAME_OFFSET),
+	);
 	writeChecksum(metadataHeader);
 
 	const metadataBlocks = Math.ceil(metadata.length / BLOCK_SIZE) * BLOCK_SIZE;

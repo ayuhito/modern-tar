@@ -4,7 +4,7 @@ import * as gs from "@hegeldev/hegel/generators";
 import { describe, expect, it } from "vitest";
 import { decoder } from "../../src/tar/encoding";
 import { unpackTar } from "../../src/web";
-import { chunkBytes } from "../helpers/bytes";
+import { chunkBytes, streamFromChunks } from "../helpers/bytes";
 import { GNU_TAR, PAX_TAR, UNKNOWN_FORMAT, V7_TAR } from "../web/fixtures";
 
 const fixtures = [
@@ -26,13 +26,7 @@ describe("tar decoding boundary properties", () => {
 			const fixture = tc.draw(gs.sampledFrom(fixtures));
 			const width = tc.draw(gs.integers({ minValue: 1, maxValue: 1024 }));
 			const archive = await readFile(fixture.path);
-			const stream = new ReadableStream<Uint8Array>({
-				start(controller) {
-					for (const chunk of chunkBytes(archive, width))
-						controller.enqueue(chunk);
-					controller.close();
-				},
-			});
+			const stream = streamFromChunks(chunkBytes(archive, width));
 
 			const entries = await unpackTar(stream, { strict: true });
 			expect(
