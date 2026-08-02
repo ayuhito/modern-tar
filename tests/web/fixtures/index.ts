@@ -17,7 +17,6 @@ export const GNU_LONG_PATH = fixturePath("gnu-long-path.tar");
 export const BASE_256_UID_GID = fixturePath("base-256-uid-gid.tar");
 export const LARGE_UID_GID = fixturePath("large-uid-gid.tar");
 export const BASE_256_SIZE = fixturePath("base-256-size.tar");
-export const HUGE = fixturePath("huge.tar.gz");
 export const LATIN1_TAR = fixturePath("latin1.tar");
 export const INCOMPLETE_TAR = fixturePath("incomplete.tar");
 
@@ -33,10 +32,5 @@ export const INVALID_TAR = fixturePath("invalid.tar");
 
 // Real-world large packages for complex testing
 export const LODASH_TGZ = fixturePath("lodash-4.17.21.tgz");
-export const NEXT_SWC_TGZ = fixturePath("next-swc-linux-14.2.15.tgz");
 export const SHARP_TGZ = fixturePath("sharp-0.33.5.tgz");
 export const ELECTRON_TGZ = fixturePath("electron-33.0.2.tgz");
-export const NODE_V25_DARWIN_ARM64_TAR_GZ = fixturePath(
-	"node-v25.2.0-darwin-arm64.tar.gz",
-);
-export const TSGO_WASM_TGZ = fixturePath("tsgo-wasm-2025.12.7.tgz");

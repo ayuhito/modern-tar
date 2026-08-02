@@ -103,7 +103,7 @@ jobs:
 
       - name: Install Playwright browsers
         if: matrix.browser
-        run: pnpm exec playwright install --with-deps chromium firefox
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
 
       - name: Test with coverage
         if: matrix.coverage
