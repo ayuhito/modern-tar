@@ -1,22 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { decoder, encoder } from "../../src/tar/encoding";
 import { packTar, type TarEntry, unpackTar } from "../../src/web";
+import { streamFromChunks } from "../helpers/bytes";
 
 const bodyCases: readonly (readonly [string, () => TarEntry["body"]])[] = [
 	["string", () => "content"],
 	["Uint8Array", () => encoder.encode("content")],
 	["ArrayBuffer", () => encoder.encode("content").buffer],
 	["Blob", () => new Blob(["content"])],
-	[
-		"ReadableStream",
-		() =>
-			new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(encoder.encode("content"));
-					controller.close();
-				},
-			}),
-	],
+	["ReadableStream", () => streamFromChunks([encoder.encode("content")])],
 ];
 
 describe("packTar", () => {

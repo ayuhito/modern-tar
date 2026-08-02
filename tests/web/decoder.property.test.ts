@@ -4,7 +4,8 @@ import * as gs from "@hegeldev/hegel/generators";
 import { describe, expect, it } from "vitest";
 import { decoder } from "../../src/tar/encoding";
 import { createTarDecoder } from "../../src/web";
-import { chunkBytes } from "../helpers/bytes";
+import { streamToBuffer } from "../../src/web/stream-utils";
+import { chunkBytes, streamFromChunks } from "../helpers/bytes";
 import { MULTI_FILE_TAR } from "./fixtures";
 
 const manifest = [
@@ -23,13 +24,7 @@ describe("decoder properties", () => {
 				}),
 			);
 			const archive = await readFile(MULTI_FILE_TAR);
-			const stream = new ReadableStream<Uint8Array>({
-				start(controller) {
-					for (const chunk of chunkBytes(archive, width))
-						controller.enqueue(chunk);
-					controller.close();
-				},
-			});
+			const stream = streamFromChunks(chunkBytes(archive, width));
 			const reader = stream
 				.pipeThrough(createTarDecoder({ strict: true }))
 				.getReader();
@@ -46,12 +41,7 @@ describe("decoder properties", () => {
 				if (actions[index] === "cancel") {
 					await entry.body.cancel();
 				} else {
-					const chunks: Uint8Array[] = [];
-					for await (const chunk of entry.body) chunks.push(chunk);
-					const bytes = Uint8Array.from(
-						chunks.flatMap((chunk) => Array.from(chunk)),
-					);
-					expect(decoder.decode(bytes)).toBe(body);
+					expect(decoder.decode(await streamToBuffer(entry.body))).toBe(body);
 				}
 			}
 

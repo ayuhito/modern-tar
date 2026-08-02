@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { decoder } from "../../src/tar/encoding";
 import { transformHeader } from "../../src/tar/options";
 import { packTar, unpackTar } from "../../src/web";
+import { streamFromChunks } from "../helpers/bytes";
 
 describe("unpack options", () => {
 	it.each([
@@ -60,13 +61,7 @@ describe("unpack options", () => {
 			{ header: { name: "root/keep.txt", size: 4 }, body: "keep" },
 			{ header: { name: "root/drop.js", size: 4 }, body: "drop" },
 		]);
-		const stream = new ReadableStream<Uint8Array>({
-			start(controller) {
-				controller.enqueue(archive);
-				controller.close();
-			},
-		});
-		const entries = await unpackTar(stream, {
+		const entries = await unpackTar(streamFromChunks([archive]), {
 			strip: 1,
 			filter: (header) => header.name.endsWith(".txt"),
 			map: (header) => ({ ...header, name: `mapped/${header.name}` }),
@@ -87,15 +82,11 @@ describe("unpack options", () => {
 			const archive = await packTar([
 				{ header: { name: "file.txt", size: 1 }, body: "x" },
 			]);
-			const stream = new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(archive);
-					controller.close();
-				},
-			});
 			const options = callback === "filter" ? { filter: fail } : { map: fail };
 
-			await expect(unpackTar(stream, options)).rejects.toBe(reason);
+			await expect(
+				unpackTar(streamFromChunks([archive]), options),
+			).rejects.toBe(reason);
 		},
 	);
 });

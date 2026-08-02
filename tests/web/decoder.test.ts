@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BLOCK_SIZE, USTAR_CHECKSUM_OFFSET } from "../../src/tar/constants";
 import { encoder } from "../../src/tar/encoding";
 import { createTarDecoder, packTar } from "../../src/web";
-import { chunkBytes } from "../helpers/bytes";
+import { chunkBytes, streamFromChunks } from "../helpers/bytes";
 import { createDeferred } from "../helpers/deferred";
 
 const expectPending = async <T>(promise: Promise<T>): Promise<void> => {
@@ -204,16 +204,9 @@ describe("createTarDecoder", () => {
 		// Corrupt the checksum
 		archive.set(encoder.encode("INVALID!"), USTAR_CHECKSUM_OFFSET);
 
-		const stream = new ReadableStream({
-			start(controller) {
-				controller.enqueue(archive);
-				controller.close();
-			},
-		});
-
 		const decoder = createTarDecoder({ strict: true });
 		await expect(
-			stream.pipeThrough(decoder).getReader().read(),
+			streamFromChunks([archive]).pipeThrough(decoder).getReader().read(),
 		).rejects.toThrow("Invalid tar header checksum");
 	});
 
@@ -221,17 +214,11 @@ describe("createTarDecoder", () => {
 		const archive = await packTar([
 			{ header: { name: "test.txt", type: "file", size: 1 }, body: "h" },
 		]);
-		const stream = new ReadableStream({
-			start(controller) {
-				// End the archive correctly, but then add extra junk data
-				controller.enqueue(archive);
-				controller.enqueue(new Uint8Array([1, 2, 3, 4]));
-				controller.close();
-			},
-		});
 
 		const decoder = createTarDecoder({ strict: true });
-		const reader = stream.pipeThrough(decoder).getReader();
+		const reader = streamFromChunks([archive, Uint8Array.of(1, 2, 3, 4)])
+			.pipeThrough(decoder)
+			.getReader();
 		await reader.read(); // Read the valid entry
 		await expect(reader.read()).rejects.toThrow("Invalid EOF.");
 	});
@@ -246,16 +233,11 @@ describe("createTarDecoder", () => {
 		// Truncate the archive in the middle of the file's data block
 		const truncated = archive.slice(0, BLOCK_SIZE + 5);
 
-		const stream = new ReadableStream({
-			start(controller) {
-				controller.enqueue(truncated);
-				controller.close();
-			},
-		});
-
 		const decoder = createTarDecoder({ strict: true });
 		await expect(
-			stream.pipeThrough(decoder).pipeTo(new WritableStream()),
+			streamFromChunks([truncated])
+				.pipeThrough(decoder)
+				.pipeTo(new WritableStream()),
 		).rejects.toThrow("Tar archive is truncated");
 	});
 
@@ -268,15 +250,10 @@ describe("createTarDecoder", () => {
 		]);
 		const truncated = archive.slice(0, BLOCK_SIZE + 5);
 
-		const stream = new ReadableStream({
-			start(controller) {
-				controller.enqueue(truncated);
-				controller.close();
-			},
-		});
-
 		const decoder = createTarDecoder({ strict: false });
-		const reader = stream.pipeThrough(decoder).getReader();
+		const reader = streamFromChunks([truncated])
+			.pipeThrough(decoder)
+			.getReader();
 
 		const { value: entry } = await reader.read();
 		expect(entry?.header.name).toBe("test.txt");
