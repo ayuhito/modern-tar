@@ -1,4 +1,4 @@
-import { createTarDecoder, unpackTar } from "../../dist/web/index.js";
+import { createTarDecoder, packTar, unpackTar } from "../../dist/web/index.js";
 
 const bodyStats = async (body, mode) => {
 	let totalBytes = 0;
@@ -32,10 +32,24 @@ const bodyStats = async (body, mode) => {
 
 export default {
 	async fetch(request) {
+		const mode = new URL(request.url).searchParams.get("mode") ?? "response";
+		if (mode === "pack") {
+			return new Response(
+				await packTar([
+					{
+						header: { name: "worker/", size: 0, type: "directory" },
+					},
+					{
+						header: { name: "worker/data.bin", size: 4 },
+						body: Uint8Array.of(1, 2, 3, 4),
+					},
+				]),
+			);
+		}
+
 		if (!request.body)
 			return new Response("Request body is required.", { status: 400 });
 
-		const mode = new URL(request.url).searchParams.get("mode") ?? "response";
 		let count = 0;
 		let totalBytes = 0;
 		let bodyByteTotal = 0;

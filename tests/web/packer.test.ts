@@ -36,14 +36,18 @@ describe("createTarPacker", () => {
 		}
 	});
 
-	it("cannot finalize while an entry is active", async () => {
+	it("keeps a bodyless entry active until output demand resumes", async () => {
 		const { readable, controller } = createTarPacker();
 		const streamError = observeReadableError(readable);
-		controller.add({ name: "file", size: 1 });
+		const closing = controller
+			.add({ name: "directory/", size: 0, type: "directory" })
+			.getWriter()
+			.close();
 
 		expect(() => controller.finalize()).toThrow(
 			"Cannot finalize while an entry is still active",
 		);
+		await expect(closing).rejects.toBeInstanceOf(Error);
 		await expect(streamError).resolves.toBeInstanceOf(Error);
 	});
 
@@ -71,5 +75,50 @@ describe("createTarPacker", () => {
 
 		controller.error(reason);
 		await expect(streamError).resolves.toBe(reason);
+	});
+
+	it("waits for output demand and cancels the active entry", async () => {
+		const { readable, controller } = createTarPacker();
+		const reader = readable.getReader();
+		const writer = controller.add({ name: "file", size: 1 }).getWriter();
+		const writing = writer.write(Uint8Array.of(1));
+		const writerClosed = writer.closed.catch((error) => error);
+		let settled = false;
+		writing.then(() => {
+			settled = true;
+		});
+
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		expect((await reader.read()).value).toHaveLength(512);
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		expect((await reader.read()).value).toEqual(Uint8Array.of(1));
+		await writing;
+
+		const reason = null;
+		await reader.cancel(reason);
+		await expect(writerClosed).resolves.toBe(reason);
+	});
+
+	it("aborts an active entry while output demand is blocked", async () => {
+		const { readable, controller } = createTarPacker();
+		const streamError = observeReadableError(readable);
+		const writer = controller.add({ name: "file", size: 1 }).getWriter();
+		const writing = writer.write(Uint8Array.of(1)).catch((error) => error);
+		const reason = new Error("cancelled");
+
+		await writer.abort(reason);
+		await expect(writing).resolves.toBe(reason);
+		await expect(streamError).resolves.toBe(reason);
+	});
+
+	it("uses AbortError when an idle entry is aborted without a reason", async () => {
+		const { readable, controller } = createTarPacker();
+		const streamError = observeReadableError(readable);
+		const writer = controller.add({ name: "file", size: 1 }).getWriter();
+
+		await writer.abort();
+		await expect(streamError).resolves.toMatchObject({ name: "AbortError" });
 	});
 });

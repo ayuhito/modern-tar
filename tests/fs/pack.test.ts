@@ -180,6 +180,19 @@ describe("pack", () => {
 		expect(archive).not.toContain("SECRET-DESCRIPTOR");
 	});
 
+	it("owns content bytes after emitting them", async () => {
+		const content = Buffer.from("SAFE-CONTENT");
+		const archive = packTar([
+			{ type: "content", content, target: "content.txt" },
+		]);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		content.fill("X");
+		const archiveText = await text(archive);
+		expect(archiveText).toContain("SAFE-CONTENT");
+		expect(archiveText).not.toContain("XXXXXXXXXXXX");
+	});
+
 	it.skipIf(process.platform === "win32")(
 		"skips files swapped after validation",
 		async ({ tmpDir }) => {
@@ -215,7 +228,12 @@ describe("pack", () => {
 
 	it("reads only the file size captured in its header", async ({ tmpDir }) => {
 		const file = path.join(tmpDir, "file.txt");
-		await fsp.writeFile(file, "SAFE");
+		const original = Buffer.concat([
+			Buffer.alloc(64 * 1024, "A"),
+			Buffer.alloc(64 * 1024, "B"),
+			Buffer.alloc(64 * 1024, "C"),
+		]);
+		await fsp.writeFile(file, original);
 
 		const destDir = path.join(tmpDir, "extracted");
 		await pipeline(
@@ -228,8 +246,8 @@ describe("pack", () => {
 			unpackTar(destDir),
 		);
 
-		expect(await fsp.readFile(path.join(destDir, "file.txt"), "utf8")).toBe(
-			"SAFE",
+		expect(await fsp.readFile(path.join(destDir, "file.txt"))).toEqual(
+			original,
 		);
 	});
 

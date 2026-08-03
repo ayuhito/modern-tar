@@ -5,19 +5,13 @@ import type { TarHeader } from "./types";
 
 const EOF_BUFFER = new Uint8Array(BLOCK_SIZE * 2); // Two zero blocks for EOF
 
-export function createTarPacker(
-	onData: (chunk: Uint8Array) => void,
-	onError: (error: Error) => void,
-	onFinalize?: () => void,
-) {
+export function createTarPacker(onData: (chunk: Uint8Array) => void) {
 	let currentHeader: TarHeader | null = null;
 	let bytesWritten = 0;
 	let finalized = false;
 
 	const fail = (message: string): never => {
-		const error = new Error(message);
-		onError(error);
-		throw error;
+		throw new Error(message);
 	};
 
 	return {
@@ -32,15 +26,11 @@ export function createTarPacker(
 			if (!Number.isSafeInteger(size) || size < 0)
 				fail("Invalid tar entry size.");
 
-			try {
-				const headerBlocks = getHeaderBlocks({ ...header, size });
-				for (const block of headerBlocks) onData(block);
+			const headerBlocks = getHeaderBlocks({ ...header, size });
+			for (const block of headerBlocks) onData(block);
 
-				currentHeader = { ...header, size };
-				bytesWritten = 0;
-			} catch (error) {
-				onError(error as Error);
-			}
+			currentHeader = { ...header, size };
+			bytesWritten = 0;
 		},
 
 		write(chunk: Uint8Array): void {
@@ -55,37 +45,28 @@ export function createTarPacker(
 					`"${currentHeader!.name}" exceeds given size of ${currentHeader!.size} bytes.`,
 				);
 
-			try {
-				bytesWritten = newTotal;
-				onData(chunk);
-			} catch (error) {
-				onError(error as Error);
-			}
+			bytesWritten = newTotal;
+			onData(chunk);
 		},
 
 		endEntry(): void {
 			if (!currentHeader) fail("No active entry to end.");
 			if (finalized) fail("Cannot end entry after finalize.");
 
-			try {
+			// biome-ignore lint/style/noNonNullAssertion: Checked above.
+			if (bytesWritten !== currentHeader!.size)
 				// biome-ignore lint/style/noNonNullAssertion: Checked above.
-				if (bytesWritten !== currentHeader!.size)
-					// biome-ignore lint/style/noNonNullAssertion: Checked above.
-					fail(`Size mismatch for "${currentHeader!.name}".`);
+				fail(`Size mismatch for "${currentHeader!.name}".`);
 
-				// Add padding to reach 512-byte boundary.
-				// biome-ignore lint/style/noNonNullAssertion: Checked above.
-				const paddingSize = -currentHeader!.size & BLOCK_SIZE_MASK;
-				// Write padding buffer if needed.
-				if (paddingSize > 0) onData(new Uint8Array(paddingSize));
+			// Add padding to reach 512-byte boundary.
+			// biome-ignore lint/style/noNonNullAssertion: Checked above.
+			const paddingSize = -currentHeader!.size & BLOCK_SIZE_MASK;
+			// Write padding buffer if needed.
+			if (paddingSize > 0) onData(new Uint8Array(paddingSize));
 
-				// Reset state.
-				currentHeader = null;
-				bytesWritten = 0;
-			} catch (error) {
-				onError(error as Error);
-				throw error;
-			}
+			// Reset state.
+			currentHeader = null;
+			bytesWritten = 0;
 		},
 
 		finalize(): void {
@@ -93,15 +74,9 @@ export function createTarPacker(
 			if (currentHeader !== null)
 				fail("Cannot finalize while an entry is still active");
 
-			try {
-				// Write two 512-byte zero blocks to mark end of archive
-				onData(EOF_BUFFER);
-				finalized = true;
-
-				if (onFinalize) onFinalize();
-			} catch (error) {
-				onError(error as Error);
-			}
+			// Write two 512-byte zero blocks to mark end of archive
+			onData(EOF_BUFFER);
+			finalized = true;
 		},
 	};
 }

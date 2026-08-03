@@ -1,4 +1,3 @@
-import { isBodyless } from "../tar/body";
 import { createTarPacker as createPacker } from "../tar/packer";
 import type { TarHeader } from "../tar/types";
 
@@ -113,56 +112,141 @@ export function createTarPacker(): {
 } {
 	let streamController: ReadableStreamController<Uint8Array<ArrayBuffer>>;
 	let packer: ReturnType<typeof createPacker>;
+	let bodyController: WritableStreamDefaultController | null = null;
+	let resume: (() => void) | null = null;
+	let drain: Promise<void> | null = null;
+	let stopped = false;
+	let stopReason: unknown;
+
+	const unblock = () => {
+		const resolve = resume;
+		resume = null;
+		drain = null;
+		resolve?.();
+	};
+
+	const stop = (reason: unknown, errorOutput = true) => {
+		if (stopped) return;
+		stopped = true;
+		stopReason = reason;
+
+		bodyController?.error(reason);
+		bodyController = null;
+
+		if (errorOutput) streamController.error(reason);
+		unblock();
+	};
+	const abortBody = () => {
+		const reason = bodyController?.signal.reason;
+		bodyController = null;
+		stop(reason);
+	};
+
+	const checkStopped = () => {
+		if (stopped) throw stopReason;
+	};
+
+	const emit = (operation: () => void): void | Promise<void> => {
+		checkStopped();
+		try {
+			operation();
+		} catch (error) {
+			stop(error);
+			throw error;
+		}
+
+		const pending = drain;
+		if (!pending) return;
+
+		// abort() waits behind writes, so its signal must release backpressure.
+		const signal = bodyController?.signal;
+		if (signal) {
+			signal.onabort = abortBody;
+			if (signal.aborted) abortBody();
+		}
+
+		return pending.then(checkStopped);
+	};
 
 	const readable = new ReadableStream<Uint8Array<ArrayBuffer>>({
 		start(controller) {
 			streamController = controller;
-			packer = createPacker(
-				(chunk) => {
-					// Native BufferSource consumers require fixed ArrayBuffer views.
-					const buffer = chunk.buffer;
-					controller.enqueue(
-						buffer instanceof ArrayBuffer && !Reflect.get(buffer, "resizable")
-							? (chunk as Uint8Array<ArrayBuffer>)
-							: new Uint8Array(chunk),
-					);
-				},
-				controller.error.bind(controller),
-				controller.close.bind(controller),
-			);
+			packer = createPacker((chunk) => {
+				// Native BufferSource consumers require fixed ArrayBuffer views.
+				const buffer = chunk.buffer;
+				controller.enqueue(
+					buffer instanceof ArrayBuffer && !Reflect.get(buffer, "resizable")
+						? (chunk as Uint8Array<ArrayBuffer>)
+						: new Uint8Array(chunk),
+				);
+
+				if ((controller.desiredSize ?? 1) <= 0 && !drain) {
+					drain = new Promise<void>((resolve) => {
+						resume = resolve;
+					});
+				}
+			});
+		},
+		pull: unblock,
+		cancel(reason) {
+			stop(reason === undefined ? AbortSignal.abort().reason : reason, false);
 		},
 	});
 
 	const packController: TarPackController = {
 		add(header: TarHeader): WritableStream<Uint8Array> {
-			// Bodyless entries should have size 0.
-			const bodyless = isBodyless(header);
-
-			packer.add(header);
-			if (bodyless) packer.endEntry();
+			try {
+				checkStopped();
+				if (bodyController)
+					throw new Error(
+						"Previous entry must be completed before adding a new one",
+					);
+				packer.add(header);
+			} catch (error) {
+				stop(error);
+				throw error;
+			}
 
 			return new WritableStream<Uint8Array>({
+				start(controller) {
+					bodyController = controller;
+				},
+
 				write(chunk) {
-					packer.write(chunk);
+					return emit(() => packer.write(chunk));
 				},
 
 				close() {
-					// Bodyless entries were already ended above.
-					if (!bodyless) packer.endEntry();
+					const result = emit(() => packer.endEntry());
+					if (!result) {
+						bodyController = null;
+						return;
+					}
+
+					return result.then(() => {
+						bodyController = null;
+					});
 				},
 
-				abort(reason) {
-					streamController.error(reason);
-				},
+				abort: abortBody,
 			});
 		},
 
 		finalize() {
-			packer.finalize();
+			try {
+				checkStopped();
+				if (bodyController)
+					throw new Error("Cannot finalize while an entry is still active");
+				packer.finalize();
+				streamController.close();
+			} catch (error) {
+				stop(error);
+				throw error;
+			}
 		},
 
 		error(err: unknown) {
-			streamController.error(err);
+			stop(err);
 		},
 	};
 

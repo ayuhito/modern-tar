@@ -4,6 +4,7 @@ import * as fsp from "node:fs/promises";
 import { cpus } from "node:os";
 import * as path from "node:path";
 import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { normalizeBody } from "../tar/body";
 import { DIRECTORY, FILE, LINK, SYMLINK } from "../tar/constants";
 import { createTarPacker } from "../tar/packer";
@@ -11,11 +12,7 @@ import type { TarHeader } from "../tar/types";
 import { normalizeName } from "./path";
 import type { PackOptionsFS, TarSource } from "./types";
 
-type FileBody =
-	| { handle: FileHandle; size: number }
-	| Uint8Array
-	| Readable
-	| ReadableStream;
+type FileBody = { handle: FileHandle; size: number } | Uint8Array | Readable;
 
 type JobResult = {
 	header: TarHeader;
@@ -70,15 +67,80 @@ export function packTar(
 	sources: readonly TarSource[] | string,
 	options: PackOptionsFS = {},
 ): Readable {
-	const stream = new Readable({ read() {} });
+	const results = new Map<number, JobResult | null>();
+	// A null value is open; a Promise is already closing the handle.
+	const fileHandles = new Map<FileHandle, Promise<void> | null>();
+	const bodyStreams = new Set<Readable>();
+
+	let resume: (() => void) | null = null;
+	let drain: Promise<void> | null = null;
+	// Notifies the writer when its next job result is ready.
+	let resumeWriter: (() => void) | null = null;
+	let cancelError: Error;
+
+	const unblock = () => {
+		const resolve = resume;
+		resume = null;
+		drain = null;
+		resolve?.();
+	};
+	const wakeWriter = () => {
+		resumeWriter?.();
+		resumeWriter = null;
+	};
+
+	const destroyBody = (body: Readable, reason: Error) => {
+		bodyStreams.delete(body);
+		body.destroy(reason);
+	};
+	const closeHandle = (handle: FileHandle) => {
+		const closing = fileHandles.get(handle);
+		if (closing !== null) return closing;
+
+		const promise = handle.close().finally(() => fileHandles.delete(handle));
+		fileHandles.set(handle, promise);
+		return promise;
+	};
+
+	const stop = async (reason: Error) => {
+		for (const body of bodyStreams) destroyBody(body, reason);
+		const closing = Promise.allSettled(
+			[...fileHandles.keys()].map(closeHandle),
+		);
+		results.clear();
+		wakeWriter();
+
+		for (const result of await closing) {
+			if (result.status === "rejected") throw result.reason;
+		}
+	};
+
+	const stream = new Readable({
+		highWaterMark: 8 * 1024 * 1024,
+		read: unblock,
+		destroy(error, callback) {
+			cancelError = error ?? AbortSignal.abort().reason;
+			unblock();
+			void stop(cancelError).then(
+				() => callback(error),
+				(closeError) => callback(error ?? closeError),
+			);
+		},
+	});
+	const onError = (error: Error) => stream.destroy(error);
+
+	const packer = createTarPacker((chunk) => {
+		if (stream.destroyed) throw cancelError;
+		if (!stream.push(Buffer.from(chunk)) && !drain) {
+			drain = new Promise<void>((resolve) => {
+				resume = resolve;
+			});
+		}
+	});
 
 	(async () => {
-		const packer = createTarPacker(
-			(chunk) => stream.push(Buffer.from(chunk)),
-			stream.destroy.bind(stream),
-			() => stream.push(null),
-		);
-
+		// After every await or user callback, stop before acquiring resources,
+		// invoking another callback, or publishing a result.
 		const {
 			dereference = false,
 			filter,
@@ -97,8 +159,11 @@ export function packTar(
 			const source = path.resolve(sources);
 			directoryPath = source;
 			const before = await fsp.stat(source, BIGINT_STAT);
+			if (stream.destroyed) return;
 			const entries = await fsp.readdir(source, WITH_FILE_TYPES);
+			if (stream.destroyed) return;
 			const after = await fsp.stat(source, BIGINT_STAT);
+			if (stream.destroyed) return;
 
 			jobs =
 				before.dev === after.dev && before.ino === after.ino
@@ -113,9 +178,6 @@ export function packTar(
 			jobs = sources.map((source) => ({ ...source }));
 		}
 
-		const results = new Map<number, JobResult | null>();
-		// Resolvers is used to notify the writer when a job result is ready.
-		const resolvers = new Map<number, () => void>();
 		// inodes can be 64-bit, so use bigint for correctness.
 		const seenInodes = new Map<bigint, string>();
 
@@ -124,10 +186,25 @@ export function packTar(
 		let activeWorkers = 0;
 		let allJobsQueued = false;
 
+		const writeStreamBody = async (body: Readable) => {
+			try {
+				for await (const chunk of body) {
+					if (stream.destroyed) return;
+					packer.write(
+						chunk instanceof Uint8Array ? chunk : Buffer.from(chunk),
+					);
+					if (drain) await drain;
+				}
+			} finally {
+				body.off("error", onError);
+				bodyStreams.delete(body);
+			}
+		};
+
 		const writer = async () => {
 			// Pre-allocate read buffers, but only lazily allocate the large one if needed.
 			const readBufferSmall = Buffer.alloc(64 * 1024); // 64KB
-			let readBufferLarge: Buffer | null = null; // 512KB
+			let readBufferLarge: Buffer | null = null; // 1MB
 
 			while (true) {
 				if (stream.destroyed) return;
@@ -137,9 +214,9 @@ export function packTar(
 
 				// Wait for the next result if it's not ready yet.
 				if (!results.has(writeIndex)) {
-					await new Promise<void>((resolve) =>
-						resolvers.set(writeIndex, resolve),
-					);
+					await new Promise<void>((resolve) => {
+						resumeWriter = resolve;
+					});
 					continue;
 				}
 
@@ -147,71 +224,59 @@ export function packTar(
 				// biome-ignore lint/style/noNonNullAssertion: .has check above.
 				const result = results.get(writeIndex)!;
 				results.delete(writeIndex);
-				resolvers.delete(writeIndex);
 
 				// Skip null results (filtered out).
 				if (!result) {
 					writeIndex++;
+					controller();
 					continue;
 				}
 
 				packer.add(result.header);
+				if (drain) await drain;
+				if (stream.destroyed) return;
 
 				// Write file content if present.
 				if (result.body) {
 					if (result.body instanceof Uint8Array) {
-						if (result.body.length > 0) packer.write(result.body);
-					} else if (
-						result.body instanceof Readable ||
-						result.body instanceof ReadableStream
-					) {
-						try {
-							for await (const chunk of result.body) {
-								if (stream.destroyed) break;
-								packer.write(
-									chunk instanceof Uint8Array ? chunk : Buffer.from(chunk),
-								);
-							}
-						} catch (error) {
-							stream.destroy(error as Error);
-							return;
+						if (result.body.length > 0) {
+							packer.write(result.body);
+							if (drain) await drain;
 						}
+					} else if (result.body instanceof Readable) {
+						await writeStreamBody(result.body);
 					} else {
 						const { handle, size } = result.body;
-
-						// Select a 64KB or 512KB buffer based on file size > 1MB.
+						// Select a 64KB or 1MB buffer based on file size > 1MB.
 						const readBuffer =
-							size > 1048576
-								? (readBufferLarge ??= Buffer.alloc(512 * 1024))
+							size > 1024 * 1024
+								? (readBufferLarge ??= Buffer.alloc(1024 * 1024))
 								: readBufferSmall;
 
 						try {
 							let bytesLeft = size;
 							while (bytesLeft > 0 && !stream.destroyed) {
-								const toRead = Math.min(bytesLeft, readBuffer.length);
-
 								const { bytesRead } = await handle.read(
 									readBuffer,
 									0,
-									toRead,
+									Math.min(bytesLeft, readBuffer.length),
 									null,
 								);
-
 								if (bytesRead === 0) break; // EOF
-
 								packer.write(readBuffer.subarray(0, bytesRead));
 								bytesLeft -= bytesRead;
+								if (drain) await drain;
 							}
-						} catch (error) {
-							stream.destroy(error as Error);
-							return;
 						} finally {
-							await handle.close();
+							await closeHandle(handle);
 						}
 					}
 				}
+				if (stream.destroyed) return;
 				packer.endEntry();
+				if (drain) await drain;
 				writeIndex++;
+				controller();
 			}
 		};
 
@@ -219,12 +284,16 @@ export function packTar(
 			if (stream.destroyed || allJobsQueued) return;
 
 			// Start new workers while under concurrency limit and jobs remain.
-			while (activeWorkers < concurrency && jobIndex < jobs.length) {
+			while (
+				activeWorkers < concurrency &&
+				jobIndex < jobs.length &&
+				jobIndex - writeIndex < concurrency
+			) {
 				activeWorkers++;
 				const currentIndex = jobIndex++;
 
 				processJob(jobs[currentIndex], currentIndex)
-					.catch(stream.destroy.bind(stream))
+					.catch(onError)
 					.finally(() => {
 						activeWorkers--;
 						controller(); // Check for more work.
@@ -234,7 +303,7 @@ export function packTar(
 			// If no active workers and all jobs have been queued, signal completion.
 			if (activeWorkers === 0 && jobIndex >= jobs.length) {
 				allJobsQueued = true;
-				resolvers.get(writeIndex)?.(); // Unblock writer if it's waiting.
+				wakeWriter();
 			}
 		};
 
@@ -246,7 +315,7 @@ export function packTar(
 
 			try {
 				if (job.type === "content" || job.type === "stream") {
-					let body: FileBody;
+					let body: FileBody | undefined;
 					let size: number;
 					const isDir = target.endsWith("/");
 
@@ -259,7 +328,6 @@ export function packTar(
 							);
 
 						size = job.size;
-						body = job.content;
 					} else {
 						const content = await normalizeBody(job.content);
 						size = content.length;
@@ -277,7 +345,9 @@ export function packTar(
 						gid: job.gid ?? 0,
 					} as fs.Stats;
 
+					if (stream.destroyed) return;
 					if (filter && !filter(target, stat)) return;
+					if (stream.destroyed) return;
 
 					let header: TarHeader = {
 						name: target,
@@ -292,30 +362,38 @@ export function packTar(
 					};
 
 					if (map) header = map(header);
+					if (stream.destroyed) return;
 
-					jobResult = {
-						header,
-						body: isDir ? undefined : body,
-					};
+					if (!isDir && job.type === "stream") {
+						body =
+							job.content instanceof Readable
+								? job.content
+								: Readable.fromWeb(job.content as NodeReadableStream);
+						body.once("error", onError);
+						bodyStreams.add(body);
+					}
+
+					jobResult = { header, body: isDir ? undefined : body };
 
 					return;
 				}
 
 				let source = job.source;
 				let stat = await fsp.lstat(source, BIGINT_STAT);
+				if (stream.destroyed) return;
 
 				// Optionally follow symlinks to their targets.
 				if (dereference && stat.isSymbolicLink()) {
 					source = await fsp.realpath(source);
+					if (stream.destroyed) return;
 
 					// `realpath` follows the whole symlink chain. Compare the final
 					// target against a real base.
-					const relativeToBase = path.relative(
-						(realBaseDir ??= await fsp.realpath(
-							baseDir ?? directoryPath ?? process.cwd(),
-						)),
-						source,
+					realBaseDir ??= await fsp.realpath(
+						baseDir ?? directoryPath ?? process.cwd(),
 					);
+					if (stream.destroyed) return;
+					const relativeToBase = path.relative(realBaseDir, source);
 					if (
 						relativeToBase === ".." ||
 						// biome-ignore lint/style/useTemplate: Smaller minified output.
@@ -331,7 +409,9 @@ export function packTar(
 					if (stat.isSymbolicLink()) return;
 				}
 
+				if (stream.destroyed) return;
 				if (filter && !filter(job.source, stat as unknown as fs.Stats)) return;
+				if (stream.destroyed) return;
 
 				// Cast bigint fields to number where safe.
 				let header: TarHeader = {
@@ -354,9 +434,11 @@ export function packTar(
 					// Enqueue children for processing.
 					try {
 						const entries = await fsp.readdir(source, WITH_FILE_TYPES);
+						if (stream.destroyed) return;
 						const after = await fsp.lstat(source, BIGINT_STAT);
 
 						if (
+							stream.destroyed ||
 							!after.isDirectory() ||
 							stat.dev !== after.dev ||
 							stat.ino !== after.ino
@@ -393,12 +475,14 @@ export function packTar(
 									source,
 									fs.constants.O_NOFOLLOW ?? 0,
 								);
+								fileHandles.set(handleToClose, null);
 							}
 						} catch (error) {
 							const code = (error as { code?: string }).code;
 							if (code === "ELOOP" || code === "ENOENT") return;
 							throw error;
 						}
+						if (stream.destroyed) return;
 
 						if (after) {
 							if (
@@ -410,6 +494,7 @@ export function packTar(
 						} else {
 							// biome-ignore lint/style/noNonNullAssertion: The open branch completed.
 							const { dev, ino } = await handleToClose!.stat(BIGINT_STAT);
+							if (stream.destroyed) return;
 							// Read only if the opened fd still points at the inode validated by
 							// lstat. This catches replacement between check and open.
 							if (stat.dev !== dev || stat.ino !== ino) return;
@@ -431,7 +516,7 @@ export function packTar(
 								if (header.size < 32 * 1024) {
 									const buffer = Buffer.allocUnsafe(header.size);
 									let offset = 0;
-									while (offset < buffer.length) {
+									while (offset < buffer.length && !stream.destroyed) {
 										const { bytesRead } = await handle.read(
 											buffer,
 											offset,
@@ -447,27 +532,32 @@ export function packTar(
 											: buffer.subarray(0, offset);
 								} else {
 									// The writer owns and closes this descriptor once it streams.
-									body = {
-										handle,
-										size: header.size,
-									};
+									body = { handle, size: header.size };
 									handleToClose = undefined;
 								}
 							}
 						}
 					} finally {
-						await handleToClose?.close();
+						if (handleToClose) await closeHandle(handleToClose);
 					}
 				} else {
 					return; // Skip unsupported file types (sockets, FIFOs, etc.)
 				}
 
+				if (stream.destroyed) return;
 				if (map) header = map(header);
 				jobResult = { header, body };
 			} finally {
-				// Store the result (or null if filtered out) and notify the writer.
-				results.set(index, jobResult);
-				resolvers.get(index)?.();
+				if (stream.destroyed) {
+					if (jobResult?.body instanceof Readable)
+						destroyBody(jobResult.body, cancelError);
+					else if (jobResult?.body && !(jobResult.body instanceof Uint8Array))
+						await closeHandle(jobResult.body.handle);
+				} else {
+					// Store the result (or null if filtered out) and notify the writer.
+					results.set(index, jobResult);
+					if (index === writeIndex) wakeWriter();
+				}
 			}
 		};
 
@@ -476,8 +566,11 @@ export function packTar(
 		await writer();
 
 		// Finalize the packer to write end-of-archive blocks.
-		if (!stream.destroyed) packer.finalize();
-	})().catch((error) => stream.destroy(error));
+		if (!stream.destroyed) {
+			packer.finalize();
+			stream.push(null);
+		}
+	})().catch(onError);
 
 	return stream;
 }
