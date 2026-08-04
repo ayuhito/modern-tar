@@ -6,6 +6,7 @@ import {
 	unpackTar,
 } from "../../src/web";
 import { chunkBytes } from "../helpers/bytes";
+import { blockPackerOutput } from "../helpers/packer";
 
 const TSGO_WASM_URL = new URL(
 	"../web/fixtures/tsgo-wasm-2025.12.7.tgz",
@@ -83,12 +84,12 @@ describe("browser runtime", () => {
 		const reason = new Error("cancelled");
 		const { readable, controller } = createTarPacker();
 		const reader = readable.getReader();
-		const writer = controller.add({ name: "file", size: 1 }).getWriter();
-		const writing = writer.write(Uint8Array.of(1)).catch((error) => error);
+		const { writer, write } = await blockPackerOutput(controller);
+		const writeError = write.catch((error) => error);
 		const closed = reader.closed.catch((error) => error);
 
 		await writer.abort(reason);
-		await expect(writing).resolves.toBe(reason);
+		await expect(writeError).resolves.toBe(reason);
 		await expect(closed).resolves.toBe(reason);
 	});
 
