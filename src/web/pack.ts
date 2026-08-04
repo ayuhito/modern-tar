@@ -119,13 +119,12 @@ export function createTarPacker(): {
 	let stopReason: unknown;
 
 	const unblock = () => {
-		const resolve = resume;
+		resume?.();
 		resume = null;
 		drain = null;
-		resolve?.();
 	};
 
-	const stop = (reason: unknown, errorOutput = true) => {
+	const stop = (reason: unknown) => {
 		if (stopped) return;
 		stopped = true;
 		stopReason = reason;
@@ -133,11 +132,10 @@ export function createTarPacker(): {
 		bodyController?.error(reason);
 		bodyController = null;
 
-		if (errorOutput) streamController.error(reason);
+		streamController.error(reason);
 		unblock();
 	};
-	const abortBody = () => {
-		const reason = bodyController?.signal.reason;
+	const abortBody = (reason = AbortSignal.abort().reason) => {
 		bodyController = null;
 		stop(reason);
 	};
@@ -158,17 +156,16 @@ export function createTarPacker(): {
 		const pending = drain;
 		if (!pending) return;
 
-		// abort() waits behind writes, so its signal must release backpressure.
+		// Only wait when abort() can release backpressure.
 		const signal = bodyController?.signal;
-		if (signal) {
-			signal.onabort = abortBody;
-			if (signal.aborted) abortBody();
-		}
+		if (!signal) return;
+		if (signal.aborted) abortBody(signal.reason);
+		else signal.onabort = () => abortBody(signal.reason);
 
 		return pending.then(checkStopped);
 	};
 
-	const readable = new ReadableStream<Uint8Array<ArrayBuffer>>({
+	const source: UnderlyingDefaultSource<Uint8Array<ArrayBuffer>> = {
 		start(controller) {
 			streamController = controller;
 			packer = createPacker((chunk) => {
@@ -180,18 +177,22 @@ export function createTarPacker(): {
 						: new Uint8Array(chunk),
 				);
 
-				if ((controller.desiredSize ?? 1) <= 0 && !drain) {
-					drain = new Promise<void>((resolve) => {
+				if ((controller.desiredSize ?? 1) <= 0) {
+					drain ||= new Promise<void>((resolve) => {
 						resume = resolve;
 					});
 				}
 			});
 		},
 		pull: unblock,
-		cancel(reason) {
-			stop(reason === undefined ? AbortSignal.abort().reason : reason, false);
+		cancel(reason = AbortSignal.abort().reason) {
+			stop(reason);
 		},
-	});
+	};
+	const readable = new ReadableStream<Uint8Array<ArrayBuffer>>(
+		source,
+		new ByteLengthQueuingStrategy({ highWaterMark: 8 * 1024 * 1024 }),
+	);
 
 	const packController: TarPackController = {
 		add(header: TarHeader): WritableStream<Uint8Array> {

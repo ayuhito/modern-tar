@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTarPacker } from "../../src/web";
+import { blockPackerOutput } from "../helpers/packer";
 
 const observeReadableError = (readable: ReadableStream<Uint8Array>) => {
 	const reader = readable.getReader();
@@ -36,18 +37,18 @@ describe("createTarPacker", () => {
 		}
 	});
 
-	it("keeps a bodyless entry active until output demand resumes", async () => {
+	it("keeps a bodyless entry active until its writable closes", async () => {
 		const { readable, controller } = createTarPacker();
 		const streamError = observeReadableError(readable);
-		const closing = controller
+		const writer = controller
 			.add({ name: "directory/", size: 0, type: "directory" })
-			.getWriter()
-			.close();
+			.getWriter();
+		const writerClosed = writer.closed.catch((error) => error);
 
 		expect(() => controller.finalize()).toThrow(
 			"Cannot finalize while an entry is still active",
 		);
-		await expect(closing).rejects.toBeInstanceOf(Error);
+		await expect(writerClosed).resolves.toBeInstanceOf(Error);
 		await expect(streamError).resolves.toBeInstanceOf(Error);
 	});
 
@@ -80,11 +81,10 @@ describe("createTarPacker", () => {
 	it("waits for output demand and cancels the active entry", async () => {
 		const { readable, controller } = createTarPacker();
 		const reader = readable.getReader();
-		const writer = controller.add({ name: "file", size: 1 }).getWriter();
-		const writing = writer.write(Uint8Array.of(1));
+		const { chunk, writer, write } = await blockPackerOutput(controller);
 		const writerClosed = writer.closed.catch((error) => error);
 		let settled = false;
-		writing.then(() => {
+		write.then(() => {
 			settled = true;
 		});
 
@@ -93,8 +93,8 @@ describe("createTarPacker", () => {
 		expect((await reader.read()).value).toHaveLength(512);
 		await Promise.resolve();
 		expect(settled).toBe(false);
-		expect((await reader.read()).value).toEqual(Uint8Array.of(1));
-		await writing;
+		expect((await reader.read()).value).toBe(chunk);
+		await write;
 
 		const reason = null;
 		await reader.cancel(reason);
@@ -104,12 +104,12 @@ describe("createTarPacker", () => {
 	it("aborts an active entry while output demand is blocked", async () => {
 		const { readable, controller } = createTarPacker();
 		const streamError = observeReadableError(readable);
-		const writer = controller.add({ name: "file", size: 1 }).getWriter();
-		const writing = writer.write(Uint8Array.of(1)).catch((error) => error);
+		const { writer, write } = await blockPackerOutput(controller);
+		const writeError = write.catch((error) => error);
 		const reason = new Error("cancelled");
 
 		await writer.abort(reason);
-		await expect(writing).resolves.toBe(reason);
+		await expect(writeError).resolves.toBe(reason);
 		await expect(streamError).resolves.toBe(reason);
 	});
 
@@ -120,5 +120,14 @@ describe("createTarPacker", () => {
 
 		await writer.abort();
 		await expect(streamError).resolves.toMatchObject({ name: "AbortError" });
+	});
+
+	it("uses AbortError when output is cancelled without a reason", async () => {
+		const { readable, controller } = createTarPacker();
+		const writer = controller.add({ name: "file", size: 1 }).getWriter();
+		const writerClosed = writer.closed.catch((error) => error);
+
+		await readable.cancel();
+		await expect(writerClosed).resolves.toMatchObject({ name: "AbortError" });
 	});
 });
