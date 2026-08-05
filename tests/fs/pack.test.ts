@@ -607,8 +607,11 @@ describe("pack", () => {
 		const testDir = path.join(tmpDir, "testdir");
 
 		await fsp.writeFile(testFile, "test content");
-		await fsp.mkdir(testDir);
-		await fsp.writeFile(path.join(testDir, "nested.txt"), "nested content");
+		await fsp.mkdir(path.join(testDir, "nested"), { recursive: true });
+		await fsp.writeFile(
+			path.join(testDir, "nested", "nested.txt"),
+			"nested content",
+		);
 
 		// Custom metadata values
 		const customMtime = new Date("2023-01-15T12:00:00Z");
@@ -657,10 +660,40 @@ describe("pack", () => {
 
 		// Extract the tar and verify metadata
 		const destDir = path.join(tmpDir, "metadata-test");
-		const packStream = packTar(sources);
+		const headers: TarHeader[] = [];
+		const packStream = packTar(sources, {
+			map: (header) => {
+				headers.push({
+					...header,
+					mtime: new Date(header.mtime.getTime()),
+				});
+				// Mutating one mapped header must not affect later descendants.
+				if (header.name === "overridden-dir/") {
+					header.mtime.setTime(0);
+				}
+				return header;
+			},
+		});
 		const unpackStream = unpackTar(destDir);
 
 		await pipeline(packStream, unpackStream);
+
+		for (const name of [
+			"overridden-dir/",
+			"overridden-dir/nested/",
+			"overridden-dir/nested/nested.txt",
+		]) {
+			const header = headers.find((entry) => entry.name === name);
+			expect(header).toMatchObject({
+				mode: customDirMode,
+				mtime: customMtime,
+				uid: customUid,
+				gid: customGid,
+				uname: customUname,
+				gname: customGname,
+			});
+		}
+		expect(customMtime).toEqual(new Date("2023-01-15T12:00:00Z"));
 
 		// Verify extracted file metadata
 		const extractedFile = path.join(destDir, "overridden-file.txt");
@@ -692,7 +725,7 @@ describe("pack", () => {
 		const fileContent = await fsp.readFile(extractedFile, "utf-8");
 		const contentFileContent = await fsp.readFile(extractedContent, "utf-8");
 		const nestedFileContent = await fsp.readFile(
-			path.join(extractedDir, "nested.txt"),
+			path.join(extractedDir, "nested", "nested.txt"),
 			"utf-8",
 		);
 
@@ -730,7 +763,9 @@ describe("pack", () => {
 	it("allows partial metadata overrides while preserving filesystem values", async ({
 		tmpDir,
 	}) => {
-		const testFile = path.join(tmpDir, "partial.txt");
+		const testDir = path.join(tmpDir, "partial");
+		const testFile = path.join(testDir, "partial.txt");
+		await fsp.mkdir(testDir);
 		await fsp.writeFile(testFile, "partial override test");
 
 		// Get original filesystem metadata
@@ -738,9 +773,9 @@ describe("pack", () => {
 
 		const sources = [
 			{
-				type: "file" as const,
-				source: testFile,
-				target: "partial-override.txt",
+				type: "directory" as const,
+				source: testDir,
+				target: "partial-override",
 				// Only override uid and uname, leave other metadata from filesystem
 				uid: 9999,
 				uname: "customuser",
@@ -748,12 +783,27 @@ describe("pack", () => {
 		];
 
 		const destDir = path.join(tmpDir, "partial-test");
-		const packStream = packTar(sources);
+		let nestedHeader: TarHeader | undefined;
+		const packStream = packTar(sources, {
+			map: (header) => {
+				if (header.name === "partial-override/partial.txt") {
+					nestedHeader = { ...header };
+				}
+				return header;
+			},
+		});
 		const unpackStream = unpackTar(destDir);
 
 		await pipeline(packStream, unpackStream);
 
-		const extractedFile = path.join(destDir, "partial-override.txt");
+		expect(nestedHeader).toMatchObject({
+			mode: Number(originalStat.mode),
+			uid: 9999,
+			uname: "customuser",
+		});
+		expect(mtime(nestedHeader as { mtime: Date })).toBe(mtime(originalStat));
+
+		const extractedFile = path.join(destDir, "partial-override", "partial.txt");
 		const extractedStat = await fsp.stat(extractedFile);
 
 		// Verify content

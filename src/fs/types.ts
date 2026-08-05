@@ -50,7 +50,10 @@ export interface UnpackOptionsFS extends UnpackOptions {
 	concurrency?: number;
 }
 
-/** Base interface containing common metadata properties for all source types. */
+/**
+ * Base interface containing metadata overrides for source entries.
+ * Directory sources apply supplied metadata to the directory and its descendants.
+ */
 export interface BaseSource {
 	/** Destination path for the entry inside the tar archive. */
 	target: string;
@@ -64,7 +67,7 @@ export interface BaseSource {
 	uname?: string;
 	/** Optional group name. */
 	gname?: string;
-	/** Optional Unix file permissions for the entry (e.g., 0o644, 0o755). */
+	/** Optional Unix file permissions override (e.g., 0o644, 0o755). */
 	mode?: number;
 }
 
