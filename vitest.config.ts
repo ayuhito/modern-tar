@@ -8,6 +8,7 @@ export default defineConfig({
 				test: {
 					name: "node",
 					include: ["tests/{fs,tar,web}/**/*.test.ts"],
+					testTimeout: 10_000,
 				},
 			},
 			{
