@@ -461,7 +461,10 @@ export function packTar(
 								mode: job.mode,
 							});
 						}
-					} catch {}
+					} catch (error) {
+						const code = (error as NodeJS.ErrnoException).code;
+						if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+					}
 				} else if (stat.isSymbolicLink()) {
 					// Store the link itself, not the target file.
 					header.type = SYMLINK;
