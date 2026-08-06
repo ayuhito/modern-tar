@@ -14,6 +14,28 @@ import { writeTree } from "../helpers/tree";
 const mtime = (stat: { mtime: Date }) =>
 	Math.floor(stat.mtime.getTime() / 1000);
 
+const packWithReaddirError = async (
+	sourceDir: string,
+	directory: string,
+	error: NodeJS.ErrnoException,
+) => {
+	const originalReaddir = fsp.readdir;
+	fs.promises.readdir = (async (
+		...args: Parameters<typeof originalReaddir>
+	) => {
+		if (args[0] === directory) throw error;
+		return originalReaddir(...args);
+	}) as typeof originalReaddir;
+	syncBuiltinESMExports();
+
+	try {
+		return await text(packTar(sourceDir, { concurrency: 1 }));
+	} finally {
+		fs.promises.readdir = originalReaddir;
+		syncBuiltinESMExports();
+	}
+};
+
 describe("pack", () => {
 	it("packs and extracts a directory with a single file", async ({
 		tmpDir,
@@ -475,26 +497,13 @@ describe("pack", () => {
 		const childDir = path.join(sourceDir, "child");
 		await fsp.mkdir(childDir, { recursive: true });
 
-		const originalReaddir = fsp.readdir;
 		const expectedError = Object.assign(new Error("permission denied"), {
 			code: "EACCES",
 		});
-		fs.promises.readdir = (async (
-			...args: Parameters<typeof originalReaddir>
-		) => {
-			if (args[0] === childDir) throw expectedError;
-			return originalReaddir(...args);
-		}) as typeof originalReaddir;
-		syncBuiltinESMExports();
 
-		try {
-			await expect(text(packTar(sourceDir, { concurrency: 1 }))).rejects.toBe(
-				expectedError,
-			);
-		} finally {
-			fs.promises.readdir = originalReaddir;
-			syncBuiltinESMExports();
-		}
+		await expect(
+			packWithReaddirError(sourceDir, childDir, expectedError),
+		).rejects.toBe(expectedError);
 	});
 
 	it("skips descendants when directories disappear or change type while being read", async ({
@@ -506,23 +515,8 @@ describe("pack", () => {
 				"secret.txt": "not archived",
 			});
 
-			const originalReaddir = fsp.readdir;
-			let archive: string;
-			fs.promises.readdir = (async (
-				...args: Parameters<typeof originalReaddir>
-			) => {
-				if (args[0] === childDir)
-					throw Object.assign(new Error(code), { code });
-				return originalReaddir(...args);
-			}) as typeof originalReaddir;
-			syncBuiltinESMExports();
-
-			try {
-				archive = await text(packTar(sourceDir, { concurrency: 1 }));
-			} finally {
-				fs.promises.readdir = originalReaddir;
-				syncBuiltinESMExports();
-			}
+			const error = Object.assign(new Error(code), { code });
+			const archive = await packWithReaddirError(sourceDir, childDir, error);
 
 			expect(archive).toContain("child/");
 			expect(archive).not.toContain("secret.txt");
