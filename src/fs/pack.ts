@@ -418,7 +418,10 @@ export function packTar(
 					name: target,
 					size: 0,
 					mode: job.mode ?? Number(stat.mode),
-					mtime: job.mtime ?? stat.mtime,
+					mtime:
+						job.mtime === undefined
+							? stat.mtime
+							: new Date(job.mtime.getTime()),
 					uid: job.uid ?? Number(stat.uid),
 					gid: job.gid ?? Number(stat.gid),
 					uname: job.uname,
@@ -450,6 +453,12 @@ export function packTar(
 								type: d.isDirectory() ? DIRECTORY : FILE,
 								source: path.join(source, d.name),
 								target: `${header.name}${d.name}`, // Reuse normalized parent path.
+								mtime: job.mtime,
+								uid: job.uid,
+								gid: job.gid,
+								uname: job.uname,
+								gname: job.gname,
+								mode: job.mode,
 							});
 						}
 					} catch {}

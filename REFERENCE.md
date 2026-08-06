@@ -264,6 +264,7 @@ interface FileSource extends BaseSource {
   source: string;
 }
 
+// Metadata overrides apply to the directory and its descendants.
 interface DirectorySource extends BaseSource {
   type: "directory";
   /** Path to the source directory on the local filesystem */

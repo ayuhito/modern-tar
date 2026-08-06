@@ -604,11 +604,11 @@ describe("pack", () => {
 	}) => {
 		// Create test files
 		const testFile = path.join(tmpDir, "test.txt");
-		const testDir = path.join(tmpDir, "testdir");
+		const testDir = await writeTree(path.join(tmpDir, "testdir"), {
+			"nested/nested.txt": "nested content",
+		});
 
 		await fsp.writeFile(testFile, "test content");
-		await fsp.mkdir(testDir);
-		await fsp.writeFile(path.join(testDir, "nested.txt"), "nested content");
 
 		// Custom metadata values
 		const customMtime = new Date("2023-01-15T12:00:00Z");
@@ -657,10 +657,38 @@ describe("pack", () => {
 
 		// Extract the tar and verify metadata
 		const destDir = path.join(tmpDir, "metadata-test");
-		const packStream = packTar(sources);
+		const descendantHeaders: TarHeader[] = [];
+		const packStream = packTar(sources, {
+			map: (header) => {
+				// Mutating one mapped header must not affect later descendants.
+				if (header.name === "overridden-dir/") {
+					expect(header.mtime).toBeDefined();
+					header.mtime?.setTime(0);
+				} else if (header.name.startsWith("overridden-dir/")) {
+					descendantHeaders.push(header);
+				}
+				return header;
+			},
+		});
 		const unpackStream = unpackTar(destDir);
 
 		await pipeline(packStream, unpackStream);
+
+		expect(descendantHeaders.map(({ name }) => name)).toEqual([
+			"overridden-dir/nested/",
+			"overridden-dir/nested/nested.txt",
+		]);
+		for (const header of descendantHeaders) {
+			expect(header).toMatchObject({
+				mode: customDirMode,
+				mtime: customMtime,
+				uid: customUid,
+				gid: customGid,
+				uname: customUname,
+				gname: customGname,
+			});
+		}
+		expect(customMtime).toEqual(new Date("2023-01-15T12:00:00Z"));
 
 		// Verify extracted file metadata
 		const extractedFile = path.join(destDir, "overridden-file.txt");
@@ -692,7 +720,7 @@ describe("pack", () => {
 		const fileContent = await fsp.readFile(extractedFile, "utf-8");
 		const contentFileContent = await fsp.readFile(extractedContent, "utf-8");
 		const nestedFileContent = await fsp.readFile(
-			path.join(extractedDir, "nested.txt"),
+			path.join(extractedDir, "nested", "nested.txt"),
 			"utf-8",
 		);
 

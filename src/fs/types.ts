@@ -75,7 +75,10 @@ export interface FileSource extends BaseSource {
 	source: string;
 }
 
-/** Describes a directory on the local filesystem to be added to the archive. */
+/**
+ * Describes a directory on the local filesystem to be added to the archive.
+ * Metadata overrides apply to the directory and its descendants.
+ */
 export interface DirectorySource extends BaseSource {
 	type: "directory";
 	/** Path to the source directory on the local filesystem. */
