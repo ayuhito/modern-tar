@@ -470,6 +470,65 @@ describe("pack", () => {
 		},
 	);
 
+	it("propagates recursive directory read errors", async ({ tmpDir }) => {
+		const sourceDir = path.join(tmpDir, "source");
+		const childDir = path.join(sourceDir, "child");
+		await fsp.mkdir(childDir, { recursive: true });
+
+		const originalReaddir = fsp.readdir;
+		const expectedError = Object.assign(new Error("permission denied"), {
+			code: "EACCES",
+		});
+		fs.promises.readdir = (async (
+			...args: Parameters<typeof originalReaddir>
+		) => {
+			if (args[0] === childDir) throw expectedError;
+			return originalReaddir(...args);
+		}) as typeof originalReaddir;
+		syncBuiltinESMExports();
+
+		try {
+			await expect(text(packTar(sourceDir, { concurrency: 1 }))).rejects.toBe(
+				expectedError,
+			);
+		} finally {
+			fs.promises.readdir = originalReaddir;
+			syncBuiltinESMExports();
+		}
+	});
+
+	it("skips descendants when directories disappear or change type while being read", async ({
+		tmpDir,
+	}) => {
+		for (const code of ["ENOENT", "ENOTDIR"] as const) {
+			const sourceDir = path.join(tmpDir, code);
+			const childDir = await writeTree(path.join(sourceDir, "child"), {
+				"secret.txt": "not archived",
+			});
+
+			const originalReaddir = fsp.readdir;
+			let archive: string;
+			fs.promises.readdir = (async (
+				...args: Parameters<typeof originalReaddir>
+			) => {
+				if (args[0] === childDir)
+					throw Object.assign(new Error(code), { code });
+				return originalReaddir(...args);
+			}) as typeof originalReaddir;
+			syncBuiltinESMExports();
+
+			try {
+				archive = await text(packTar(sourceDir, { concurrency: 1 }));
+			} finally {
+				fs.promises.readdir = originalReaddir;
+				syncBuiltinESMExports();
+			}
+
+			expect(archive).toContain("child/");
+			expect(archive).not.toContain("secret.txt");
+		}
+	});
+
 	it("handles empty files", async ({ tmpDir }) => {
 		const sourceDir = path.join(tmpDir, "source");
 		await fsp.mkdir(sourceDir, { recursive: true });
