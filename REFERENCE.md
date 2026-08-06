@@ -239,8 +239,7 @@ interface PackOptionsFS {
   map?: (header: TarHeader) => TarHeader;
 }
 
-// Metadata overrides for source entries. Directory sources apply supplied
-// metadata to the directory and its descendants.
+// Base interface for all source types
 interface BaseSource {
   /** Destination path for the entry inside the tar archive */
   target: string;
@@ -254,7 +253,7 @@ interface BaseSource {
   uname?: string;
   /** Optional group name. */
   gname?: string;
-  /** Optional Unix file permissions override (e.g., 0o644, 0o755). */
+  /** Optional Unix file permissions for the entry (e.g., 0o644, 0o755). */
   mode?: number;
 }
 
@@ -265,6 +264,7 @@ interface FileSource extends BaseSource {
   source: string;
 }
 
+// Metadata overrides apply to the directory and its descendants.
 interface DirectorySource extends BaseSource {
   type: "directory";
   /** Path to the source directory on the local filesystem */
