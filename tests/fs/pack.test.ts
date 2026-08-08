@@ -92,6 +92,61 @@ describe("pack", () => {
 		expect(copiedContent).toBe(originalContent);
 	});
 
+	it("uses device and inode to identify hard links", async ({ tmpDir }) => {
+		const first = path.join(tmpDir, "first.txt");
+		const second = path.join(tmpDir, "second.txt");
+		const third = path.join(tmpDir, "third.txt");
+		const devices = new Map([
+			[first, 1n],
+			[second, 2n],
+			[third, 1n],
+		]);
+		await Promise.all([
+			fsp.writeFile(first, ""),
+			fsp.writeFile(second, ""),
+			fsp.writeFile(third, ""),
+		]);
+
+		const originalLstat = fsp.lstat;
+		fs.promises.lstat = (async (...args: Parameters<typeof originalLstat>) => {
+			const stat = await originalLstat(...args);
+			const device = devices.get(String(args[0]));
+			return device === undefined
+				? stat
+				: Object.assign(stat, { dev: device, ino: 42n, nlink: 2n });
+		}) as typeof originalLstat;
+		syncBuiltinESMExports();
+
+		const headers: TarHeader[] = [];
+		try {
+			await text(
+				packTar(
+					[
+						{ type: "file", source: first, target: "first.txt" },
+						{ type: "file", source: second, target: "second.txt" },
+						{ type: "file", source: third, target: "third.txt" },
+					],
+					{
+						concurrency: 1,
+						map: (header) => {
+							headers.push({ ...header });
+							return header;
+						},
+					},
+				),
+			);
+		} finally {
+			fs.promises.lstat = originalLstat;
+			syncBuiltinESMExports();
+		}
+
+		expect(headers).toMatchObject([
+			{ name: "first.txt", type: "file" },
+			{ name: "second.txt", type: "file" },
+			{ linkname: "first.txt", name: "third.txt", type: "link" },
+		]);
+	});
+
 	it("handles USTAR long filenames on a round trip", async ({ tmpDir }) => {
 		const longDirName =
 			"a-very-long-directory-name-that-is-over-100-characters-long";
