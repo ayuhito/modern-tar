@@ -178,8 +178,10 @@ export function packTar(
 			jobs = sources.map((source) => ({ ...source }));
 		}
 
-		// inodes can be 64-bit, so use bigint for correctness.
-		const seenInodes = new Map<bigint, string>();
+		// Inode numbers are only unique within a filesystem, so hard links are
+		// identified by (device, inode). Nested bigint maps preserve both values
+		// without allocating composite strings or assuming an integer width.
+		const seenHardlinks = new Map<bigint, Map<bigint, string>>();
 
 		let jobIndex = 0;
 		let writeIndex = 0;
@@ -472,7 +474,22 @@ export function packTar(
 				} else if (stat.isFile()) {
 					header.size = Number(stat.size);
 					let handleToClose: FileHandle | undefined;
-					let linkname = stat.nlink > 1 ? seenInodes.get(stat.ino) : undefined;
+					let hardlinks: Map<bigint, string> | undefined;
+					// On Windows, libuv reports device 0 when the volume ID is unavailable,
+					// and ReFS reports inode -1 when its 128-bit ID cannot fit in 64 bits.
+					// Store the full file rather than link files with an ambiguous identity.
+					if (
+						stat.nlink > 1n &&
+						(process.platform !== "win32" ||
+							(stat.dev !== 0n && stat.ino !== -1n))
+					) {
+						hardlinks = seenHardlinks.get(stat.dev);
+						if (hardlinks === undefined) {
+							hardlinks = new Map();
+							seenHardlinks.set(stat.dev, hardlinks);
+						}
+					}
+					let linkname = hardlinks?.get(stat.ino);
 
 					try {
 						let after: fs.BigIntStats | undefined;
@@ -512,15 +529,16 @@ export function packTar(
 							if (stat.dev !== dev || stat.ino !== ino) return;
 						}
 
-						// Deduplicate hard links with inode number.
-						if (stat.nlink > 1) linkname = seenInodes.get(stat.ino);
+						// Another worker may have registered this identity while this worker
+						// was validating the file, so check again after the awaited I/O.
+						if (hardlinks !== undefined) linkname = hardlinks.get(stat.ino);
 						if (linkname !== undefined) {
 							header.type = LINK;
 							header.linkname = linkname;
 							header.size = 0;
 						} else {
 							// Else handle as a regular file.
-							if (stat.nlink > 1) seenInodes.set(stat.ino, target);
+							if (hardlinks !== undefined) hardlinks.set(stat.ino, target);
 							if (header.size > 0) {
 								// biome-ignore lint/style/noNonNullAssertion: A body requires an opened handle.
 								const handle = handleToClose!;
