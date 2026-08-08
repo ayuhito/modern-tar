@@ -419,7 +419,10 @@ export function packTar(
 				let header: TarHeader = {
 					name: target,
 					size: 0,
-					mode: job.mode ?? Number(stat.mode),
+					// stat.mode combines permission bits with bits that identify the filesystem
+					// entry type. TAR stores the type separately, so 0o7777 keeps only rwx,
+					// setuid, setgid, and sticky bits
+					mode: (job.mode ?? Number(stat.mode)) & 0o7777,
 					mtime:
 						job.mtime === undefined
 							? stat.mtime

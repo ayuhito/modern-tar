@@ -203,6 +203,30 @@ describe("options fs", () => {
 			}
 		});
 
+		it.skipIf(process.platform === "win32")(
+			"preserves mode zero from archive headers",
+			async ({ tmpDir }) => {
+				const extractDir = path.join(tmpDir, "extract");
+				await pipeline(
+					packTar([
+						{
+							type: "content",
+							content: "locked",
+							target: "locked.txt",
+							mode: 0,
+						},
+						{ type: "content", content: null, target: "locked/", mode: 0 },
+					]),
+					unpackTar(extractDir),
+				);
+
+				const file = await fs.stat(path.join(extractDir, "locked.txt"));
+				const directory = await fs.stat(path.join(extractDir, "locked"));
+				expect(file.mode & 0o777).toBe(0);
+				expect(directory.mode & 0o777).toBe(0);
+			},
+		);
+
 		it("inherits core strip option", async ({ tmpDir }) => {
 			const sourceDir = await writeTree(path.join(tmpDir, "source"), {
 				"a/test.txt": "test\n",
