@@ -2,11 +2,15 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import * as path from "node:path";
-import { text } from "node:stream/consumers";
+import { buffer, text } from "node:stream/consumers";
 import { pipeline } from "node:stream/promises";
 import { describe, expect } from "vitest";
 import { packTar, type TarSource, unpackTar } from "../../src/fs";
-import { createTarDecoder, type TarHeader } from "../../src/web";
+import {
+	createTarDecoder,
+	type TarHeader,
+	unpackTar as unpackTarBuffer,
+} from "../../src/web";
 import { it } from "../helpers/test";
 import { writeTree } from "../helpers/tree";
 
@@ -138,6 +142,22 @@ describe("pack", () => {
 		const copiedContent = await fsp.readFile(copiedPath, "utf-8");
 		expect(copiedContent).toBe(originalContent);
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"stores filesystem permissions without file type bits",
+		async ({ tmpDir }) => {
+			const source = path.join(tmpDir, "mode.txt");
+			await fsp.writeFile(source, "mode");
+			await fsp.chmod(source, 0o640);
+
+			const archive = packTar([{ type: "file", source, target: "mode.txt" }]);
+			const entries = await unpackTarBuffer(await buffer(archive), {
+				strict: true,
+			});
+
+			expect(entries).toMatchObject([{ header: { mode: 0o640 } }]);
+		},
+	);
 
 	it("uses device and inode to identify hard links", async ({ tmpDir }) => {
 		// The same inode on another device is a different file; the same pair is

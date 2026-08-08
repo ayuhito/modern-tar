@@ -221,7 +221,7 @@ export const createPathCache = (
 					pathConflicts.set(normalizedName, DIRECTORY);
 
 					// Strip SUID/SGID/Sticky bits for security.
-					const safeMode = mode ? mode & 0o777 : undefined;
+					const safeMode = mode === undefined ? undefined : mode & 0o777;
 					// Create directory with mode from header or default.
 					await prepareDirectory(outPath, dmode ?? safeMode);
 
