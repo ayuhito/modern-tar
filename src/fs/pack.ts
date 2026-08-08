@@ -17,6 +17,12 @@ type FileBody = { handle: FileHandle; size: number } | Uint8Array | Readable;
 type JobResult = {
 	header: TarHeader;
 	body?: FileBody;
+	hardlinkId?: string;
+};
+
+type HardlinkTarget = {
+	originalName: string;
+	mappedName: string;
 };
 
 const BIGINT_STAT = { bigint: true } as const;
@@ -178,10 +184,7 @@ export function packTar(
 			jobs = sources.map((source) => ({ ...source }));
 		}
 
-		// Inode numbers are only unique within a filesystem, so hard links are
-		// identified by (device, inode). Nested bigint maps preserve both values
-		// without allocating composite strings or assuming an integer width.
-		const seenHardlinks = new Map<bigint, Map<bigint, string>>();
+		const seenHardlinks = new Map<string, HardlinkTarget>();
 
 		let jobIndex = 0;
 		let writeIndex = 0;
@@ -232,6 +235,41 @@ export function packTar(
 					writeIndex++;
 					controller();
 					continue;
+				}
+
+				// Workers prepare files concurrently, but hardlink targets must appear
+				// before their references. Resolve them here in archive order
+				if (result.hardlinkId) {
+					const originalName = result.header.name;
+					const hardlinkTarget = seenHardlinks.get(result.hardlinkId);
+					if (hardlinkTarget) {
+						// A later hardlink may already own a buffer or file handle because
+						// workers prepare bodies before the writer knows which entry is first
+						if (
+							result.body &&
+							!(result.body instanceof Uint8Array) &&
+							!(result.body instanceof Readable)
+						)
+							await closeHandle(result.body.handle);
+						result.body = undefined;
+						result.header.type = LINK;
+						result.header.linkname = hardlinkTarget.originalName;
+						result.header.size = 0;
+					}
+
+					// Map after choosing file or link so the callback sees the final type
+					if (map) result.header = map(result.header);
+					if (hardlinkTarget) {
+						// An unchanged link follows the target's mapped name, while a changed
+						// linkname is an explicit callback override
+						if (result.header.linkname === hardlinkTarget.originalName)
+							result.header.linkname = hardlinkTarget.mappedName;
+					} else {
+						seenHardlinks.set(result.hardlinkId, {
+							originalName,
+							mappedName: result.header.name,
+						});
+					}
 				}
 
 				packer.add(result.header);
@@ -435,6 +473,7 @@ export function packTar(
 				};
 
 				let body: FileBody | undefined;
+				let hardlinkId: string | undefined;
 				if (stat.isDirectory()) {
 					header.type = DIRECTORY;
 					header.name = target.endsWith("/") ? target : `${target}/`;
@@ -477,7 +516,6 @@ export function packTar(
 				} else if (stat.isFile()) {
 					header.size = Number(stat.size);
 					let handleToClose: FileHandle | undefined;
-					let hardlinks: Map<bigint, string> | undefined;
 					// On Windows, libuv reports device 0 when the volume ID is unavailable,
 					// and ReFS reports inode -1 when its 128-bit ID cannot fit in 64 bits.
 					// Store the full file rather than link files with an ambiguous identity.
@@ -486,18 +524,15 @@ export function packTar(
 						(process.platform !== "win32" ||
 							(stat.dev !== 0n && stat.ino !== -1n))
 					) {
-						hardlinks = seenHardlinks.get(stat.dev);
-						if (hardlinks === undefined) {
-							hardlinks = new Map();
-							seenHardlinks.set(stat.dev, hardlinks);
-						}
+						// stat.ino is unique only within stat.dev. BigInt interpolation keeps
+						// both values exact and the separator makes the pair unambiguous
+						hardlinkId = `${stat.dev}:${stat.ino}`;
 					}
-					let linkname = hardlinks?.get(stat.ino);
 
 					try {
 						let after: fs.BigIntStats | undefined;
 						try {
-							if (header.size === 0 || linkname !== undefined) {
+							if (header.size === 0) {
 								// Header-only entries still need a second identity check, but do not
 								// need an open descriptor because no file body will be read.
 								after = await fsp.lstat(source, BIGINT_STAT);
@@ -532,42 +567,31 @@ export function packTar(
 							if (stat.dev !== dev || stat.ino !== ino) return;
 						}
 
-						// Another worker may have registered this identity while this worker
-						// was validating the file, so check again after the awaited I/O.
-						if (hardlinks !== undefined) linkname = hardlinks.get(stat.ino);
-						if (linkname !== undefined) {
-							header.type = LINK;
-							header.linkname = linkname;
-							header.size = 0;
-						} else {
-							// Else handle as a regular file.
-							if (hardlinks !== undefined) hardlinks.set(stat.ino, target);
-							if (header.size > 0) {
-								// biome-ignore lint/style/noNonNullAssertion: A body requires an opened handle.
-								const handle = handleToClose!;
-								// If the file is small (< 32KB), read it into a buffer immediately.
-								if (header.size < 32 * 1024) {
-									const buffer = Buffer.allocUnsafe(header.size);
-									let offset = 0;
-									while (offset < buffer.length && !stream.destroyed) {
-										const { bytesRead } = await handle.read(
-											buffer,
-											offset,
-											buffer.length - offset,
-											offset,
-										);
-										if (bytesRead === 0) break;
-										offset += bytesRead;
-									}
-									body =
-										offset === buffer.length
-											? buffer
-											: buffer.subarray(0, offset);
-								} else {
-									// The writer owns and closes this descriptor once it streams.
-									body = { handle, size: header.size };
-									handleToClose = undefined;
+						if (header.size > 0) {
+							// biome-ignore lint/style/noNonNullAssertion: A body requires an opened handle.
+							const handle = handleToClose!;
+							// If the file is small (< 32KB), read it into a buffer immediately.
+							if (header.size < 32 * 1024) {
+								const buffer = Buffer.allocUnsafe(header.size);
+								let offset = 0;
+								while (offset < buffer.length && !stream.destroyed) {
+									const { bytesRead } = await handle.read(
+										buffer,
+										offset,
+										buffer.length - offset,
+										offset,
+									);
+									if (bytesRead === 0) break;
+									offset += bytesRead;
 								}
+								body =
+									offset === buffer.length
+										? buffer
+										: buffer.subarray(0, offset);
+							} else {
+								// The writer owns and closes this descriptor once it streams.
+								body = { handle, size: header.size };
+								handleToClose = undefined;
 							}
 						}
 					} finally {
@@ -578,8 +602,13 @@ export function packTar(
 				}
 
 				if (stream.destroyed) return;
-				if (map) header = map(header);
-				jobResult = { header, body };
+				// Defer mapping hardlink candidates until the ordered writer knows
+				// whether each entry is the target or a link
+				if (hardlinkId) jobResult = { header, body, hardlinkId };
+				else {
+					if (map) header = map(header);
+					jobResult = { header, body };
+				}
 			} finally {
 				if (stream.destroyed) {
 					if (jobResult?.body instanceof Readable)

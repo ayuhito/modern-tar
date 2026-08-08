@@ -4,8 +4,14 @@ import { syncBuiltinESMExports } from "node:module";
 import * as path from "node:path";
 import { buffer, text } from "node:stream/consumers";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect } from "vitest";
-import { packTar, type TarSource, unpackTar } from "../../src/fs";
+import {
+	type PackOptionsFS,
+	packTar,
+	type TarSource,
+	unpackTar,
+} from "../../src/fs";
 import {
 	createTarDecoder,
 	type TarHeader,
@@ -42,7 +48,13 @@ const packWithReaddirError = async (
 
 const packMockHardlinks = async (
 	tmpDir: string,
-	entries: readonly { name: string; dev: bigint; ino: bigint }[],
+	entries: readonly {
+		name: string;
+		dev: bigint;
+		ino: bigint;
+		initialDelay?: number;
+	}[],
+	options: PackOptionsFS = { concurrency: 1 },
 ) => {
 	const identities = new Map(
 		entries.map(({ name, ...identity }) => [path.join(tmpDir, name), identity]),
@@ -53,38 +65,40 @@ const packMockHardlinks = async (
 
 	const originalLstat = fsp.lstat;
 	fs.promises.lstat = (async (...args: Parameters<typeof originalLstat>) => {
-		const stat = await originalLstat(...args);
 		const identity = identities.get(String(args[0]));
-		return identity === undefined
-			? stat
-			: Object.assign(stat, { ...identity, nlink: 2n });
+		if (identity?.initialDelay !== undefined) {
+			const initialDelay = identity.initialDelay;
+			identity.initialDelay = undefined;
+			await delay(initialDelay);
+		}
+		const stat = await originalLstat(...args);
+		if (identity === undefined) return stat;
+		return Object.assign(stat, {
+			dev: identity.dev,
+			ino: identity.ino,
+			nlink: 2n,
+		});
 	}) as typeof originalLstat;
 	syncBuiltinESMExports();
 
-	const headers: TarHeader[] = [];
 	try {
-		await text(
+		const archive = await buffer(
 			packTar(
 				[...identities.keys()].map((source) => ({
 					type: "file" as const,
 					source,
 					target: path.basename(source),
 				})),
-				{
-					concurrency: 1,
-					map: (header) => {
-						headers.push({ ...header });
-						return header;
-					},
-				},
+				options,
 			),
+		);
+		return (await unpackTarBuffer(archive, { strict: true })).map(
+			({ header }) => header,
 		);
 	} finally {
 		fs.promises.lstat = originalLstat;
 		syncBuiltinESMExports();
 	}
-
-	return headers;
 };
 
 describe("pack", () => {
@@ -159,19 +173,60 @@ describe("pack", () => {
 		},
 	);
 
-	it("uses device and inode to identify hard links", async ({ tmpDir }) => {
-		// The same inode on another device is a different file; the same pair is
-		// another hard link to the original file.
-		const headers = await packMockHardlinks(tmpDir, [
-			{ name: "first.txt", dev: 1n, ino: 42n },
-			{ name: "second.txt", dev: 2n, ino: 42n },
-			{ name: "third.txt", dev: 1n, ino: 42n },
-		]);
+	it("uses archive-ordered device and inode identities for hard links", async ({
+		tmpDir,
+	}) => {
+		// A worker for a later link can finish first, while the same inode on
+		// another device still identifies a different file
+		const headers = await packMockHardlinks(
+			tmpDir,
+			[
+				{ name: "first.txt", dev: 1n, ino: 42n, initialDelay: 20 },
+				{ name: "second.txt", dev: 1n, ino: 42n },
+				{ name: "third.txt", dev: 2n, ino: 42n },
+			],
+			{ concurrency: 2 },
+		);
 
 		expect(headers).toMatchObject([
 			{ name: "first.txt", type: "file" },
-			{ name: "second.txt", type: "file" },
-			{ linkname: "first.txt", name: "third.txt", type: "link" },
+			{ linkname: "first.txt", name: "second.txt", type: "link" },
+			{ name: "third.txt", type: "file" },
+		]);
+	});
+
+	it("maps hardlink references without overriding explicit targets", async ({
+		tmpDir,
+	}) => {
+		const headers = await packMockHardlinks(
+			tmpDir,
+			[
+				{ name: "first.txt", dev: 1n, ino: 42n },
+				{ name: "second.txt", dev: 1n, ino: 42n },
+				{ name: "third.txt", dev: 1n, ino: 42n },
+			],
+			{
+				map: (header) => ({
+					...header,
+					name: `mapped/${header.name}`,
+					linkname:
+						header.name === "third.txt" ? "custom/first.txt" : header.linkname,
+				}),
+			},
+		);
+
+		expect(headers).toMatchObject([
+			{ name: "mapped/first.txt", type: "file" },
+			{
+				linkname: "mapped/first.txt",
+				name: "mapped/second.txt",
+				type: "link",
+			},
+			{
+				linkname: "custom/first.txt",
+				name: "mapped/third.txt",
+				type: "link",
+			},
 		]);
 	});
 
