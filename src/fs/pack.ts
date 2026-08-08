@@ -178,6 +178,9 @@ export function packTar(
 			jobs = sources.map((source) => ({ ...source }));
 		}
 
+		// Inode numbers are only unique within a filesystem, so hard links are
+		// identified by (device, inode). Nested bigint maps preserve both values
+		// without allocating composite strings or assuming an integer width.
 		const seenHardlinks = new Map<bigint, Map<bigint, string>>();
 
 		let jobIndex = 0;
@@ -472,7 +475,14 @@ export function packTar(
 					header.size = Number(stat.size);
 					let handleToClose: FileHandle | undefined;
 					let hardlinks: Map<bigint, string> | undefined;
-					if (stat.nlink > 1n) {
+					// On Windows, libuv reports device 0 when the volume ID is unavailable,
+					// and ReFS reports inode -1 when its 128-bit ID cannot fit in 64 bits.
+					// Store the full file rather than link files with an ambiguous identity.
+					if (
+						stat.nlink > 1n &&
+						(process.platform !== "win32" ||
+							(stat.dev !== 0n && stat.ino !== -1n))
+					) {
 						hardlinks = seenHardlinks.get(stat.dev);
 						if (hardlinks === undefined) {
 							hardlinks = new Map();
@@ -519,6 +529,8 @@ export function packTar(
 							if (stat.dev !== dev || stat.ino !== ino) return;
 						}
 
+						// Another worker may have registered this identity while this worker
+						// was validating the file, so check again after the awaited I/O.
 						if (hardlinks !== undefined) linkname = hardlinks.get(stat.ino);
 						if (linkname !== undefined) {
 							header.type = LINK;

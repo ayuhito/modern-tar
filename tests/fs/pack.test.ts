@@ -36,6 +36,53 @@ const packWithReaddirError = async (
 	}
 };
 
+const packMockHardlinks = async (
+	tmpDir: string,
+	entries: readonly { name: string; dev: bigint; ino: bigint }[],
+) => {
+	const identities = new Map(
+		entries.map(({ name, ...identity }) => [path.join(tmpDir, name), identity]),
+	);
+	await Promise.all(
+		[...identities.keys()].map((file) => fsp.writeFile(file, "")),
+	);
+
+	const originalLstat = fsp.lstat;
+	fs.promises.lstat = (async (...args: Parameters<typeof originalLstat>) => {
+		const stat = await originalLstat(...args);
+		const identity = identities.get(String(args[0]));
+		return identity === undefined
+			? stat
+			: Object.assign(stat, { ...identity, nlink: 2n });
+	}) as typeof originalLstat;
+	syncBuiltinESMExports();
+
+	const headers: TarHeader[] = [];
+	try {
+		await text(
+			packTar(
+				[...identities.keys()].map((source) => ({
+					type: "file" as const,
+					source,
+					target: path.basename(source),
+				})),
+				{
+					concurrency: 1,
+					map: (header) => {
+						headers.push({ ...header });
+						return header;
+					},
+				},
+			),
+		);
+	} finally {
+		fs.promises.lstat = originalLstat;
+		syncBuiltinESMExports();
+	}
+
+	return headers;
+};
+
 describe("pack", () => {
 	it("packs and extracts a directory with a single file", async ({
 		tmpDir,
@@ -93,52 +140,13 @@ describe("pack", () => {
 	});
 
 	it("uses device and inode to identify hard links", async ({ tmpDir }) => {
-		const first = path.join(tmpDir, "first.txt");
-		const second = path.join(tmpDir, "second.txt");
-		const third = path.join(tmpDir, "third.txt");
-		const devices = new Map([
-			[first, 1n],
-			[second, 2n],
-			[third, 1n],
+		// The same inode on another device is a different file; the same pair is
+		// another hard link to the original file.
+		const headers = await packMockHardlinks(tmpDir, [
+			{ name: "first.txt", dev: 1n, ino: 42n },
+			{ name: "second.txt", dev: 2n, ino: 42n },
+			{ name: "third.txt", dev: 1n, ino: 42n },
 		]);
-		await Promise.all([
-			fsp.writeFile(first, ""),
-			fsp.writeFile(second, ""),
-			fsp.writeFile(third, ""),
-		]);
-
-		const originalLstat = fsp.lstat;
-		fs.promises.lstat = (async (...args: Parameters<typeof originalLstat>) => {
-			const stat = await originalLstat(...args);
-			const device = devices.get(String(args[0]));
-			return device === undefined
-				? stat
-				: Object.assign(stat, { dev: device, ino: 42n, nlink: 2n });
-		}) as typeof originalLstat;
-		syncBuiltinESMExports();
-
-		const headers: TarHeader[] = [];
-		try {
-			await text(
-				packTar(
-					[
-						{ type: "file", source: first, target: "first.txt" },
-						{ type: "file", source: second, target: "second.txt" },
-						{ type: "file", source: third, target: "third.txt" },
-					],
-					{
-						concurrency: 1,
-						map: (header) => {
-							headers.push({ ...header });
-							return header;
-						},
-					},
-				),
-			);
-		} finally {
-			fs.promises.lstat = originalLstat;
-			syncBuiltinESMExports();
-		}
 
 		expect(headers).toMatchObject([
 			{ name: "first.txt", type: "file" },
@@ -146,6 +154,21 @@ describe("pack", () => {
 			{ linkname: "first.txt", name: "third.txt", type: "link" },
 		]);
 	});
+
+	it.skipIf(process.platform !== "win32")(
+		"stores files with ambiguous Windows identities separately",
+		async ({ tmpDir }) => {
+			const headers = await packMockHardlinks(tmpDir, [
+				{ name: "unknown-volume-first.txt", dev: 0n, ino: 1n },
+				{ name: "unknown-volume-second.txt", dev: 0n, ino: 1n },
+				{ name: "unrepresentable-first.txt", dev: 1n, ino: -1n },
+				{ name: "unrepresentable-second.txt", dev: 1n, ino: -1n },
+			]);
+
+			expect(headers).toHaveLength(4);
+			expect(headers.every((header) => header.type === "file")).toBe(true);
+		},
+	);
 
 	it("handles USTAR long filenames on a round trip", async ({ tmpDir }) => {
 		const longDirName =
