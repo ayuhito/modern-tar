@@ -30,9 +30,9 @@ describe("path properties", () => {
 		hegel.test((tc) => {
 			const value = tc.draw(portablePath);
 			const expected = value
-				.replace(/\/+$/, "")
 				.replace(/\\/g, "/")
-				.replace(/^\/+/, "");
+				.replace(/\/+/g, "/")
+				.replace(/^\/|\/$/g, "");
 			const normalized = normalizeHeaderName(value);
 
 			expect(normalized).toBe(expected);

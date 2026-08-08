@@ -27,6 +27,17 @@ describe("path utilities", () => {
 			expect(normalizeHeaderName("file")).toBe("file");
 		});
 
+		it("canonicalizes equivalent filesystem paths", () => {
+			for (const name of [
+				"same/file",
+				"same//file",
+				"same/./file",
+				"./same/file",
+			]) {
+				expect(normalizeHeaderName(name)).toBe("same/file");
+			}
+		});
+
 		it("handles security-relevant paths consistently", () => {
 			// Conservative security approach - reject any traversal patterns including bare ".."
 			expect(() => normalizeHeaderName("../")).toThrow(

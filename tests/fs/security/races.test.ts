@@ -360,6 +360,32 @@ describe("path races and collisions", () => {
 			);
 		});
 
+		it.for([{ concurrency: 1 }, { concurrency: 8 }])(
+			"keeps the first file across equivalent paths at concurrency $concurrency",
+			async ({ concurrency }, { tmpDir }) => {
+				const extractDir = path.join(tmpDir, "extract");
+				const bodies = ["FIRST", "SECOND", "THIRD", "FOURTH"];
+				const entries: TarEntry[] = [
+					"same/file",
+					"same//file",
+					"same/./file",
+					"./same/file",
+				].map((name, index) => ({
+					header: { name, size: bodies[index].length, type: "file" },
+					body: bodies[index],
+				}));
+
+				await pipeline(
+					Readable.from([await packTar(entries)]),
+					unpackTar(extractDir, { concurrency }),
+				);
+
+				expect(
+					await fs.readFile(path.join(extractDir, "same", "file"), "utf8"),
+				).toBe("FIRST");
+			},
+		);
+
 		it("tracks duplicates beyond the path-cache capacity", async ({
 			tmpDir,
 		}) => {
