@@ -23,6 +23,8 @@ const win32Reserved: Record<string, string> = {
 	'"': "\uF022",
 };
 
+const pathAlias = /\/\/|(?:^|\/)\.(?:\/|$)/;
+
 // Normalizes a path for use as a tar entry name.
 export function normalizeName(name: string): string {
 	// Normalize backslashes to forward slashes.
@@ -54,6 +56,10 @@ export function normalizeName(name: string): string {
 }
 
 // Normalizes a header name without changing its Unicode spelling.
-export const normalizeHeaderName = (s: string) =>
+export const normalizeHeaderName = (s: string) => {
 	// Strip trailing separators.
-	normalizeName(s.replace(/[\\/]+$/, ""));
+	const name = normalizeName(s.replace(/[\\/]+$/, ""));
+	// Treat aliases that resolve to the same filesystem path as one conflict key.
+	// Keep already canonical names on the fast path.
+	return pathAlias.test(name) ? path.posix.normalize(name) : name;
+};
