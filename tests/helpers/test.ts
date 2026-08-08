@@ -6,6 +6,13 @@ import { test as baseTest } from "vitest";
 // biome-ignore lint/correctness/noEmptyPattern: Vitest requires fixture context destructuring.
 export const it = baseTest.extend("tmpDir", async ({}, { onCleanup }) => {
 	const tmpDir = await mkdtemp(join(tmpdir(), "modern-tar-test-"));
-	onCleanup(() => rm(tmpDir, { recursive: true, force: true }));
+	onCleanup(() =>
+		rm(tmpDir, {
+			recursive: true,
+			force: true,
+			maxRetries: 3,
+			retryDelay: 100,
+		}),
+	);
 	return tmpDir;
 });
