@@ -36,9 +36,10 @@ const RESUME_LIMIT = BUFFER_LIMIT / 2;
  *  }
  * }
  */
-export function createTarDecoder(
-	options: DecoderOptions = {},
-): ReadableWritablePair<ParsedTarEntry, Uint8Array> {
+export function createTarDecoder(options: DecoderOptions = {}): {
+	readable: ReadableStream<ParsedTarEntry>;
+	writable: WritableStream<Uint8Array>;
+} {
 	const unpacker = createUnpacker(options);
 	const strict = options.strict ?? false;
 
