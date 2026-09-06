@@ -86,21 +86,21 @@ export const TYPEFLAG = {
 	"gnu-long-link-name": "K",
 } as const;
 
-/** Reverse mapping from flag characters to type names. */
+/** Reverse mapping from ASCII flag bytes to type names. */
 export const FLAGTYPE = {
-	"0": FILE,
-	"1": LINK,
-	"2": SYMLINK,
-	"3": "character-device",
-	"4": "block-device",
-	"5": DIRECTORY,
-	"6": "fifo",
+	48: FILE,
+	49: LINK,
+	50: SYMLINK,
+	51: "character-device",
+	52: "block-device",
+	53: DIRECTORY,
+	54: "fifo",
 	// POSIX.1-2001 extensions
-	x: "pax-header",
-	g: "pax-global-header",
+	120: "pax-header",
+	103: "pax-global-header",
 	// GNU extensions
-	L: "gnu-long-name",
-	K: "gnu-long-link-name",
+	76: "gnu-long-name",
+	75: "gnu-long-link-name",
 } as const;
 
 /** Pre-allocated zero block for padding and EOF. */
