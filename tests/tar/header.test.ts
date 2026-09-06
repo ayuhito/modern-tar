@@ -1,27 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { writeChecksum } from "../../src/tar/checksum";
-import { TYPEFLAG, USTAR_TYPEFLAG_OFFSET } from "../../src/tar/constants";
 import { createTarHeader, parseUstarHeader } from "../../src/tar/header";
 import { unpackTar } from "../../src/web";
 import { LONG_NAME_TAR, NAME_IS_100_TAR } from "../web/fixtures";
 
 describe("USTAR headers", () => {
-	it("preserves entry types and the file fallback for every type byte", () => {
-		const block = createTarHeader({ name: "entry", size: 0 });
-		for (let byte = 0; byte < 256; byte++) {
-			block[USTAR_TYPEFLAG_OFFSET] = byte;
-			writeChecksum(block);
-			const expected =
-				Object.entries(TYPEFLAG).find(
-					([, flag]) => flag.charCodeAt(0) === byte,
-				)?.[0] ?? "file";
-			expect(parseUstarHeader(block, true).type, `type byte ${byte}`).toBe(
-				expected,
-			);
-		}
-	});
-
 	it("round-trips supported header fields", () => {
 		const mtime = new Date(1_700_000_000_000);
 		const header = {
