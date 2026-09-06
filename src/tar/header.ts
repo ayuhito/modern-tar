@@ -133,12 +133,6 @@ export function parseUstarHeader(
 		throw new Error("Invalid tar header checksum.");
 	}
 
-	const typeflag = readString(
-		block,
-		USTAR_TYPEFLAG_OFFSET,
-		USTAR_TYPEFLAG_SIZE,
-	) as keyof typeof FLAGTYPE;
-
 	const header: InternalTarHeader = {
 		name: readString(block, USTAR_NAME_OFFSET, USTAR_NAME_SIZE),
 		mode: readOctal(block, USTAR_MODE_OFFSET, USTAR_MODE_SIZE),
@@ -148,7 +142,8 @@ export function parseUstarHeader(
 		mtime: new Date(
 			readNumeric(block, USTAR_MTIME_OFFSET, USTAR_MTIME_SIZE) * 1000,
 		),
-		type: FLAGTYPE[typeflag] || FILE,
+		type:
+			FLAGTYPE[block[USTAR_TYPEFLAG_OFFSET] as keyof typeof FLAGTYPE] || FILE,
 		linkname: readString(block, USTAR_LINKNAME_OFFSET, USTAR_LINKNAME_SIZE),
 	};
 
