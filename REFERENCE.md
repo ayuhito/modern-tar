@@ -60,7 +60,7 @@ const stream2 = controller.add({ name: "file2.txt", size: 4 });
 controller.finalize();
 ```
 
-### `createTarDecoder(options?: DecoderOptions): ReadableWritablePair<ParsedTarEntry, Uint8Array>`
+### `createTarDecoder(options?: DecoderOptions): { readable: ReadableStream<ParsedTarEntry>, writable: WritableStream<Uint8Array> }`
 
 Create a readable/writable stream pair that parses tar bytes into entries.
 
