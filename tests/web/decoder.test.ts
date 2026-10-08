@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { BLOCK_SIZE, USTAR_CHECKSUM_OFFSET } from "../../src/tar/constants";
-import { encoder } from "../../src/tar/encoding";
 import { createTarDecoder, packTar } from "../../src/web";
 import { chunkBytes, streamFromChunks } from "../helpers/bytes";
 import { createDeferred } from "../helpers/deferred";
@@ -201,8 +200,8 @@ describe("createTarDecoder", () => {
 		const archive = await packTar([
 			{ header: { name: "test.txt", type: "file", size: 0 }, body: "" },
 		]);
-		// Corrupt the checksum
-		archive.set(encoder.encode("INVALID!"), USTAR_CHECKSUM_OFFSET);
+		// Change the checksum while keeping its octal representation valid.
+		archive[USTAR_CHECKSUM_OFFSET] ^= 1;
 
 		const decoder = createTarDecoder({ strict: true });
 		await expect(

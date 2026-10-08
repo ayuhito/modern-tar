@@ -77,6 +77,7 @@ export function readOctal(
 		const charCode = view[i];
 		if (charCode === 0) break; // Stop at NUL terminator
 		if (charCode === 32) continue; // Ignore whitespace
+		if (charCode < 48 || charCode > 55) throw new Error("Invalid tar number.");
 		value = value * 8 + (charCode - 48); // 48 is ASCII '0'
 	}
 
