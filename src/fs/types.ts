@@ -15,7 +15,13 @@ export interface PackOptionsFS {
 	filter?: (path: string, stat: Stats) => boolean;
 	/** Transform function to modify tar headers before packing */
 	map?: (header: TarHeader) => TarHeader;
-	/** Base directory for symlink security validation, when `dereference` is set to true. */
+	/**
+	 * With `dereference: true`, skip filesystem sources whose resolved paths are
+	 * outside this directory, including explicitly selected files and directories.
+	 * If omitted, only final symlink targets are checked against the input directory
+	 * (for string sources) or the current working directory.
+	 * Path checks do not protect against concurrent changes to ancestor directories.
+	 */
 	baseDir?: string;
 	/**
 	 * Maximum number of concurrent filesystem operations during packing.

@@ -422,9 +422,9 @@ export function packTar(
 				let stat = await fsp.lstat(source, BIGINT_STAT);
 				if (stream.destroyed) return;
 
-				// Optionally follow symlinks to their targets.
-				if (dereference && stat.isSymbolicLink()) {
-					source = await fsp.realpath(source);
+				// An explicit base also constrains sources reached through ancestor links.
+				if (dereference && (baseDir !== undefined || stat.isSymbolicLink())) {
+					const resolvedSource = await fsp.realpath(source);
 					if (stream.destroyed) return;
 
 					// `realpath` follows the whole symlink chain. Compare the final
@@ -433,7 +433,7 @@ export function packTar(
 						baseDir ?? directoryPath ?? process.cwd(),
 					);
 					if (stream.destroyed) return;
-					const relativeToBase = path.relative(realBaseDir, source);
+					const relativeToBase = path.relative(realBaseDir, resolvedSource);
 					if (
 						relativeToBase === ".." ||
 						// biome-ignore lint/style/useTemplate: Smaller minified output.
@@ -443,10 +443,13 @@ export function packTar(
 						return; // Skip and do no further work.
 					}
 
-					stat = await fsp.lstat(source, BIGINT_STAT);
-					// If the resolved target became a symlink again, avoid following a
-					// second mutable path chain.
-					if (stat.isSymbolicLink()) return;
+					if (stat.isSymbolicLink()) {
+						source = resolvedSource;
+						stat = await fsp.lstat(source, BIGINT_STAT);
+						// If the resolved target became a symlink again, avoid following a
+						// second mutable path chain.
+						if (stat.isSymbolicLink()) return;
+					}
 				}
 
 				if (stream.destroyed) return;
