@@ -214,7 +214,15 @@ export function createTarPacker(): {
 				},
 
 				write(chunk) {
-					return emit(() => packer.write(chunk));
+					return emit(() => {
+						// Reject objects that claim one size but produce more bytes.
+						if (
+							!ArrayBuffer.isView(chunk) ||
+							chunk[Symbol.toStringTag] !== "Uint8Array"
+						)
+							throw new TypeError("Expected a Uint8Array body chunk");
+						packer.write(chunk);
+					});
 				},
 
 				close() {

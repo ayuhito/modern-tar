@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { createTarPacker } from "../../src/web";
 import { blockPackerOutput } from "../helpers/packer";
@@ -35,6 +36,46 @@ describe("createTarPacker", () => {
 			}
 			await expect(streamError).resolves.toBeInstanceOf(Error);
 		}
+	});
+
+	it.each([
+		["null", null],
+		["Uint16Array", new Uint16Array(2)],
+		["DataView", new DataView(new ArrayBuffer(2))],
+		["Proxy", new Proxy(new Uint8Array(2), {})],
+		[
+			"misleading iterable",
+			{
+				length: 512,
+				[Symbol.toStringTag]: "Uint8Array",
+				*[Symbol.iterator]() {
+					yield* new Uint8Array(1024);
+				},
+			},
+		],
+	])("rejects %s body chunks and errors both streams", async (_name, chunk) => {
+		const { readable, controller } = createTarPacker();
+		const streamError = observeReadableError(readable);
+		const writer = controller.add({ name: "file", size: 512 }).getWriter();
+		await expect(writer.write(chunk as Uint8Array)).rejects.toThrow(TypeError);
+		await expect(streamError).resolves.toBeInstanceOf(TypeError);
+	});
+
+	it.each([
+		["Buffer", () => Buffer.from([1, 2, 3])],
+		["cross-realm", () => runInNewContext("new Uint8Array([1, 2, 3])")],
+	] as const)("preserves %s byte chunks", async (_name, createBody) => {
+		const { readable, controller } = createTarPacker();
+		const writer = controller.add({ name: "file", size: 3 }).getWriter();
+		await writer.write(createBody());
+		await writer.close();
+		controller.finalize();
+
+		const reader = readable.getReader();
+		await reader.read(); // Header.
+		const { value } = await reader.read();
+		expect(Array.from(value ?? [])).toEqual([1, 2, 3]);
+		await reader.cancel();
 	});
 
 	it("keeps a bodyless entry active until its writable closes", async () => {
