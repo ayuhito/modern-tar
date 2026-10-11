@@ -9,9 +9,124 @@ import {
 	type TarSource,
 	unpackTar,
 } from "../../../src/fs";
+import { unpackTar as unpackTarBuffer } from "../../../src/web";
 import { it } from "../../helpers/test";
+import { writeTree } from "../../helpers/tree";
 
 describe("dereference containment", () => {
+	it.skipIf(process.platform === "win32")(
+		"skips explicit files and directories outside baseDir, including through ancestor links",
+		async ({ tmpDir }) => {
+			const realBase = await writeTree(path.join(tmpDir, "base"), {
+				"..safe/file.txt": "safe",
+			});
+			const baseDir = path.join(tmpDir, "base-link");
+			await fs.symlink(realBase, baseDir);
+			await fs.symlink("..safe", path.join(baseDir, "inside"));
+			const outside = await writeTree(path.join(tmpDir, "outside"), {
+				"nested/secret.txt": "outside",
+			});
+			await fs.symlink(outside, path.join(baseDir, "link"));
+			const sources: TarSource[] = [
+				{
+					type: "file",
+					source: path.join(baseDir, "inside/file.txt"),
+					target: "safe.txt",
+				},
+				{
+					type: "file",
+					source: path.join(baseDir, "link/nested/secret.txt"),
+					target: "leak.txt",
+				},
+				{
+					type: "directory",
+					source: path.join(baseDir, "link/nested"),
+					target: "leak",
+				},
+				{
+					type: "file",
+					source: path.join(outside, "nested/secret.txt"),
+					target: "direct.txt",
+				},
+			];
+			const filtered: string[] = [];
+			const archive = await arrayBuffer(
+				packTarFS(sources, {
+					baseDir,
+					dereference: true,
+					filter(source) {
+						filtered.push(source);
+						return true;
+					},
+				}),
+			);
+			const entries = await unpackTarBuffer(archive, { strict: true });
+			expect(entries.map(({ header }) => header.name)).toEqual(["safe.txt"]);
+			expect(new TextDecoder().decode(entries[0].data)).toBe("safe");
+			expect(filtered).toEqual([path.join(baseDir, "inside/file.txt")]);
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"preserves explicit ancestor-link sources unless dereference and baseDir are both set",
+		async ({ tmpDir }) => {
+			const baseDir = path.join(tmpDir, "base");
+			await fs.mkdir(baseDir);
+			const outside = await writeTree(path.join(tmpDir, "outside"), {
+				"file.txt": "selected",
+			});
+			await fs.symlink(outside, path.join(baseDir, "link"));
+			for (const options of [{}, { baseDir }, { dereference: true }]) {
+				const archive = await arrayBuffer(
+					packTarFS(
+						[
+							{
+								type: "file",
+								source: path.join(baseDir, "link/file.txt"),
+								target: "file.txt",
+							},
+						],
+						options,
+					),
+				);
+				const entries = await unpackTarBuffer(archive, { strict: true });
+				expect(entries.map(({ header }) => header.name)).toEqual(["file.txt"]);
+				expect(new TextDecoder().decode(entries[0].data)).toBe("selected");
+			}
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"preserves filter paths beneath a symlinked string root within baseDir",
+		async ({ tmpDir }) => {
+			const baseDir = await writeTree(path.join(tmpDir, "base"), {
+				"nested/file.txt": "safe",
+			});
+			const root = path.join(tmpDir, "root");
+			await fs.symlink(baseDir, root);
+			const filtered: string[] = [];
+			const archive = await arrayBuffer(
+				packTarFS(root, {
+					baseDir,
+					dereference: true,
+					filter(source) {
+						filtered.push(source);
+						return true;
+					},
+				}),
+			);
+			expect(
+				(await unpackTarBuffer(archive, { strict: true })).map(
+					({ header }) => header.name,
+				),
+			).toEqual(["nested/", "nested/file.txt"]);
+			expect(filtered).toEqual([
+				path.join(root, "nested"),
+				path.join(root, "nested/file.txt"),
+			]);
+		},
+	);
+
 	describe("pack security vulnerabilities", () => {
 		it.skipIf(process.platform === "win32")(
 			"prevents symlink directory traversal during packing with dereference: true",
