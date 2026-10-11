@@ -15,10 +15,7 @@ export interface PackOptionsFS {
 	filter?: (path: string, stat: Stats) => boolean;
 	/** Transform function to modify tar headers before packing */
 	map?: (header: TarHeader) => TarHeader;
-	/**
-	 * With `dereference: true`, skip filesystem sources resolving outside this directory.
-	 * Does not protect against concurrent ancestor replacement.
-	 */
+	/** Base directory for symlink security validation, when `dereference` is set to true. */
 	baseDir?: string;
 	/**
 	 * Maximum number of concurrent filesystem operations during packing.
