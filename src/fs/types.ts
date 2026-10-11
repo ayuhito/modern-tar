@@ -16,11 +16,8 @@ export interface PackOptionsFS {
 	/** Transform function to modify tar headers before packing */
 	map?: (header: TarHeader) => TarHeader;
 	/**
-	 * With `dereference: true`, skip filesystem sources whose resolved paths are
-	 * outside this directory, including explicitly selected files and directories.
-	 * If omitted, only final symlink targets are checked against the input directory
-	 * (for string sources) or the current working directory.
-	 * Path checks do not protect against concurrent changes to ancestor directories.
+	 * With `dereference: true`, skip filesystem sources resolving outside this directory.
+	 * Does not protect against concurrent ancestor replacement.
 	 */
 	baseDir?: string;
 	/**

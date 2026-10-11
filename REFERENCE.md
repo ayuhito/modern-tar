@@ -142,14 +142,6 @@ const sources = [
 const archiveStream = packTar(sources);
 ```
 
-When `dereference: true` is combined with an explicit `baseDir`, filesystem sources
-resolving outside that directory are skipped before filtering or archiving. This
-also applies to explicitly selected regular files and directories, including paths
-through ancestor symlinks. Without `baseDir`, the existing check applies only to
-final symlink targets, using the input directory or current working directory.
-`baseDir` has no effect when `dereference` is false. These path checks do not make
-packing safe against concurrent changes to ancestor directories.
-
 ### `unpackTar(directoryPath: string, options?: UnpackOptionsFS): Writable`
 
 Extract a tar archive to a directory.
@@ -241,8 +233,6 @@ interface UnpackOptions extends DecoderOptions {
 interface PackOptionsFS {
   /** Follow symlinks instead of archiving them as symlinks (default: false) */
   dereference?: boolean;
-  /** With dereference: true, skip filesystem sources resolving outside this directory */
-  baseDir?: string;
   /** Filter function to determine which files to include (uses Node.js fs.Stats) */
   filter?: (path: string, stat: Stats) => boolean;
   /** Transform function to modify headers before packing */
