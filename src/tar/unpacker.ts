@@ -300,6 +300,8 @@ function isZeroBlock(block: Uint8Array): boolean {
 }
 
 function checkPadding(chunk: Uint8Array): boolean {
-	if (chunk.some((byte) => byte !== 0)) throw new Error("Invalid EOF.");
+	for (let i = 0; i < chunk.length; i++) {
+		if (chunk[i] !== 0) throw new Error("Invalid EOF.");
+	}
 	return true;
 }

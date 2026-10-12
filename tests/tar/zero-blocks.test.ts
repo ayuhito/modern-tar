@@ -48,7 +48,9 @@ describe("tar zero blocks", () => {
 				unpacker.write(eof);
 				if (position === "later write") {
 					unpacker.readHeader();
-					expect(() => unpacker.write(Uint8Array.of(1))).toThrow("Invalid EOF");
+					const trailer = new Uint8Array(64 * 1024);
+					trailer[trailer.length - 1] = 1;
+					expect(() => unpacker.write(trailer)).toThrow("Invalid EOF");
 					return;
 				}
 				unpacker.write(Uint8Array.of(1));
