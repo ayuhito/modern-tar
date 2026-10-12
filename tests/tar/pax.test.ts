@@ -257,7 +257,7 @@ describe("PAX format", () => {
 		for (const strict of [false, true]) {
 			const result = unpackTar(archive, { strict });
 			if (type === "pax-global-header" && count > 512) {
-				await expect(result).rejects.toThrow("Too many global PAX attributes");
+				await expect(result).rejects.toThrow("Too many global attributes");
 			} else {
 				expect((await result)[0].header.pax).toEqual(pax);
 			}

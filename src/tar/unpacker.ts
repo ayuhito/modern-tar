@@ -176,7 +176,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 						overrides.pax &&
 						Object.keys(overrides.pax).length > MAX_GLOBAL_PAX_KEYS
 					)
-						throw new Error("Too many global PAX attributes.");
+						throw new Error("Too many global attributes.");
 
 					for (const key in overrides) target[key] = overrides[key];
 
