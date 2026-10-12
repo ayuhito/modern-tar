@@ -15,6 +15,48 @@ describe("tar zero blocks", () => {
 		}).not.toThrow();
 	});
 
+	it.each([false, true])(
+		"discards trailers immediately (strict: %s)",
+		(strict) => {
+			const unpacker = createUnpacker({ strict });
+			unpacker.write(new Uint8Array(BLOCK_SIZE * 2 + 3));
+			unpacker.write(new Uint8Array(17));
+			expect(unpacker.readHeader()).toBeUndefined();
+			expect(unpacker.available()).toBe(0);
+
+			const trailer = new Uint8Array(64 * 1024).fill(strict ? 0 : 1);
+			for (let i = 0; i < 256; i++) {
+				unpacker.write(trailer);
+				expect(unpacker.available()).toBe(0);
+			}
+			unpacker.end();
+			expect(() => unpacker.validateEOF()).not.toThrow();
+			expect(() => unpacker.write(trailer)).toThrow("Archive already ended");
+		},
+	);
+
+	it.each(["same chunk", "queued chunk", "later write"])(
+		"rejects nonzero strict trailers before source closure: %s",
+		(position) => {
+			const unpacker = createUnpacker({ strict: true });
+			const eof = new Uint8Array(BLOCK_SIZE * 2);
+			if (position === "same chunk") {
+				const chunk = new Uint8Array(eof.length + 1);
+				chunk[chunk.length - 1] = 1;
+				unpacker.write(chunk);
+			} else {
+				unpacker.write(eof);
+				if (position === "later write") {
+					unpacker.readHeader();
+					expect(() => unpacker.write(Uint8Array.of(1))).toThrow("Invalid EOF");
+					return;
+				}
+				unpacker.write(Uint8Array.of(1));
+			}
+			expect(() => unpacker.readHeader()).toThrow("Invalid EOF");
+		},
+	);
+
 	it("requires two EOF blocks only in strict mode", async () => {
 		const archive = await packTar([
 			{ header: { name: "file.txt", size: 1 }, body: "x" },

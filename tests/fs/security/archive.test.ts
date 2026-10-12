@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -11,6 +12,17 @@ import { it } from "../../helpers/test";
 import { INVALID_TAR } from "../../web/fixtures";
 
 describe("archive hardening", () => {
+	it("rejects nonzero strict trailers without waiting for source closure", async ({
+		tmpDir,
+	}) => {
+		const stream = unpackTar(path.join(tmpDir, "extract"), { strict: true });
+		const error = once(stream, "error");
+		stream.write(new Uint8Array(1024));
+		stream.write(Uint8Array.of(1));
+		const [reason] = await error;
+		expect(reason.message).toBe("Invalid EOF.");
+	});
+
 	describe("malformed archives", () => {
 		it.skipIf(process.platform === "win32")(
 			"rejects unpacking a tar with an invalid symlink pointing outside",
