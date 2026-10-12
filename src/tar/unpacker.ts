@@ -97,7 +97,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				// Peek at the next block since we know it is not null from above.
 				const headerBlock = peek(BLOCK_SIZE) as Uint8Array;
 
-				if (isZeroBlock(headerBlock)) {
+				if (isZero(headerBlock)) {
 					// We need to check for a second zero block to confirm a valid EOF.
 					if (available() < BLOCK_SIZE * 2) {
 						// Not enough data to check for the second block.
@@ -112,7 +112,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 
 					// Check if the second block is also zeroed.
 					const eofBlock = peek(BLOCK_SIZE * 2) as Uint8Array;
-					if (isZeroBlock(eofBlock.subarray(BLOCK_SIZE))) {
+					if (isZero(eofBlock.subarray(BLOCK_SIZE))) {
 						discard(BLOCK_SIZE * 2); // Valid EOF.
 						done = true;
 						eof = true;
@@ -269,14 +269,12 @@ export function createUnpacker(options: DecoderOptions = {}) {
 	return unpacker;
 }
 
-// Instead of checking each byte individually (512 iterations), we can check
-// 8 bytes at a time using BigUint64Array (64 iterations).
-function isZeroBlock(block: Uint8Array): boolean {
+// Scan eight bytes at a time when the view is aligned and has no partial word.
+function isZero(block: Uint8Array): boolean {
+	if (block.length === 0) return true;
 	if (block[0] !== 0) return false;
 
-	// If the block's offset within its underlying buffer is 8-byte aligned, we can safely
-	// use BigUint64Array for a fast path check.
-	if (block.byteOffset % 8 === 0) {
+	if (block.byteOffset % 8 === 0 && block.length % 8 === 0) {
 		const view = new BigUint64Array(
 			block.buffer,
 			block.byteOffset,
@@ -290,8 +288,7 @@ function isZeroBlock(block: Uint8Array): boolean {
 		return true;
 	}
 
-	// If the block is not 8-byte aligned, creating a BigUint64Array would throw, so fallback
-	// to counting every byte.
+	// Handle unaligned views and partial words byte by byte.
 	for (let i = 0; i < block.length; i++) {
 		if (block[i] !== 0) return false;
 	}
@@ -300,8 +297,6 @@ function isZeroBlock(block: Uint8Array): boolean {
 }
 
 function checkPadding(chunk: Uint8Array): boolean {
-	for (let i = 0; i < chunk.length; i++) {
-		if (chunk[i] !== 0) throw new Error("Invalid EOF.");
-	}
+	if (!isZero(chunk)) throw new Error("Invalid EOF.");
 	return true;
 }

@@ -59,6 +59,26 @@ describe("tar zero blocks", () => {
 		},
 	);
 
+	it.each([0, 1, 7, 8])(
+		"checks complete trailers at byte offset %s",
+		(offset) => {
+			for (const length of [0, 1, 7, 8, 9, 511, 512, 513]) {
+				const unpacker = createUnpacker({ strict: true });
+				unpacker.write(new Uint8Array(BLOCK_SIZE * 2));
+				unpacker.readHeader();
+				const trailer = new Uint8Array(
+					new ArrayBuffer(offset + length),
+					offset,
+				);
+				expect(() => unpacker.write(trailer)).not.toThrow();
+				if (length > 0) {
+					trailer[length - 1] = 1;
+					expect(() => unpacker.write(trailer)).toThrow("Invalid EOF");
+				}
+			}
+		},
+	);
+
 	it("requires two EOF blocks only in strict mode", async () => {
 		const archive = await packTar([
 			{ header: { name: "file.txt", size: 1 }, body: "x" },
