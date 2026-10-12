@@ -59,7 +59,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 		write(chunk: Uint8Array): void {
 			if (ended) throw new Error("Archive already ended.");
 			if (eof) {
-				if (strict) validateZeroPadding(chunk);
+				if (strict) checkPadding(chunk);
 				return;
 			}
 			push(chunk);
@@ -117,7 +117,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 						done = true;
 						eof = true;
 						// Discard bytes already buffered after EOF without copying them.
-						if (strict) pull(available(), validateZeroPadding);
+						if (strict) pull(available(), checkPadding);
 						else discard(available());
 						return undefined;
 					}
@@ -260,7 +260,8 @@ export function createUnpacker(options: DecoderOptions = {}) {
 			return unpacker.skipPadding();
 		},
 
-		validateEOF() {
+		/** Check completion after buffered input has been processed. */
+		finish() {
 			if (strict && !eof) throw truncateErr;
 		},
 	};
@@ -298,7 +299,7 @@ function isZeroBlock(block: Uint8Array): boolean {
 	return true;
 }
 
-function validateZeroPadding(chunk: Uint8Array): boolean {
+function checkPadding(chunk: Uint8Array): boolean {
 	if (chunk.some((byte) => byte !== 0)) throw new Error("Invalid EOF.");
 	return true;
 }

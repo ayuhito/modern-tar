@@ -30,7 +30,7 @@ describe("tar zero blocks", () => {
 				expect(unpacker.available()).toBe(0);
 			}
 			unpacker.end();
-			expect(() => unpacker.validateEOF()).not.toThrow();
+			expect(() => unpacker.finish()).not.toThrow();
 			expect(() => unpacker.write(trailer)).toThrow("Archive already ended");
 		},
 	);

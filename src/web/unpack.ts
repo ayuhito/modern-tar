@@ -111,10 +111,7 @@ export function createTarDecoder(options: DecoderOptions = {}): {
 		try {
 			while (true) {
 				if (eofReached) {
-					if (sourceEnded) {
-						unpacker.validateEOF();
-						finish();
-					}
+					if (sourceEnded) finish();
 					break;
 				}
 
@@ -173,7 +170,7 @@ export function createTarDecoder(options: DecoderOptions = {}): {
 
 					if (header === undefined) {
 						if (sourceEnded) {
-							unpacker.validateEOF();
+							unpacker.finish();
 							finish();
 							break;
 						}

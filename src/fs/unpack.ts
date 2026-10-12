@@ -199,7 +199,7 @@ export function unpackTar(
 			try {
 				// Close out remaining buffered data and flush the async operation queue.
 				unpacker.end();
-				unpacker.validateEOF();
+				unpacker.finish();
 				// Non-strict archives may end mid-entry, so flush the bytes received.
 				if (currentFileStream) closeCurrent();
 				// Ensure all paths are prepared before cleanup.
