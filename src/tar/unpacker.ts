@@ -97,7 +97,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 				// Peek at the next block since we know it is not null from above.
 				const headerBlock = peek(BLOCK_SIZE) as Uint8Array;
 
-				if (isZero(headerBlock)) {
+				if (isZeroBlock(headerBlock)) {
 					// We need to check for a second zero block to confirm a valid EOF.
 					if (available() < BLOCK_SIZE * 2) {
 						// Not enough data to check for the second block.
@@ -112,7 +112,7 @@ export function createUnpacker(options: DecoderOptions = {}) {
 
 					// Check if the second block is also zeroed.
 					const eofBlock = peek(BLOCK_SIZE * 2) as Uint8Array;
-					if (isZero(eofBlock.subarray(BLOCK_SIZE))) {
+					if (isZeroBlock(eofBlock.subarray(BLOCK_SIZE))) {
 						discard(BLOCK_SIZE * 2); // Valid EOF.
 						done = true;
 						eof = true;
@@ -269,11 +269,14 @@ export function createUnpacker(options: DecoderOptions = {}) {
 	return unpacker;
 }
 
-function isZero(block: Uint8Array): boolean {
+// Instead of checking each byte individually, we can check
+// 8 bytes at a time using BigUint64Array.
+function isZeroBlock(block: Uint8Array): boolean {
 	if (block.length === 0) return true;
 	if (block[0] !== 0) return false;
 
-	// Scan eight bytes at a time; both the offset and length must be divisible by eight.
+	// If the block's offset and length are both multiples of 8, we can safely
+	// use BigUint64Array for a fast path check.
 	if (block.byteOffset % 8 === 0 && block.length % 8 === 0) {
 		const view = new BigUint64Array(
 			block.buffer,
@@ -288,6 +291,7 @@ function isZero(block: Uint8Array): boolean {
 		return true;
 	}
 
+	// Otherwise, fall back to counting every byte.
 	for (let i = 0; i < block.length; i++) {
 		if (block[i] !== 0) return false;
 	}
@@ -296,6 +300,6 @@ function isZero(block: Uint8Array): boolean {
 }
 
 function checkPadding(chunk: Uint8Array): boolean {
-	if (!isZero(chunk)) throw new Error("Invalid EOF.");
+	if (!isZeroBlock(chunk)) throw new Error("Invalid EOF.");
 	return true;
 }
