@@ -174,6 +174,8 @@ await pipeline(tarStream, extractStream);
 
 ### Core Types
 
+Decoders accept at most 512 attributes per global PAX header in both strict and non-strict modes. Global attributes are copied into every following entry, so this limits their per-entry memory and processing cost. Local PAX headers are not subject to this attribute-count limit.
+
 ```typescript
 // Union type for entry body data that can be packed into a tar archive
 type TarEntryData = string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> | Blob | null | undefined;
