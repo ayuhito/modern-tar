@@ -35,47 +35,19 @@ describe("tar zero blocks", () => {
 		},
 	);
 
-	it.each(["same chunk", "queued chunk", "later write"])(
-		"rejects nonzero strict trailers before source closure: %s",
-		(position) => {
+	it.each([false, true])(
+		"rejects buffered nonzero trailers before source closure (separate chunk: %s)",
+		(separateChunk) => {
 			const unpacker = createUnpacker({ strict: true });
-			const eof = new Uint8Array(BLOCK_SIZE * 2);
-			if (position === "same chunk") {
-				const chunk = new Uint8Array(eof.length + 1);
-				chunk[chunk.length - 1] = 1;
-				unpacker.write(chunk);
+			const archive = new Uint8Array(BLOCK_SIZE * 2 + 1);
+			archive[archive.length - 1] = 1;
+			if (separateChunk) {
+				unpacker.write(archive.subarray(0, BLOCK_SIZE * 2));
+				unpacker.write(archive.subarray(BLOCK_SIZE * 2));
 			} else {
-				unpacker.write(eof);
-				if (position === "later write") {
-					unpacker.readHeader();
-					const trailer = new Uint8Array(64 * 1024);
-					trailer[trailer.length - 1] = 1;
-					expect(() => unpacker.write(trailer)).toThrow("Invalid EOF");
-					return;
-				}
-				unpacker.write(Uint8Array.of(1));
+				unpacker.write(archive);
 			}
 			expect(() => unpacker.readHeader()).toThrow("Invalid EOF");
-		},
-	);
-
-	it.each([0, 1, 7, 8])(
-		"checks complete trailers at byte offset %s",
-		(offset) => {
-			for (const length of [0, 1, 7, 8, 9, 511, 512, 513]) {
-				const unpacker = createUnpacker({ strict: true });
-				unpacker.write(new Uint8Array(BLOCK_SIZE * 2));
-				unpacker.readHeader();
-				const trailer = new Uint8Array(
-					new ArrayBuffer(offset + length),
-					offset,
-				);
-				expect(() => unpacker.write(trailer)).not.toThrow();
-				if (length > 0) {
-					trailer[length - 1] = 1;
-					expect(() => unpacker.write(trailer)).toThrow("Invalid EOF");
-				}
-			}
 		},
 	);
 

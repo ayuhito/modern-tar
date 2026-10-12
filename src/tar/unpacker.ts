@@ -269,11 +269,11 @@ export function createUnpacker(options: DecoderOptions = {}) {
 	return unpacker;
 }
 
-// Scan eight bytes at a time when the view is aligned and has no partial word.
 function isZero(block: Uint8Array): boolean {
 	if (block.length === 0) return true;
 	if (block[0] !== 0) return false;
 
+	// Scan eight bytes at a time; both the offset and length must be divisible by eight.
 	if (block.byteOffset % 8 === 0 && block.length % 8 === 0) {
 		const view = new BigUint64Array(
 			block.buffer,
@@ -288,7 +288,6 @@ function isZero(block: Uint8Array): boolean {
 		return true;
 	}
 
-	// Handle unaligned views and partial words byte by byte.
 	for (let i = 0; i < block.length; i++) {
 		if (block[i] !== 0) return false;
 	}
