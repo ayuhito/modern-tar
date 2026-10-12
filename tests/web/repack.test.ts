@@ -3,6 +3,27 @@ import { decoder } from "../../src/tar/encoding";
 import { packTar, unpackTar } from "../../src/web";
 
 describe("repacking", () => {
+	it("updates retained PAX size when the body changes", async () => {
+		const [entry] = await unpackTar(
+			await packTar([
+				{
+					header: {
+						name: "file",
+						size: 5,
+						pax: { size: "5", comment: "keep" },
+					},
+					body: "hello",
+				},
+			]),
+		);
+		entry.data = new Uint8Array(513);
+		entry.header.size = entry.data.length;
+		const [repacked] = await unpackTar(await packTar([entry]));
+		expect(repacked.data).toEqual(entry.data);
+		expect(repacked.header.pax).toEqual({ size: "513", comment: "keep" });
+		expect(entry.header.pax?.size).toBe("5");
+	});
+
 	it("accepts buffered entries through their data field", async () => {
 		const original = await packTar([
 			{ header: { name: "file.txt", size: 5 }, body: "hello" },

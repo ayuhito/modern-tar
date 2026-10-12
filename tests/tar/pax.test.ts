@@ -17,6 +17,29 @@ import { packTar, unpackTar } from "../../src/web";
 import { PAX_TAR, UNICODE_TAR } from "../web/fixtures";
 
 describe("PAX format", () => {
+	it.each(["0", "1024", "invalid"])(
+		"uses the body size instead of PAX size %s",
+		async (size) => {
+			const pax = Object.freeze({ size, comment: "preserved" });
+			const body = createTarHeader({ name: "not-an-entry", size: 0 });
+			const entries = await unpackTar(
+				await packTar([
+					{ header: { name: "file", size: body.length, pax }, body },
+					{ header: { name: "next", size: 1 }, body: "x" },
+				]),
+			);
+			expect(entries.map(({ header }) => header.name)).toEqual([
+				"file",
+				"next",
+			]);
+			expect(entries[0].data).toEqual(body);
+			expect(entries[0].header.pax).toEqual({
+				size: String(body.length),
+				comment: "preserved",
+			});
+		},
+	);
+
 	it("reads external PAX fixtures", async () => {
 		const [unicode] = await unpackTar(await readFile(UNICODE_TAR));
 		expect(unicode.header).toMatchObject({
@@ -113,6 +136,7 @@ describe("PAX format", () => {
 			["link", 0],
 			["next.txt", 1],
 		]);
+		expect(entries[0].header.pax?.size).toBe("0");
 	});
 
 	it("does not carry local PAX size through GNU metadata", async () => {
@@ -120,9 +144,10 @@ describe("PAX format", () => {
 			{
 				header: {
 					name: "ignored",
-					size: 0,
+					size: BLOCK_SIZE,
 					pax: { size: String(BLOCK_SIZE) },
 				},
+				body: new Uint8Array(BLOCK_SIZE),
 			},
 		]);
 		const longName = `${"long/".repeat(20)}file.txt`;
@@ -175,7 +200,7 @@ describe("PAX format", () => {
 			name: "large.bin",
 			size,
 			gid,
-			pax: { mtime: "12345.678" },
+			pax: { mtime: "12345.678", size: "0" },
 		});
 		expect(generated).not.toBeNull();
 		if (!generated) throw new Error("Expected PAX data");
