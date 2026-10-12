@@ -58,6 +58,10 @@ export function createUnpacker(options: DecoderOptions = {}) {
 		/** Add data to the internal buffer. */
 		write(chunk: Uint8Array): void {
 			if (ended) throw new Error("Archive already ended.");
+			if (eof) {
+				if (strict) checkPadding(chunk);
+				return;
+			}
 			push(chunk);
 		},
 
@@ -112,6 +116,9 @@ export function createUnpacker(options: DecoderOptions = {}) {
 						discard(BLOCK_SIZE * 2); // Valid EOF.
 						done = true;
 						eof = true;
+						// Discard bytes already buffered after EOF without copying them.
+						if (strict) pull(available(), checkPadding);
+						else discard(available());
 						return undefined;
 					}
 
@@ -253,29 +260,24 @@ export function createUnpacker(options: DecoderOptions = {}) {
 			return unpacker.skipPadding();
 		},
 
-		validateEOF() {
-			if (strict) {
-				if (!eof) throw truncateErr;
-				if (available() > 0) {
-					const remaining = pull(available()) as Uint8Array;
-					if (remaining.some((byte) => byte !== 0))
-						throw new Error("Invalid EOF.");
-				}
-			}
+		/** Check completion after buffered input has been processed. */
+		finish() {
+			if (strict && !eof) throw truncateErr;
 		},
 	};
 
 	return unpacker;
 }
 
-// Instead of checking each byte individually (512 iterations), we can check
-// 8 bytes at a time using BigUint64Array (64 iterations).
+// Instead of checking each byte individually, we can check
+// 8 bytes at a time using BigUint64Array.
 function isZeroBlock(block: Uint8Array): boolean {
+	if (block.length === 0) return true;
 	if (block[0] !== 0) return false;
 
-	// If the block's offset within its underlying buffer is 8-byte aligned, we can safely
+	// If the block's offset and length are both multiples of 8, we can safely
 	// use BigUint64Array for a fast path check.
-	if (block.byteOffset % 8 === 0) {
+	if (block.byteOffset % 8 === 0 && block.length % 8 === 0) {
 		const view = new BigUint64Array(
 			block.buffer,
 			block.byteOffset,
@@ -289,11 +291,15 @@ function isZeroBlock(block: Uint8Array): boolean {
 		return true;
 	}
 
-	// If the block is not 8-byte aligned, creating a BigUint64Array would throw, so fallback
-	// to counting every byte.
+	// Otherwise, fall back to counting every byte.
 	for (let i = 0; i < block.length; i++) {
 		if (block[i] !== 0) return false;
 	}
 
+	return true;
+}
+
+function checkPadding(chunk: Uint8Array): boolean {
+	if (!isZeroBlock(chunk)) throw new Error("Invalid EOF.");
 	return true;
 }

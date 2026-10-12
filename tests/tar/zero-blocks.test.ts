@@ -15,6 +15,42 @@ describe("tar zero blocks", () => {
 		}).not.toThrow();
 	});
 
+	it.each([false, true])(
+		"discards trailers immediately (strict: %s)",
+		(strict) => {
+			const unpacker = createUnpacker({ strict });
+			unpacker.write(new Uint8Array(BLOCK_SIZE * 2 + 3));
+			unpacker.write(new Uint8Array(17));
+			expect(unpacker.readHeader()).toBeUndefined();
+			expect(unpacker.available()).toBe(0);
+
+			const trailer = new Uint8Array(64 * 1024).fill(strict ? 0 : 1);
+			for (let i = 0; i < 256; i++) {
+				unpacker.write(trailer);
+				expect(unpacker.available()).toBe(0);
+			}
+			unpacker.end();
+			expect(() => unpacker.finish()).not.toThrow();
+			expect(() => unpacker.write(trailer)).toThrow("Archive already ended");
+		},
+	);
+
+	it.each([false, true])(
+		"rejects buffered nonzero trailers before source closure (separate chunk: %s)",
+		(separateChunk) => {
+			const unpacker = createUnpacker({ strict: true });
+			const archive = new Uint8Array(BLOCK_SIZE * 2 + 1);
+			archive[archive.length - 1] = 1;
+			if (separateChunk) {
+				unpacker.write(archive.subarray(0, BLOCK_SIZE * 2));
+				unpacker.write(archive.subarray(BLOCK_SIZE * 2));
+			} else {
+				unpacker.write(archive);
+			}
+			expect(() => unpacker.readHeader()).toThrow("Invalid EOF");
+		},
+	);
+
 	it("requires two EOF blocks only in strict mode", async () => {
 		const archive = await packTar([
 			{ header: { name: "file.txt", size: 1 }, body: "x" },

@@ -111,10 +111,7 @@ export function createTarDecoder(options: DecoderOptions = {}): {
 		try {
 			while (true) {
 				if (eofReached) {
-					if (sourceEnded) {
-						unpacker.validateEOF();
-						finish();
-					}
+					if (sourceEnded) finish();
 					break;
 				}
 
@@ -173,7 +170,7 @@ export function createTarDecoder(options: DecoderOptions = {}): {
 
 					if (header === undefined) {
 						if (sourceEnded) {
-							unpacker.validateEOF();
+							unpacker.finish();
 							finish();
 							break;
 						}
@@ -232,9 +229,6 @@ export function createTarDecoder(options: DecoderOptions = {}): {
 		writable: new WritableStream<Uint8Array>({
 			write(chunk, controller) {
 				try {
-					if (eofReached && strict && chunk.some((byte) => byte !== 0))
-						throw new Error("Invalid EOF.");
-
 					unpacker.write(chunk);
 					pump();
 					if (blocked && unpacker.available() >= BUFFER_LIMIT) {

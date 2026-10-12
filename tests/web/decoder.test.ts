@@ -81,7 +81,9 @@ describe("createTarDecoder", () => {
 			},
 			cancel: () => sourceCanceled.resolve(),
 		});
-		const reader = source.pipeThrough(createTarDecoder()).getReader();
+		const reader = source
+			.pipeThrough(createTarDecoder({ strict: true }))
+			.getReader();
 		const result = await reader.read();
 		if (!result.value) throw new Error("Expected first entry");
 		const bodyReader = result.value.body.getReader();

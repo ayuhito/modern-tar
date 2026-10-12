@@ -261,6 +261,6 @@ function unpackTarBuffer(
 		if (!bodyComplete || !paddingComplete) break;
 	}
 
-	unpacker.validateEOF();
+	unpacker.finish();
 	return results;
 }
