@@ -64,14 +64,14 @@ export function generatePax(header: TarHeader): {
 		paxRecords.gid = String(header.gid);
 	}
 
-	// Check file size.
-	if (header.size != null && header.size > USTAR_MAX_SIZE) {
-		paxRecords.size = String(header.size);
-	}
-
 	// Add any user-provided PAX attributes.
 	if (header.pax) {
 		Object.assign(paxRecords, header.pax);
+	}
+
+	// Keep PAX size consistent with the entry body.
+	if (header.size > USTAR_MAX_SIZE || "size" in paxRecords) {
+		paxRecords.size = String(header.size);
 	}
 
 	const paxEntries = Object.entries(paxRecords);
