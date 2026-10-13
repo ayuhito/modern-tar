@@ -15,6 +15,7 @@ const STATE_HEADER = 0;
 const STATE_BODY = 1;
 
 const MAX_META_SIZE = 8 * 1024 * 1024;
+const MAX_GLOBAL_PAX_KEYS = 512;
 const truncateErr = new Error("Tar archive is truncated.");
 
 export function createUnpacker(options: DecoderOptions = {}) {
@@ -168,6 +169,14 @@ export function createUnpacker(options: DecoderOptions = {}) {
 						internalHeader.type === "pax-global-header"
 							? paxGlobals
 							: nextEntryOverrides;
+
+					// Global attributes are copied into every following entry.
+					if (
+						target === paxGlobals &&
+						overrides.pax &&
+						Object.keys(overrides.pax).length > MAX_GLOBAL_PAX_KEYS
+					)
+						throw new Error("Too many global attributes.");
 
 					for (const key in overrides) target[key] = overrides[key];
 

@@ -234,6 +234,36 @@ describe("PAX format", () => {
 		expect(entry.header.pax?.comment).toBe("global");
 	});
 
+	it.each([
+		["pax-global-header", 512],
+		["pax-global-header", 513],
+		["pax-header", 513],
+	] as const)("bounds global attributes (%s, %i keys)", async (type, count) => {
+		const pax = Object.fromEntries(
+			Array.from({ length: count }, (_, i) => [`key${i}`, "value"]),
+		);
+		const generated = generatePax({ name: "file", size: 0, pax });
+		if (!generated) throw new Error("Expected PAX data");
+		const { paxBody } = generated;
+		const paddedSize = (paxBody.length + BLOCK_SIZE - 1) & ~(BLOCK_SIZE - 1);
+		const archive = new Uint8Array(BLOCK_SIZE + paddedSize + BLOCK_SIZE * 3);
+		archive.set(createTarHeader({ name: "meta", type, size: paxBody.length }));
+		archive.set(paxBody, BLOCK_SIZE);
+		archive.set(
+			createTarHeader({ name: "file", size: 0 }),
+			BLOCK_SIZE + paddedSize,
+		);
+
+		for (const strict of [false, true]) {
+			const result = unpackTar(archive, { strict });
+			if (type === "pax-global-header" && count > 512) {
+				await expect(result).rejects.toThrow("Too many global attributes");
+			} else {
+				expect((await result)[0].header.pax).toEqual(pax);
+			}
+		}
+	});
+
 	it("stops parsing invalid record lengths", () => {
 		expect(parsePax(encoder.encode("-100 path=value\n"))).toEqual({});
 	});
