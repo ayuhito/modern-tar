@@ -131,29 +131,25 @@ export function createFileSink(
 		const fdToClose = fd;
 		fd = null;
 
+		const onClose = (err: NodeJS.ErrnoException | null) => {
+			if (state !== STATE_OPEN) return;
+			if (err) fail(err);
+			else finish();
+		};
 		if (mtime) {
 			// Apply mtime before closing so corpus diffing stays deterministic.
-			fs.futimes(fdToClose, mtime, mtime, (err) => {
-				if (state !== STATE_OPEN) {
-					fs.close(fdToClose);
-					return;
-				}
-				if (err) {
-					fs.close(fdToClose, () => fail(err));
-					return;
-				}
-				fs.close(fdToClose, (closeErr) => {
-					if (state !== STATE_OPEN) return;
-					if (closeErr) fail(closeErr);
-					else finish();
+			try {
+				fs.futimes(fdToClose, mtime, mtime, (err) => {
+					fs.close(
+						fdToClose,
+						err && state === STATE_OPEN ? () => fail(err) : onClose,
+					);
 				});
-			});
+			} catch (error) {
+				fs.close(fdToClose, () => fail(error as Error));
+			}
 		} else {
-			fs.close(fdToClose, (err) => {
-				if (state !== STATE_OPEN) return;
-				if (err) fail(err);
-				else finish();
-			});
+			fs.close(fdToClose, onClose);
 		}
 	};
 
