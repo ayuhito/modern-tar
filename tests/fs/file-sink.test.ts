@@ -14,6 +14,7 @@ import { createFileSink } from "../../src/fs/file-sink";
 let nextWriteError: Error | null = null;
 let nextPartialWrite: number | null = null;
 let nextFutimesError: Error | null = null;
+let throwFutimesError = false;
 let failedFutimesFd: number | null = null;
 let closedFds: number[] = [];
 let delayExistingOpen = false;
@@ -90,6 +91,7 @@ vi.mock("node:fs", async () => {
 			if (!error) return Reflect.apply(actual.futimes, actual, args);
 			nextFutimesError = null;
 			failedFutimesFd = args[0] as number;
+			if (throwFutimesError) throw error;
 			const callback = args.at(-1) as (error: Error) => void;
 			queueMicrotask(() => callback(error));
 		}) as typeof actual.futimes,
@@ -139,6 +141,7 @@ describe("createFileSink", () => {
 		nextWriteError = null;
 		nextPartialWrite = null;
 		nextFutimesError = null;
+		throwFutimesError = false;
 		failedFutimesFd = null;
 		closedFds = [];
 		releaseExistingOpen?.();
@@ -455,16 +458,21 @@ describe("createFileSink", () => {
 		expect(content).toBe("");
 	});
 
-	it("should close the file descriptor when futimes fails", async () => {
-		const filePath = join(tmpDir, "mtime-error.txt");
-		const stream = createFileSink(filePath, { mtime: new Date() });
-		await stream.waitDrain();
-		const futimesError = new Error("futimes failed");
-		nextFutimesError = futimesError;
+	it.each([false, true])(
+		"should close the file descriptor when futimes fails (synchronous: %s)",
+		async (synchronous) => {
+			const filePath = join(tmpDir, "mtime-error.txt");
+			const stream = createFileSink(filePath, { mtime: new Date() });
+			await stream.waitDrain();
+			const futimesError = new Error("futimes failed");
+			nextFutimesError = futimesError;
+			throwFutimesError = synchronous;
+			stream.write(Buffer.from("test content"));
 
-		await expect(stream.end()).rejects.toBe(futimesError);
-		expect(closedFds).toContain(failedFutimesFd);
-	});
+			await expect(stream.end()).rejects.toBe(futimesError);
+			expect(closedFds).toContain(failedFutimesFd);
+		},
+	);
 
 	it("should work without mtime option (no futimes call)", async () => {
 		const filePath = join(tmpDir, "no-mtime-test.txt");
