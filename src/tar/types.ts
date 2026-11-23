@@ -10,19 +10,16 @@ export interface TarHeader {
 	size: number;
 	/**
 	 * Modification time as a `Date` object. Defaults to current time if not specified.
-	 * Packing rounds down to whole seconds and uses PAX for times outside the USTAR range.
+	 * Packing rounds down to whole seconds.
 	 */
 	mtime?: Date;
-	/**
-	 * Unix file permissions as an octal number (e.g., 0o644 for rw-r--r--). Defaults to 0o644 for files and 0o755 for directories.
-	 * Must fit in seven unsigned octal digits.
-	 */
+	/** Unix file permissions as an octal number (e.g., 0o644 for rw-r--r--). Defaults to 0o644 for files and 0o755 for directories. */
 	mode?: number;
 	/** Entry type. Defaults to "file" if not specified. */
 	type?: keyof typeof TYPEFLAG;
-	/** User ID of the entry owner. Packing requires a non-negative safe integer. */
+	/** User ID of the entry owner. */
 	uid?: number;
-	/** Group ID of the entry owner. Packing requires a non-negative safe integer. */
+	/** Group ID of the entry owner. */
 	gid?: number;
 	/** User name of the entry owner. */
 	uname?: string;
