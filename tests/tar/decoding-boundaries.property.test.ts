@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
 import { describe, expect, it } from "vitest";
+import { BLOCK_SIZE } from "../../src/tar/constants";
 import { decoder } from "../../src/tar/encoding";
 import { unpackTar } from "../../src/web";
 import { chunkBytes, streamFromChunks } from "../helpers/bytes";
@@ -21,12 +22,18 @@ const fixtures = [
 ] as const;
 
 describe("tar decoding boundary properties", () => {
-	it("decodes fixed compatibility manifests across generated fragment sizes", () =>
+	it("decodes compatibility fixtures split around tar block boundaries", () =>
 		hegel.testAsync(async (tc) => {
 			const fixture = tc.draw(gs.sampledFrom(fixtures));
-			const width = tc.draw(gs.integers({ minValue: 1, maxValue: 1024 }));
 			const archive = await readFile(fixture.path);
-			const stream = streamFromChunks(chunkBytes(archive, width));
+			const first = tc.draw(
+				gs.sampledFrom([BLOCK_SIZE - 1, BLOCK_SIZE, BLOCK_SIZE + 1]),
+			);
+			const width = tc.draw(gs.integers({ minValue: 1, maxValue: 1024 }));
+			const stream = streamFromChunks([
+				archive.subarray(0, first),
+				...chunkBytes(archive, width, first),
+			]);
 
 			const entries = await unpackTar(stream, { strict: true });
 			expect(
