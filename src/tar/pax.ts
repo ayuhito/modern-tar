@@ -7,7 +7,7 @@ import {
 	USTAR_UNAME_SIZE,
 } from "./constants";
 import { decoder, encoder } from "./encoding";
-import { createTarHeader } from "./header";
+import { createTarHeader, mtimeSeconds } from "./header";
 import type { TarHeader } from "./types";
 
 const USTAR_SPLIT_MAX_SIZE = USTAR_PREFIX_SIZE + USTAR_NAME_SIZE + 1;
@@ -25,7 +25,10 @@ function isUtf8TooLong(value: string, limit: number): boolean {
 }
 
 // Checks a tar header for fields that exceed USTAR limits and generates a PAX header entry if necessary.
-export function generatePax(header: TarHeader): {
+export function generatePax(
+	header: TarHeader,
+	mtime = mtimeSeconds(header),
+): {
 	paxHeader: Uint8Array;
 	paxBody: Uint8Array;
 } | null {
@@ -64,6 +67,9 @@ export function generatePax(header: TarHeader): {
 		paxRecords.gid = String(header.gid);
 	}
 
+	// Size and mtime both have eleven octal digits in USTAR.
+	if (mtime < 0 || mtime > USTAR_MAX_SIZE) paxRecords.mtime = String(mtime);
+
 	// Add any user-provided PAX attributes.
 	if (header.pax) {
 		Object.assign(paxRecords, header.pax);
@@ -99,21 +105,23 @@ export function generatePax(header: TarHeader): {
 			.join(""),
 	);
 
-	const paxHeader = createTarHeader({
-		// We decode like this specifically to ensure no multi-byte chars sneak in
-		// and exceed 100 bytes.
-		name: decoder.decode(
-			encoder.encode(`PaxHeader/${header.name}`).slice(0, 100),
-		),
-		size: paxBody.length,
-		type: "pax-header",
-		mode: 0o644,
-		mtime: header.mtime,
-		uname: header.uname,
-		gname: header.gname,
-		uid: header.uid,
-		gid: header.gid,
-	});
+	const paxHeader = createTarHeader(
+		{
+			// We decode like this specifically to ensure no multi-byte chars sneak in
+			// and exceed 100 bytes.
+			name: decoder.decode(
+				encoder.encode(`PaxHeader/${header.name}`).slice(0, 100),
+			),
+			size: paxBody.length,
+			type: "pax-header",
+			mode: 0o644,
+			uname: header.uname,
+			gname: header.gname,
+			uid: header.uid,
+			gid: header.gid,
+		},
+		mtime,
+	);
 
 	return { paxHeader, paxBody };
 }

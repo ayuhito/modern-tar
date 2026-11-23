@@ -37,16 +37,9 @@ describe("tar field encoding", () => {
 	});
 
 	it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
-		"preserves formatting for the non-standard octal value %s",
+		"rejects the non-octal value %s",
 		(value) => {
-			const actual = new Uint8Array(8);
-			const expected = new Uint8Array(8);
-			writeOctal(actual, 0, actual.length, value);
-			encoder.encodeInto(
-				value.toString(8).padStart(expected.length - 1, "0"),
-				expected.subarray(0, -1),
-			);
-			expect(actual).toEqual(expected);
+			expect(() => writeOctal(new Uint8Array(8), 0, 8, value)).toThrow();
 		},
 	);
 

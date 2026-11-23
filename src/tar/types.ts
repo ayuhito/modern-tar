@@ -8,15 +8,21 @@ export interface TarHeader {
 	name: string;
 	/** Size of the entry data in bytes. Should be 0 for directories, symlinks, and hardlinks. */
 	size: number;
-	/** Modification time as a `Date` object. Defaults to current time if not specified. */
+	/**
+	 * Modification time. Defaults to the current time.
+	 * Packing rounds down to whole seconds and uses PAX for times outside the USTAR range.
+	 */
 	mtime?: Date;
-	/** Unix file permissions as an octal number (e.g., 0o644 for rw-r--r--). Defaults to 0o644 for files and 0o755 for directories. */
+	/**
+	 * Unix file permissions (e.g., 0o644 for rw-r--r--). Must fit in seven unsigned octal digits.
+	 * Defaults to 0o644 for files and 0o755 for directories.
+	 */
 	mode?: number;
 	/** Entry type. Defaults to "file" if not specified. */
 	type?: keyof typeof TYPEFLAG;
-	/** User ID of the entry owner. */
+	/** User ID of the entry owner. Packing requires a non-negative safe integer. */
 	uid?: number;
-	/** Group ID of the entry owner. */
+	/** Group ID of the entry owner. Packing requires a non-negative safe integer. */
 	gid?: number;
 	/** User name of the entry owner. */
 	uname?: string;

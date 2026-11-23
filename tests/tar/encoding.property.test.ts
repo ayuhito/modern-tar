@@ -22,16 +22,6 @@ function writeStringReference(
 	if (value) encoder.encodeInto(value, view.subarray(offset, offset + size));
 }
 
-function writeOctalReference(
-	view: Uint8Array,
-	offset: number,
-	size: number,
-	value: number,
-) {
-	const octalString = value.toString(8).padStart(size - 1, "0");
-	encoder.encodeInto(octalString, view.subarray(offset, offset + size - 1));
-}
-
 describe("tar encoding properties", () => {
 	it("round-trips strings that fit in their field", () =>
 		hegel.test((tc) => {
@@ -87,7 +77,7 @@ describe("tar encoding properties", () => {
 			expect(readOctal(buffer, offset, size)).toBe(value);
 		}));
 
-	it("preserves formatted bytes when octal values overflow their field", () =>
+	it("writes a zero placeholder when a value exceeds its octal field", () =>
 		hegel.test((tc) => {
 			const size = tc.draw(gs.integers({ minValue: 2, maxValue: 12 }));
 			const value = tc.draw(
@@ -103,7 +93,7 @@ describe("tar encoding properties", () => {
 			expected.fill(0, offset, offset + size);
 
 			writeOctal(actual, offset, size, value);
-			writeOctalReference(expected, offset, size, value);
+			expected.fill(48, offset, offset + size - 1);
 
 			expect(actual).toEqual(expected);
 		}));
