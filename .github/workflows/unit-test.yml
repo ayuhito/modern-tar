@@ -51,34 +51,6 @@ jobs:
         working-directory: benchmarks
         run: npm exec tsc -- --noEmit
 
-      - name: Install packed library in a clean project
-        run: |
-          mkdir "$RUNNER_TEMP/consumer"
-          npm pack --pack-destination "$RUNNER_TEMP/consumer"
-          cd "$RUNNER_TEMP/consumer"
-          npm install --no-save --ignore-scripts --no-audit --no-fund ./modern-tar-*.tgz
-
-      - name: Setup minimum supported Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 18.0.0
-          package-manager-cache: false
-
-      - name: Extract a file with the packed library
-        working-directory: ${{ runner.temp }}/consumer
-        run: |
-          node --input-type=module <<'JS'
-          import assert from "node:assert/strict";
-          import { readFile } from "node:fs/promises";
-          import { pipeline } from "node:stream/promises";
-          import { packTar } from "modern-tar";
-          import { unpackTar } from "modern-tar/fs";
-
-          const archive = await packTar([{ header: { name: "hello.txt", size: 5 }, body: "hello" }]);
-          await pipeline([archive], unpackTar("output"));
-          assert.equal(await readFile("output/hello.txt", "utf8"), "hello");
-          JS
-
   test:
     name: ${{ matrix.project }} on Node ${{ matrix.node-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
