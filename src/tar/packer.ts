@@ -1,5 +1,5 @@
 import { isBodyless } from "./body";
-import { BLOCK_SIZE, BLOCK_SIZE_MASK } from "./constants";
+import { BLOCK_SIZE, BLOCK_SIZE_MASK, USTAR_MAX_SIZE } from "./constants";
 import { getHeaderBlocks } from "./header";
 import type { TarHeader } from "./types";
 
@@ -26,10 +26,19 @@ export function createTarPacker(onData: (chunk: Uint8Array) => void) {
 			if (!Number.isSafeInteger(size) || size < 0)
 				fail("Invalid tar entry size.");
 
-			const headerBlocks = getHeaderBlocks({ ...header, size });
+			const entry = { ...header, size };
+			entry.mtime ??= new Date();
+			const mtime = Math.floor(entry.mtime.getTime() / 1000);
+			// USTAR stores eleven unsigned octal digits. PAX carries other times.
+			if (mtime < 0 || mtime > USTAR_MAX_SIZE) {
+				entry.pax = { mtime: String(mtime), ...entry.pax };
+				entry.mtime = new Date(0);
+			}
+
+			const headerBlocks = getHeaderBlocks(entry);
 			for (const block of headerBlocks) onData(block);
 
-			currentHeader = { ...header, size };
+			currentHeader = entry;
 			bytesWritten = 0;
 		},
 

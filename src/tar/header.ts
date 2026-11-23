@@ -62,15 +62,8 @@ export type HeaderOverrides = Omit<Partial<TarHeader>, "mtime"> & {
 	[key: string]: string | number | Record<string, string> | undefined;
 };
 
-export function mtimeSeconds(header: TarHeader): number {
-	return Math.floor((header.mtime?.getTime() ?? Date.now()) / 1000);
-}
-
 // Creates a USTAR format tar header from a TarHeader object.
-export function createTarHeader(
-	header: TarHeader,
-	mtime = mtimeSeconds(header),
-): Uint8Array {
+export function createTarHeader(header: TarHeader): Uint8Array {
 	const view = new Uint8Array(BLOCK_SIZE);
 
 	// Entries without a data body (like directories) have a size of 0.
@@ -100,7 +93,12 @@ export function createTarHeader(
 	writeOctal(view, USTAR_UID_OFFSET, USTAR_UID_SIZE, header.uid ?? 0);
 	writeOctal(view, USTAR_GID_OFFSET, USTAR_GID_SIZE, header.gid ?? 0);
 	writeOctal(view, USTAR_SIZE_OFFSET, USTAR_SIZE_SIZE, size);
-	writeOctal(view, USTAR_MTIME_OFFSET, USTAR_MTIME_SIZE, Math.max(0, mtime));
+	writeOctal(
+		view,
+		USTAR_MTIME_OFFSET,
+		USTAR_MTIME_SIZE,
+		Math.floor((header.mtime?.getTime() ?? Date.now()) / 1000),
+	);
 	writeString(
 		view,
 		USTAR_TYPEFLAG_OFFSET,
@@ -274,9 +272,8 @@ export function getMetaParser(
 }
 
 export function getHeaderBlocks(header: TarHeader): Uint8Array[] {
-	const mtime = mtimeSeconds(header);
-	const base = createTarHeader(header, mtime);
-	const pax = generatePax(header, mtime);
+	const base = createTarHeader(header);
+	const pax = generatePax(header);
 
 	// Skip PAX if not needed.
 	if (!pax) return [base];
