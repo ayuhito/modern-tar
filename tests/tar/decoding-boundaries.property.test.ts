@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { BLOCK_SIZE } from "../../src/tar/constants";
 import { decoder } from "../../src/tar/encoding";
 import { unpackTar } from "../../src/web";
-import { streamFromChunks } from "../helpers/bytes";
+import { chunkBytes, streamFromChunks } from "../helpers/bytes";
 import { GNU_TAR, PAX_TAR, UNKNOWN_FORMAT, V7_TAR } from "../web/fixtures";
 
 const fixtures = [
@@ -26,15 +26,14 @@ describe("tar decoding boundary properties", () => {
 		hegel.testAsync(async (tc) => {
 			const fixture = tc.draw(gs.sampledFrom(fixtures));
 			const archive = await readFile(fixture.path);
-			const offsets: number[] = [];
-			for (let end = BLOCK_SIZE; end < archive.length; end += BLOCK_SIZE) {
-				offsets.push(end - 1, end, end + 1);
-			}
-			const cuts = tc.draw(gs.subsequences(offsets, { minSize: 1 }));
-			const chunks = [...cuts, archive.length].map((end, index) =>
-				archive.subarray(cuts[index - 1] ?? 0, end),
+			const first = tc.draw(
+				gs.sampledFrom([BLOCK_SIZE - 1, BLOCK_SIZE, BLOCK_SIZE + 1]),
 			);
-			const stream = streamFromChunks(chunks);
+			const width = tc.draw(gs.integers({ minValue: 1, maxValue: 1024 }));
+			const stream = streamFromChunks([
+				archive.subarray(0, first),
+				...chunkBytes(archive, width, first),
+			]);
 
 			const entries = await unpackTar(stream, { strict: true });
 			expect(
