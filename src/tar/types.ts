@@ -9,13 +9,13 @@ export interface TarHeader {
 	/** Size of the entry data in bytes. Should be 0 for directories, symlinks, and hardlinks. */
 	size: number;
 	/**
-	 * Modification time. Defaults to the current time.
+	 * Modification time as a `Date` object. Defaults to current time if not specified.
 	 * Packing rounds down to whole seconds and uses PAX for times outside the USTAR range.
 	 */
 	mtime?: Date;
 	/**
-	 * Unix file permissions (e.g., 0o644 for rw-r--r--). Must fit in seven unsigned octal digits.
-	 * Defaults to 0o644 for files and 0o755 for directories.
+	 * Unix file permissions as an octal number (e.g., 0o644 for rw-r--r--). Defaults to 0o644 for files and 0o755 for directories.
+	 * Must fit in seven unsigned octal digits.
 	 */
 	mode?: number;
 	/** Entry type. Defaults to "file" if not specified. */

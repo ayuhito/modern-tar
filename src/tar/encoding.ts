@@ -22,8 +22,7 @@ export function writeString(
 	}
 }
 
-// TAR numeric fields are zero-padded ASCII octal with a final NUL byte.
-// Write digits right-to-left to avoid allocating a padded string.
+// Writes a number as a zero-padded octal string.
 export function writeOctal(
 	view: Uint8Array,
 	offset: number,
@@ -36,6 +35,9 @@ export function writeOctal(
 
 	// PAX carries the actual value when the USTAR field overflows.
 	let remaining = value >= 8 ** (size - 1) ? 0 : value;
+
+	// TAR numeric fields are zero-padded ASCII octal with a final NUL byte. As an
+	// optimization, fill digits right-to-left instead of encoding a padded string.
 	for (let i = offset + size - 2; i >= offset; i--) {
 		view[i] = 48 + (remaining & 7); // 48 is ASCII '0'.
 		// A shift would discard the high bits of values wider than 32 bits.

@@ -105,25 +105,22 @@ export function generatePax(
 			.join(""),
 	);
 
-	const paxHeader = createTarHeader(
-		{
-			// We decode like this specifically to ensure no multi-byte chars sneak in
-			// and exceed 100 bytes.
-			name: decoder.decode(
-				encoder.encode(`PaxHeader/${header.name}`).slice(0, 100),
-			),
-			size: paxBody.length,
-			type: "pax-header",
-			mode: 0o644,
-			uname: header.uname,
-			gname: header.gname,
-			uid: header.uid,
-			gid: header.gid,
-		},
-		mtime,
-	);
+	const paxHeader: TarHeader = {
+		// We decode like this specifically to ensure no multi-byte chars sneak in
+		// and exceed 100 bytes.
+		name: decoder.decode(
+			encoder.encode(`PaxHeader/${header.name}`).slice(0, 100),
+		),
+		size: paxBody.length,
+		type: "pax-header",
+		mode: 0o644,
+		uname: header.uname,
+		gname: header.gname,
+		uid: header.uid,
+		gid: header.gid,
+	};
 
-	return { paxHeader, paxBody };
+	return { paxHeader: createTarHeader(paxHeader, mtime), paxBody };
 }
 
 // Tries to split a long path into a USTAR compatible name and prefix.
