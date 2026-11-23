@@ -30,22 +30,19 @@ export function writeOctal(
 	value?: number,
 ) {
 	if (value === undefined) return;
+	if (!Number.isSafeInteger(value) || value < 0)
+		throw new Error(`Invalid tar number: ${value}`);
+
+	// PAX carries the actual value when the USTAR field overflows.
+	let remaining = value >= 8 ** (size - 1) ? 0 : value;
 
 	// TAR numeric fields are zero-padded ASCII octal with a final NUL byte. As an
 	// optimization, fill digits right-to-left instead of encoding a padded string.
-	let remaining = value;
 	for (let i = offset + size - 2; i >= offset; i--) {
-		view[i] = 48 + (remaining % 8); // 48 is ASCII '0'.
+		view[i] = 48 + (remaining & 7); // 48 is ASCII '0'.
+		// A shift would discard the high bits of values wider than 32 bits.
 		remaining = Math.floor(remaining / 8);
 	}
-	if (remaining === 0 && value % 1 === 0) return;
-
-	// If digits remain or the value is not an integer, use the previous formatter.
-	// PAX overflows still need compatible placeholder bytes in the base header.
-	encoder.encodeInto(
-		value.toString(8).padStart(size - 1, "0"),
-		view.subarray(offset, offset + size - 1),
-	);
 }
 
 // Reads a NUL-terminated string from the view.

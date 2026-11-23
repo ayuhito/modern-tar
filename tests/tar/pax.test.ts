@@ -17,6 +17,61 @@ import { packTar, unpackTar } from "../../src/web";
 import { PAX_TAR, UNICODE_TAR } from "../web/fixtures";
 
 describe("PAX format", () => {
+	it.each([
+		[new Date(-1), "-1"],
+		[new Date(0), undefined],
+		[new Date(USTAR_MAX_SIZE * 1000 + 999), undefined],
+		[new Date((USTAR_MAX_SIZE + 1) * 1000), String(USTAR_MAX_SIZE + 1)],
+		[new Date("2300-01-01T00:00:00Z"), "10413792000"],
+	] as const)(
+		"packs %s with PAX only outside the USTAR time range",
+		async (mtime, paxTime) => {
+			const archive = await packTar([
+				{ header: { name: "dated", size: 3, mtime }, body: "abc" },
+				{ header: { name: "next", size: 0, mtime: new Date(0) } },
+			]);
+			expect(archive.length).toBe((paxTime === undefined ? 5 : 7) * BLOCK_SIZE);
+			const [entry, next] = await unpackTar(archive, { strict: true });
+			expect(entry.header.name).toBe("dated");
+			expect(entry.header.mtime?.getTime()).toBe(
+				Math.floor(mtime.getTime() / 1000) * 1000,
+			);
+			expect(entry.header.pax?.mtime).toBe(paxTime);
+			expect(decoder.decode(entry.data)).toBe("abc");
+			expect(next.header).toMatchObject({ name: "next", mtime: new Date(0) });
+		},
+	);
+
+	it("honors an explicit PAX mtime for a pre-epoch entry", async () => {
+		const [entry] = await unpackTar(
+			await packTar([
+				{
+					header: {
+						name: "file",
+						size: 0,
+						mtime: new Date(-1000),
+						pax: { mtime: "2.125" },
+					},
+				},
+			]),
+			{ strict: true },
+		);
+		expect(entry.header.mtime).toEqual(new Date(2125));
+	});
+
+	it.each([
+		{ mtime: new Date(NaN) },
+		{ uid: -1 },
+		{ gid: 1.5 },
+		{ mode: 0.5 },
+		{ mode: USTAR_MAX_UID_GID + 1 },
+		{ uid: Number.MAX_SAFE_INTEGER + 1 },
+	])("rejects unrepresentable metadata %o", async (fields) => {
+		await expect(
+			packTar([{ header: { name: "file", size: 0, ...fields } }]),
+		).rejects.toThrow();
+	});
+
 	it.each(["0", "1024", "invalid"])(
 		"uses the body size instead of PAX size %s",
 		async (size) => {

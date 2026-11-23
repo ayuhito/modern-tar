@@ -82,14 +82,14 @@ export function createTarHeader(header: TarHeader): Uint8Array {
 		}
 	}
 
-	writeString(view, USTAR_NAME_OFFSET, USTAR_NAME_SIZE, name);
-	writeOctal(
-		view,
-		USTAR_MODE_OFFSET,
-		USTAR_MODE_SIZE,
+	const mode =
 		header.mode ??
-			(header.type === DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE),
-	);
+		(header.type === DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE);
+	// Mode has no PAX override.
+	if (mode > 0o7777777) throw new Error(`Invalid tar mode: ${mode}`);
+
+	writeString(view, USTAR_NAME_OFFSET, USTAR_NAME_SIZE, name);
+	writeOctal(view, USTAR_MODE_OFFSET, USTAR_MODE_SIZE, mode);
 	writeOctal(view, USTAR_UID_OFFSET, USTAR_UID_SIZE, header.uid ?? 0);
 	writeOctal(view, USTAR_GID_OFFSET, USTAR_GID_SIZE, header.gid ?? 0);
 	writeOctal(view, USTAR_SIZE_OFFSET, USTAR_SIZE_SIZE, size);

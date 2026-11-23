@@ -8,7 +8,10 @@ export interface TarHeader {
 	name: string;
 	/** Size of the entry data in bytes. Should be 0 for directories, symlinks, and hardlinks. */
 	size: number;
-	/** Modification time as a `Date` object. Defaults to current time if not specified. */
+	/**
+	 * Modification time as a `Date` object. Defaults to current time if not specified.
+	 * Packing rounds down to whole seconds.
+	 */
 	mtime?: Date;
 	/** Unix file permissions as an octal number (e.g., 0o644 for rw-r--r--). Defaults to 0o644 for files and 0o755 for directories. */
 	mode?: number;

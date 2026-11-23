@@ -11,16 +11,19 @@ const segment = gs.text({
 	maxSize: 120,
 });
 
+const ownerId = gs.integers({ minValue: 0, maxValue: Number.MAX_SAFE_INTEGER });
 const entry = gs.record({
 	body: gs.binary({ maxSize: 1024 }),
-	gid: gs.integers({ minValue: 0, maxValue: 1_000_000 }),
+	gid: ownerId,
 	mode: gs.integers({ minValue: 0, maxValue: 0o777 }),
-	mtimeSeconds: gs.integers({ minValue: 0, maxValue: 2 ** 31 - 1 }),
+	// Span both sides of the unsigned 33-bit USTAR time range.
+	mtimeSeconds: gs.integers({ minValue: -(2 ** 33), maxValue: 2 ** 34 }),
+	mtimeMilliseconds: gs.integers({ minValue: 0, maxValue: 999 }),
 	name: gs
 		.arrays(segment, { minSize: 1, maxSize: 3 })
 		.map((parts) => parts.join("/")),
 	type: gs.sampledFrom(["file", "directory"] as const),
-	uid: gs.integers({ minValue: 0, maxValue: 1_000_000 }),
+	uid: ownerId,
 });
 
 describe("web archive properties", () => {
@@ -40,7 +43,7 @@ describe("web archive properties", () => {
 					mode: value.mode,
 					uid: value.uid,
 					gid: value.gid,
-					mtime: new Date(value.mtimeSeconds * 1000),
+					mtime: new Date(value.mtimeSeconds * 1000 + value.mtimeMilliseconds),
 				};
 
 				return directory ? { header } : { header, body: value.body };
