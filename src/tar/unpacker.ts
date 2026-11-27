@@ -5,7 +5,6 @@ import {
 	applyOverrides,
 	getMetaParser,
 	type HeaderOverrides,
-	type InternalTarHeader,
 	parseUstarHeader,
 } from "./header";
 import type { DecoderOptions, TarHeader } from "./types";
@@ -128,16 +127,8 @@ export function createUnpacker(options: DecoderOptions = {}) {
 					continue;
 				}
 
-				// It's not a zero block, so try to parse it as a header.
-				let internalHeader: InternalTarHeader;
-				try {
-					internalHeader = parseUstarHeader(headerBlock, strict);
-				} catch (err) {
-					if (strict) throw err;
-					// In non-strict mode, just consume the invalid block and continue.
-					discard(BLOCK_SIZE);
-					continue;
-				}
+				// A malformed header leaves the next entry boundary unknown.
+				const internalHeader = parseUstarHeader(headerBlock, strict);
 
 				// Check if it's a meta-header (like PAX or GNU long names).
 				const metaParser = getMetaParser(internalHeader.type);

@@ -81,27 +81,18 @@ export function readOctal(
 	return value;
 }
 
-// Reads a numeric field that can be octal or POSIX base-256.
-// This implementation handles positive integers, such as uid, gid, and size.
+// Reads an octal or GNU base-256 numeric field.
 export function readNumeric(
 	view: Uint8Array,
 	offset: number,
 	size: number,
 ): number {
-	// According to the POSIX tar specification, if the most significant bit of the
-	// first byte is set (i.e., the byte is >= 128), then the number is stored in a
-	// big-endian, base-256 format.
-	//
-	// The `& 0x80` operation is a bitmask to check if the highest bit is set.
-	// (0x80 = 10000000)
-	if (view[offset] & 0x80) {
-		let result = 0;
+	const first = view[offset];
+	if (first === 0x80 || first === 0xff) {
+		// GNU uses 0x80 for nonnegative values and 0xff for negative values.
+		// Start at -1 to sign-extend a negative field as we read its bytes.
+		let result = first === 0xff ? -1 : 0;
 
-		// The first byte has the MSB set as a marker.
-		// We mask it out (0x7F = 01111111) to get its value.
-		result = view[offset] & 0x7f;
-
-		// Process the remaining bytes.
 		for (let i = 1; i < size; i++) {
 			result = result * 256 + view[offset + i];
 		}

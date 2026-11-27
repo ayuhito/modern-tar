@@ -4,6 +4,8 @@ import { writeChecksum } from "../../src/tar/checksum";
 import {
 	BLOCK_SIZE,
 	USTAR_MAGIC_OFFSET,
+	USTAR_MTIME_OFFSET,
+	USTAR_MTIME_SIZE,
 	USTAR_TYPEFLAG_OFFSET,
 	USTAR_UNAME_OFFSET,
 } from "../../src/tar/constants";
@@ -61,6 +63,27 @@ describe("GNU compatibility", () => {
 				gname: "mygroup",
 			});
 			expect(decoder.decode(entry.data).trim()).toBe("Hello, world!");
+		},
+	);
+
+	it.each([false, true])(
+		"preserves a GNU member with a pre-epoch mtime with strict=%s",
+		async (strict) => {
+			const archive = await readFile(GNU_TAR);
+			archive.fill(
+				0xff,
+				USTAR_MTIME_OFFSET,
+				USTAR_MTIME_OFFSET + USTAR_MTIME_SIZE,
+			);
+			writeChecksum(archive.subarray(0, BLOCK_SIZE));
+
+			const entries = await unpackTar(archive, { strict });
+			expect(entries).toHaveLength(1);
+			expect(entries[0].header).toMatchObject({
+				name: "test.txt",
+				mtime: new Date(-1000),
+			});
+			expect(decoder.decode(entries[0].data)).toBe("Hello, world!\n");
 		},
 	);
 

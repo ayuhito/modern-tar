@@ -147,6 +147,8 @@ export function parseUstarHeader(
 		linkname: readString(block, USTAR_LINKNAME_OFFSET, USTAR_LINKNAME_SIZE),
 	};
 
+	if (header.size < 0) throw new Error("Negative tar entry size.");
+
 	const magic = readString(block, USTAR_MAGIC_OFFSET, USTAR_MAGIC_SIZE);
 
 	// Both GNU and USTAR formats have uname and gname.

@@ -56,9 +56,26 @@ describe("tar field encoding", () => {
 		expect(readNumeric(buffer, 0, buffer.length)).toBe(0o1755);
 	});
 
-	it("rejects numeric fields above Number.MAX_SAFE_INTEGER", () => {
-		expect(() => readNumeric(new Uint8Array(8).fill(0xff), 0, 8)).toThrow(
+	it("rejects a 12-byte field whose value exceeds 64 bits", () => {
+		const field = new Uint8Array(12);
+		field.set([0x80, 0, 0, 1]); // 2^64, with all eight low bytes zero.
+		expect(() => readNumeric(field, 0, field.length)).toThrow(
 			"TAR number too large",
 		);
+	});
+
+	it("checks both safe integer limits for base-256 fields", () => {
+		const field = new Uint8Array(8);
+		function read(value: bigint) {
+			new DataView(field.buffer).setBigInt64(0, value);
+			field[0] |= 0x80;
+			return readNumeric(field, 0, field.length);
+		}
+
+		const max = BigInt(Number.MAX_SAFE_INTEGER);
+		expect(read(max)).toBe(Number.MAX_SAFE_INTEGER);
+		expect(read(-max)).toBe(Number.MIN_SAFE_INTEGER);
+		expect(() => read(max + 1n)).toThrow("TAR number too large");
+		expect(() => read(-max - 1n)).toThrow("TAR number too large");
 	});
 });

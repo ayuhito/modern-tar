@@ -98,16 +98,19 @@ describe("tar encoding properties", () => {
 			expect(actual).toEqual(expected);
 		}));
 
-	it("decodes positive base-256 values", () =>
+	it("decodes signed base-256 values", () =>
 		hegel.test((tc) => {
 			const value = tc.draw(
-				gs.integers({ minValue: 0, maxValue: Number.MAX_SAFE_INTEGER }),
+				gs.integers({
+					minValue: Number.MIN_SAFE_INTEGER,
+					maxValue: Number.MAX_SAFE_INTEGER,
+				}),
 			);
 			const offset = tc.draw(offsets);
-			const size = 8;
-			const buffer = new Uint8Array(offset + size);
-			// Use the platform encoder as an independent oracle for the field bytes.
-			new DataView(buffer.buffer).setBigUint64(offset, BigInt(value));
+			const size = tc.draw(gs.sampledFrom([8, 12]));
+			const buffer = new Uint8Array(offset + size).fill(value < 0 ? 0xff : 0);
+			// The low eight bytes hold the value. Wider fields extend its sign.
+			new DataView(buffer.buffer).setBigInt64(offset + size - 8, BigInt(value));
 			buffer[offset] |= 0x80;
 
 			expect(readNumeric(buffer, offset, size)).toBe(value);

@@ -47,10 +47,8 @@ export type TarEntryData =
  */
 export interface DecoderOptions {
 	/**
-	 * Enable strict validation of the tar archive.
-	 * When true, the decoder will throw errors for data corruption issues:
-	 * - Invalid checksums (indicates header corruption)
-	 * - Invalid USTAR magic string (format violation)
+	 * Validate header checksums and archive termination.
+	 * Both modes stop if an entry header cannot be parsed.
 	 * @default false
 	 */
 	strict?: boolean;
